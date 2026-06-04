@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: servilla_pg
+    environment:
+      POSTGRES_DB: servilla_erp
+      POSTGRES_USER: servilla
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-servilla_dev}
+    ports:
+      - "5440:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U servilla -d servilla_erp"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pg_data:
