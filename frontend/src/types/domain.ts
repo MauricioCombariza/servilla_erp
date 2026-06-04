@@ -132,6 +132,166 @@ export interface SerialGestion {
   fecha_modificacion: string | null;
 }
 
+// ── Gastos ────────────────────────────────────────────────────────────────────
+
+export interface GastoAdmin {
+  id: number;
+  fecha: string;
+  categoria: string;
+  descripcion: string;
+  monto: number;
+  proveedor: string | null;
+  numero_factura: string | null;
+  estado: "pendiente" | "pagado";
+  fecha_pago: string | null;
+  observaciones: string | null;
+  fecha_creacion: string | null;
+}
+
+export interface GastoAdminResumen {
+  categoria: string;
+  total: number;
+  cantidad: number;
+}
+
+export interface GastoFijo {
+  id: number;
+  categoria: string;
+  descripcion: string;
+  monto: number;
+  dia_pago: number;
+  activo: boolean;
+  observaciones: string | null;
+  created_at: string | null;
+  pagos: PagoGastoFijo[];
+}
+
+export interface PagoGastoFijo {
+  id: number;
+  gasto_fijo_id: number;
+  mes: number;
+  anio: number;
+  monto_pagado: number;
+  fecha_pago: string;
+  observaciones: string | null;
+  created_at: string | null;
+}
+
+// ── Nómina ────────────────────────────────────────────────────────────────────
+
+export interface NominaEmpleado {
+  id: number;
+  nombre_completo: string;
+  identificacion: string | null;
+  cargo: string | null;
+  salario_mensual: number;
+  tiene_auxilio_transporte: boolean;
+  auxilio_no_salarial: number;
+  fecha_ingreso: string | null;
+  activo: boolean;
+  fecha_creacion: string | null;
+}
+
+export interface NominaProvision {
+  id: number;
+  empleado_id: number;
+  periodo_mes: number;
+  periodo_anio: number;
+  salario_base: number | null;
+  auxilio_transporte: number | null;
+  auxilio_no_salarial: number | null;
+  arl: number | null;
+  eps: number | null;
+  afp: number | null;
+  caja_compensacion: number | null;
+  prima: number | null;
+  cesantias: number | null;
+  int_cesantias: number | null;
+  vacaciones: number | null;
+  fecha_creacion: string | null;
+}
+
+export interface ResumenNomina {
+  periodo_mes: number;
+  periodo_anio: number;
+  total_empleados: number;
+  total_salarios: number;
+  total_seguridad_social: number;
+  total_provisiones: number;
+  costo_total: number;
+}
+
+// ── Labores ───────────────────────────────────────────────────────────────────
+
+export interface RegistroHoras {
+  id: number;
+  personal_id: number;
+  orden_id: number | null;
+  fecha: string;
+  horas_trabajadas: number;
+  tarifa_hora: number;
+  total: number | null;
+  tipo_trabajo: string;
+  aprobado: boolean;
+  aprobado_por: number | null;
+  fecha_aprobacion: string | null;
+  liquidado: boolean;
+  observaciones: string | null;
+  fecha_creacion: string | null;
+}
+
+export interface RegistroLabores {
+  id: number;
+  personal_id: number;
+  orden_id: number | null;
+  fecha: string;
+  tipo_labor: string;
+  cantidad: number;
+  tarifa_unitaria: number;
+  total: number | null;
+  aprobado: boolean;
+  aprobado_por: number | null;
+  fecha_aprobacion: string | null;
+  liquidado: boolean;
+  observaciones: string | null;
+  fecha_creacion: string | null;
+}
+
+export interface ResumenLabores {
+  personal_id: number;
+  nombre_completo: string;
+  total_horas: number;
+  total_horas_monto: number;
+  total_labores: number;
+  total_labores_monto: number;
+  total_general: number;
+}
+
+// ── Flujo de caja ─────────────────────────────────────────────────────────────
+
+export interface FlujoCaja60Dias {
+  fecha: string;
+  tipo: "ingreso" | "egreso";
+  descripcion: string;
+  monto: number;
+  categoria: string;
+  dias_hasta_fecha: number;
+  periodo: "VENCIDO" | "ESTA SEMANA" | "ESTE MES" | "PROXIMO MES";
+}
+
+export interface ResumenMensualFlujo {
+  anio: number;
+  mes: number;
+  total_facturado: number;
+  cobrado: number;
+  por_cobrar: number;
+  ingreso_bruto_seriales: number;
+  costo_mensajero: number;
+  gastos_admin: number;
+  costo_nomina: number;
+  flujo_neto: number;
+}
+
 export interface PlanillaResumen {
   planilla: string;
   cod_men: string;
