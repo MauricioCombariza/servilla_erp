@@ -1,0 +1,35 @@
+import api from "./client";
+import type { RegistroHoras, RegistroLabores, ResumenLabores } from "@/types/domain";
+
+type FiltrosPeriodo = { personal_id?: number; mes?: number; anio?: number; aprobado?: boolean };
+
+export const laboresApi = {
+  listHoras: (params?: FiltrosPeriodo) =>
+    api.get<RegistroHoras[]>("/labores/horas", { params }),
+
+  createHora: (data: Omit<RegistroHoras, "id" | "total" | "aprobado" | "aprobado_por" | "fecha_aprobacion" | "liquidado" | "fecha_creacion">) =>
+    api.post<RegistroHoras>("/labores/horas", data),
+
+  updateHora: (id: number, data: Partial<RegistroHoras>) =>
+    api.put<RegistroHoras>(`/labores/horas/${id}`, data),
+
+  deleteHora: (id: number) => api.delete(`/labores/horas/${id}`),
+
+  aprobarHora: (id: number) => api.post<RegistroHoras>(`/labores/horas/${id}/aprobar`),
+
+  listLabores: (params?: FiltrosPeriodo & { tipo_labor?: string }) =>
+    api.get<RegistroLabores[]>("/labores/labores", { params }),
+
+  createLabor: (data: Omit<RegistroLabores, "id" | "total" | "aprobado" | "aprobado_por" | "fecha_aprobacion" | "liquidado" | "fecha_creacion">) =>
+    api.post<RegistroLabores>("/labores/labores", data),
+
+  updateLabor: (id: number, data: Partial<RegistroLabores>) =>
+    api.put<RegistroLabores>(`/labores/labores/${id}`, data),
+
+  deleteLabor: (id: number) => api.delete(`/labores/labores/${id}`),
+
+  aprobarLabor: (id: number) => api.post<RegistroLabores>(`/labores/labores/${id}/aprobar`),
+
+  resumen: (params?: { mes?: number; anio?: number }) =>
+    api.get<ResumenLabores[]>("/labores/resumen", { params }),
+};
