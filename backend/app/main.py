@@ -8,6 +8,7 @@ from app.routers.clientes import router as clientes_router
 from app.routers.facturacion import router as facturacion_router
 from app.routers.gestiones import router as gestiones_router
 from app.routers.ordenes import router as ordenes_router
+from app.routers.reportes import router as reportes_router
 from app.routers.personal import router as personal_router
 from app.config import settings
 from app.database import engine
@@ -39,6 +40,7 @@ app.include_router(personal_router)
 app.include_router(ordenes_router)
 app.include_router(facturacion_router)
 app.include_router(gestiones_router)
+app.include_router(reportes_router)
 
 
 @app.get("/health")

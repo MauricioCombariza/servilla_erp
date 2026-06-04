@@ -11,6 +11,7 @@ import { ResumenPage } from "@/pages/facturacion/ResumenPage";
 import { FacturasEmitidasPage } from "@/pages/facturacion/FacturasEmitidasPage";
 import { PlanillasPage } from "@/pages/planillas/PlanillasPage";
 import { DetalleGestionesPage } from "@/pages/gestiones/DetalleGestionesPage";
+import { ReportesPage } from "@/pages/reportes/ReportesPage";
 import { Placeholder } from "@/pages/Placeholder";
 
 const qc = new QueryClient({
@@ -43,7 +44,7 @@ export default function App() {
             <Route path="/facturacion" element={<ResumenPage />} />
             <Route path="/facturacion/emitidas" element={<FacturasEmitidasPage />} />
             <Route path="/facturacion/*" element={<Placeholder />} />
-            <Route path="/reportes" element={<Placeholder />} />
+            <Route path="/reportes" element={<ReportesPage />} />
             <Route path="/labores" element={<Placeholder />} />
             <Route path="/pagos-mensajeros" element={<Placeholder />} />
             <Route path="/facturas-transporte" element={<Placeholder />} />
