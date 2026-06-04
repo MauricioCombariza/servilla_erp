@@ -11,6 +11,11 @@ import { ResumenPage } from "@/pages/facturacion/ResumenPage";
 import { FacturasEmitidasPage } from "@/pages/facturacion/FacturasEmitidasPage";
 import { PlanillasPage } from "@/pages/planillas/PlanillasPage";
 import { DetalleGestionesPage } from "@/pages/gestiones/DetalleGestionesPage";
+import { ReportesPage } from "@/pages/reportes/ReportesPage";
+import { GastosPage } from "@/pages/gastos/GastosPage";
+import { NominaPage } from "@/pages/nomina/NominaPage";
+import { LaboresPage } from "@/pages/labores/LaboresPage";
+import { FlujoCajaPage } from "@/pages/flujo/FlujoCajaPage";
 import { Placeholder } from "@/pages/Placeholder";
 
 const qc = new QueryClient({
@@ -43,13 +48,13 @@ export default function App() {
             <Route path="/facturacion" element={<ResumenPage />} />
             <Route path="/facturacion/emitidas" element={<FacturasEmitidasPage />} />
             <Route path="/facturacion/*" element={<Placeholder />} />
-            <Route path="/reportes" element={<Placeholder />} />
-            <Route path="/labores" element={<Placeholder />} />
+            <Route path="/reportes" element={<ReportesPage />} />
+            <Route path="/labores" element={<LaboresPage />} />
             <Route path="/pagos-mensajeros" element={<Placeholder />} />
             <Route path="/facturas-transporte" element={<Placeholder />} />
-            <Route path="/gastos" element={<Placeholder />} />
-            <Route path="/flujo-caja" element={<Placeholder />} />
-            <Route path="/nomina" element={<Placeholder />} />
+            <Route path="/gastos" element={<GastosPage />} />
+            <Route path="/flujo-caja" element={<FlujoCajaPage />} />
+            <Route path="/nomina" element={<NominaPage />} />
             <Route path="/gestiones" element={<DetalleGestionesPage />} />
             <Route path="/planillas" element={<PlanillasPage />} />
           </Route>
