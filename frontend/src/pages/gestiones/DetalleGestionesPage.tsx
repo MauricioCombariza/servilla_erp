@@ -316,7 +316,7 @@ export function DetalleGestionesPage() {
                         <Pencil size={13} />
                       </button>
                       {sg.editado_manualmente && (
-                        <Lock size={11} className="text-amber-400" title="Bloqueado manualmente" />
+                        <Lock size={11} className="text-amber-400" aria-label="Bloqueado manualmente" />
                       )}
                     </div>
                   </td>

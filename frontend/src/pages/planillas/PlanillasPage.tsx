@@ -288,11 +288,11 @@ export function PlanillasPage() {
                     <CurrencyCell value={p.total_cliente} />
                   </td>
                   <td className="px-4 py-3">
-                    {p.bloqueada ? (
-                      <Badge color="green">Bloqueada</Badge>
-                    ) : (
-                      <Badge color="gray">Abierta</Badge>
-                    )}
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                      p.bloqueada ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"
+                    }`}>
+                      {p.bloqueada ? "Bloqueada" : "Abierta"}
+                    </span>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
