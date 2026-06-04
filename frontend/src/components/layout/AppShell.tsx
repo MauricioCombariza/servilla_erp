@@ -2,7 +2,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   Users, UserCheck, ShoppingCart, FileText, BarChart2,
   Clock, DollarSign, Truck, Receipt, Wallet, Calculator, List, ClipboardCheck,
-  LogOut, Menu, X
+  LogOut, Menu, X, ArrowDownCircle, ArrowUpCircle,
 } from "lucide-react";
 import { useState } from "react";
 import { useAuthStore } from "@/store/authStore";
@@ -13,6 +13,9 @@ const navItems = [
   { to: "/ordenes", label: "Órdenes", icon: ShoppingCart },
   { to: "/facturacion", label: "Resumen Financiero", icon: FileText },
   { to: "/facturacion/emitidas", label: "Facturas Emitidas", icon: FileText },
+  { to: "/facturacion/recibidas", label: "Facturas Recibidas", icon: FileText },
+  { to: "/facturacion/cobrar", label: "CxC — Por Cobrar", icon: ArrowDownCircle },
+  { to: "/facturacion/pagar", label: "CxP — Por Pagar", icon: ArrowUpCircle },
   { to: "/reportes", label: "Reportes", icon: BarChart2 },
   { to: "/labores", label: "Registro Labores", icon: Clock },
   { to: "/pagos-mensajeros", label: "Gestión Pagos", icon: DollarSign },

@@ -8,6 +8,8 @@ from app.routers.clientes import router as clientes_router
 from app.routers.facturacion import router as facturacion_router
 from app.routers.flujo import router as flujo_router
 from app.routers.gastos import router as gastos_router
+from app.routers.liquidaciones import router as liquidaciones_router
+from app.routers.transporte import router as transporte_router
 from app.routers.gestiones import router as gestiones_router
 from app.routers.labores import router as labores_router
 from app.routers.nomina import router as nomina_router
@@ -46,6 +48,8 @@ app.include_router(facturacion_router)
 app.include_router(gestiones_router)
 app.include_router(reportes_router)
 app.include_router(gastos_router)
+app.include_router(liquidaciones_router)
+app.include_router(transporte_router)
 app.include_router(nomina_router)
 app.include_router(labores_router)
 app.include_router(flujo_router)
