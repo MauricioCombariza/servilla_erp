@@ -16,6 +16,11 @@ import { GastosPage } from "@/pages/gastos/GastosPage";
 import { NominaPage } from "@/pages/nomina/NominaPage";
 import { LaboresPage } from "@/pages/labores/LaboresPage";
 import { FlujoCajaPage } from "@/pages/flujo/FlujoCajaPage";
+import { FacturasRecibidasPage } from "@/pages/facturacion/FacturasRecibidasPage";
+import { CuentasCobrarPage } from "@/pages/facturacion/CuentasCobrarPage";
+import { CuentasPagarPage } from "@/pages/facturacion/CuentasPagarPage";
+import { LiquidacionesPage } from "@/pages/pagos/LiquidacionesPage";
+import { FacturasTransportePage } from "@/pages/transporte/FacturasTransportePage";
 import { Placeholder } from "@/pages/Placeholder";
 
 const qc = new QueryClient({
@@ -47,11 +52,13 @@ export default function App() {
             <Route path="/ordenes/carga-masiva" element={<CargaMasivaPage />} />
             <Route path="/facturacion" element={<ResumenPage />} />
             <Route path="/facturacion/emitidas" element={<FacturasEmitidasPage />} />
-            <Route path="/facturacion/*" element={<Placeholder />} />
+            <Route path="/facturacion/recibidas" element={<FacturasRecibidasPage />} />
+            <Route path="/facturacion/cobrar" element={<CuentasCobrarPage />} />
+            <Route path="/facturacion/pagar" element={<CuentasPagarPage />} />
             <Route path="/reportes" element={<ReportesPage />} />
             <Route path="/labores" element={<LaboresPage />} />
-            <Route path="/pagos-mensajeros" element={<Placeholder />} />
-            <Route path="/facturas-transporte" element={<Placeholder />} />
+            <Route path="/pagos-mensajeros" element={<LiquidacionesPage />} />
+            <Route path="/facturas-transporte" element={<FacturasTransportePage />} />
             <Route path="/gastos" element={<GastosPage />} />
             <Route path="/flujo-caja" element={<FlujoCajaPage />} />
             <Route path="/nomina" element={<NominaPage />} />
