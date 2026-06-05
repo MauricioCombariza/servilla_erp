@@ -1,11 +1,12 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    database_url: str = "postgresql+asyncpg://servilla:Vale2010@localhost:5432/servilla_erp"
+    database_url: str = Field(...)
     bases_web_url: str = ""
 
-    jwt_secret: str = "REDACTED_JWT_SECRET"
+    jwt_secret: str = Field(...)
     jwt_algorithm: str = "HS256"
     jwt_access_expire_minutes: int = 60
     jwt_refresh_expire_days: int = 30
