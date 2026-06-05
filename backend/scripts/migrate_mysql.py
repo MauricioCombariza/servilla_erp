@@ -1,17 +1,38 @@
 """
-Migración one-shot: MySQL logistica → PostgreSQL servilla_erp
+Migración MySQL → PostgreSQL Servilla ERP
 
 Uso:
     cd backend
-    python scripts/migrate_mysql.py [--dry-run] [--tabla clientes,personal,seriales]
+    python scripts/migrate_mysql.py [--dry-run] [--tabla clientes,personal,histo,mensajeros]
 
 Tablas soportadas (en orden de dependencias):
-    clientes    → clientes
-    personal    → personal
-    seriales    → seriales_gestion (desde logistica.seriales_gestion)
-    histo       → seriales_gestion (desde bases_web.histo — alternativa)
+    clientes          → migra logistica.clientes
+    personal          → migra logistica.personal
+    seriales          → migra logistica.seriales_gestion (con precios)
+    histo             → migra bases_web.histo desde HISTO_FECHA_DESDE hasta HISTO_FECHA_HASTA
+    histo-incremental → migra bases_web.histo desde el último f_esc ya migrado hasta hoy
+    mensajeros        → resuelve cod_men → mensajero_id (ejecutar al final)
 
-El script es idempotente: usa INSERT ... ON CONFLICT DO NOTHING.
+Idempotente: usa INSERT ... ON CONFLICT DO NOTHING.
+
+Variables de entorno requeridas:
+    DATABASE_URL              URL completa de PostgreSQL (ver .env.example)
+
+Variables de entorno para MySQL logistica:
+    MYSQL_HOST                (default: 127.0.0.1)
+    MYSQL_PORT                (default: 3306)
+    MYSQL_USER                (default: root)
+    MYSQL_PASSWORD            (requerida)
+    MYSQL_DB_LOGISTICA        (default: logistica)
+
+Variables adicionales para bases_web.histo:
+    MYSQL_HOST_BW             (default: 186.180.15.66)
+    MYSQL_PORT_BW             (default: 12539)
+    MYSQL_USER_BW             (default: servilla_remoto)
+    MYSQL_PASSWORD_BW         (requerida)
+    MYSQL_DB_BW               (default: bases_web)
+    HISTO_FECHA_DESDE         (default: 2026-01-01)
+    HISTO_FECHA_HASTA         (default: hoy)
 """
 
 import argparse
@@ -19,48 +40,53 @@ import logging
 import os
 import sys
 from contextlib import contextmanager
+from datetime import date, datetime
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 log = logging.getLogger(__name__)
 
-# ── Config desde entorno ──────────────────────────────────────────────────────
+# ── Config ────────────────────────────────────────────────────────────────────
 
-MYSQL_CFG = {
-    "host":     os.environ.get("MYSQL_HOST", "localhost"),
+MYSQL_LOG = {
+    "host":     os.environ.get("MYSQL_HOST", "127.0.0.1"),
     "port":     int(os.environ.get("MYSQL_PORT", 3306)),
     "user":     os.environ.get("MYSQL_USER", "root"),
     "password": os.environ.get("MYSQL_PASSWORD", ""),
-    "db_log":   os.environ.get("MYSQL_DB_LOGISTICA", "logistica"),
-    "db_bw":    os.environ.get("MYSQL_DB_BASES_WEB", "bases_web"),
+    "database": os.environ.get("MYSQL_DB_LOGISTICA", "logistica"),
 }
 
-PG_DSN = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://servilla:Vale2010@localhost:5440/servilla_erp",
-).replace("+asyncpg", "")   # psycopg2 no usa +asyncpg
+MYSQL_BW = {
+    "host":     os.environ.get("MYSQL_HOST_BW", "186.180.15.66"),
+    "port":     int(os.environ.get("MYSQL_PORT_BW", 12539)),
+    "user":     os.environ.get("MYSQL_USER_BW", "servilla_remoto"),
+    "password": os.environ.get("MYSQL_PASSWORD_BW", ""),
+    "database": os.environ.get("MYSQL_DB_BW", "bases_web"),
+}
 
-BATCH = 500  # filas por commit
+_hoy = date.today().isoformat()
+HISTO_DESDE = os.environ.get("HISTO_FECHA_DESDE", "2026-01-01")
+HISTO_HASTA = os.environ.get("HISTO_FECHA_HASTA", _hoy)
+
+_db_url = os.environ.get("DATABASE_URL")
+if not _db_url:
+    log.error("DATABASE_URL no configurada. Agrega DATABASE_URL al archivo .env")
+    sys.exit(1)
+PG_DSN = _db_url.replace("+asyncpg", "")
+
+BATCH = 500
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 @contextmanager
-def mysql_cursor(database: str):
+def mysql_conn(cfg: dict, buffered: bool = True):
     try:
         import mysql.connector
     except ImportError:
         log.error("Instalar: pip install mysql-connector-python")
         sys.exit(1)
-
-    conn = mysql.connector.connect(
-        host=MYSQL_CFG["host"],
-        port=MYSQL_CFG["port"],
-        user=MYSQL_CFG["user"],
-        password=MYSQL_CFG["password"],
-        database=database,
-        charset="utf8mb4",
-    )
-    cur = conn.cursor(dictionary=True)
+    conn = mysql.connector.connect(charset="utf8mb4", **cfg)
+    cur = conn.cursor(dictionary=True, buffered=buffered)
     try:
         yield cur
     finally:
@@ -69,14 +95,13 @@ def mysql_cursor(database: str):
 
 
 @contextmanager
-def pg_cursor():
+def pg_conn():
     try:
         import psycopg2
         import psycopg2.extras
     except ImportError:
         log.error("Instalar: pip install psycopg2-binary")
         sys.exit(1)
-
     conn = psycopg2.connect(PG_DSN)
     conn.autocommit = False
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -87,217 +112,533 @@ def pg_cursor():
         conn.close()
 
 
-def batched(iterable, n):
-    it = list(iterable)
-    for i in range(0, len(it), n):
-        yield it[i : i + n]
+def batched(lst, n):
+    for i in range(0, len(lst), n):
+        yield lst[i: i + n]
+
+
+def parse_fecha(valor) -> date | None:
+    """Convierte fechas en varios formatos a date. Devuelve None si inválida."""
+    if valor is None:
+        return None
+    if isinstance(valor, (date, datetime)):
+        return valor if isinstance(valor, date) else valor.date()
+    s = str(valor).strip()
+    if not s or s in ("0000-00-00", "0000.00.00", "00.00.0000"):
+        return None
+    for fmt in ("%Y.%m.%d", "%Y-%m-%d", "%d/%m/%Y", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
 
 
 # ── Migración: clientes ───────────────────────────────────────────────────────
 
 def migrate_clientes(dry_run: bool):
     log.info("── clientes ──────────────────────────────────────────")
-    with mysql_cursor(MYSQL_CFG["db_log"]) as my:
+    with mysql_conn(MYSQL_LOG) as my:
         my.execute("""
             SELECT id, nombre_empresa, nit, contacto_nombre, contacto_telefono,
                    contacto_email, direccion, ciudad, plazo_pago_dias,
                    activo, notas, fecha_creacion
-            FROM clientes
-            ORDER BY id
+            FROM clientes ORDER BY id
         """)
         rows = my.fetchall()
-
     log.info(f"  MySQL: {len(rows)} clientes")
     if dry_run or not rows:
         return
-
-    with pg_cursor() as (conn, cur):
+    with pg_conn() as (conn, cur):
         inserted = 0
         for batch in batched(rows, BATCH):
             for r in batch:
+                nit = (r.get("nit") or "").strip() or f"SIN_NIT_{r['id']}"
                 cur.execute("""
                     INSERT INTO clientes
                         (nombre_empresa, nit, contacto_nombre, contacto_telefono,
                          contacto_email, direccion, ciudad, plazo_pago_dias,
                          activo, notas, fecha_creacion)
                     VALUES
-                        (%(nombre_empresa)s, %(nit)s, %(contacto_nombre)s, %(contacto_telefono)s,
-                         %(contacto_email)s, %(direccion)s, %(ciudad)s, %(plazo_pago_dias)s,
-                         %(activo)s, %(notas)s, %(fecha_creacion)s)
+                        (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (nit) DO NOTHING
-                """, r)
+                """, (
+                    r["nombre_empresa"], nit,
+                    r.get("contacto_nombre"), r.get("contacto_telefono"),
+                    r.get("contacto_email"), r.get("direccion"),
+                    r.get("ciudad"), r.get("plazo_pago_dias") or 30,
+                    bool(r.get("activo", True)),
+                    r.get("notas"), r.get("fecha_creacion"),
+                ))
                 inserted += cur.rowcount
             conn.commit()
-    log.info(f"  PostgreSQL: {inserted} insertados (resto ya existían)")
+    log.info(f"  PostgreSQL: {inserted} insertados")
 
 
 # ── Migración: personal ───────────────────────────────────────────────────────
 
 def migrate_personal(dry_run: bool):
     log.info("── personal ──────────────────────────────────────────")
-    with mysql_cursor(MYSQL_CFG["db_log"]) as my:
+    with mysql_conn(MYSQL_LOG) as my:
         my.execute("""
-            SELECT id, codigo, nombre_completo, identificacion, telefono, email,
+            SELECT codigo, nombre_completo, identificacion, telefono, email,
                    tipo_personal, banco, numero_cuenta, tipo_cuenta,
                    dia_pago, activo, observaciones, fecha_ingreso,
                    precio_local, precio_nacional, fecha_creacion
-            FROM personal
-            ORDER BY id
+            FROM personal ORDER BY id
         """)
         rows = my.fetchall()
-
     log.info(f"  MySQL: {len(rows)} registros")
     if dry_run or not rows:
         return
 
     TIPOS_VALIDOS = {"mensajero", "alistamiento", "conductor", "courier_externo", "transportadora"}
-
-    with pg_cursor() as (conn, cur):
+    with pg_conn() as (conn, cur):
         inserted = skipped = 0
         for batch in batched(rows, BATCH):
             for r in batch:
-                if r["tipo_personal"] not in TIPOS_VALIDOS:
-                    log.warning(f"  Omitiendo personal id={r['id']}: tipo '{r['tipo_personal']}' no válido")
+                if r.get("tipo_personal") not in TIPOS_VALIDOS:
+                    log.warning(f"  Omitiendo código {r['codigo']}: tipo '{r['tipo_personal']}' no válido")
                     skipped += 1
                     continue
+                ident = (r.get("identificacion") or "").strip() or f"SIN_ID_{r['codigo']}"
                 cur.execute("""
                     INSERT INTO personal
                         (codigo, nombre_completo, identificacion, telefono, email,
                          tipo_personal, banco, numero_cuenta, tipo_cuenta,
                          dia_pago, activo, observaciones, fecha_ingreso,
                          precio_local, precio_nacional, fecha_creacion)
-                    VALUES
-                        (%(codigo)s, %(nombre_completo)s, %(identificacion)s, %(telefono)s, %(email)s,
-                         %(tipo_personal)s, %(banco)s, %(numero_cuenta)s, %(tipo_cuenta)s,
-                         %(dia_pago)s, %(activo)s, %(observaciones)s, %(fecha_ingreso)s,
-                         %(precio_local)s, %(precio_nacional)s, %(fecha_creacion)s)
-                    ON CONFLICT (codigo)        DO NOTHING
-                """, r)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (codigo) DO NOTHING
+                """, (
+                    r["codigo"], r["nombre_completo"], ident,
+                    r.get("telefono"), r.get("email"),
+                    r["tipo_personal"],
+                    r.get("banco"), r.get("numero_cuenta"), r.get("tipo_cuenta"),
+                    r.get("dia_pago") or 8,
+                    bool(r.get("activo", True)),
+                    r.get("observaciones"),
+                    parse_fecha(r.get("fecha_ingreso")),
+                    r.get("precio_local"), r.get("precio_nacional"),
+                    r.get("fecha_creacion"),
+                ))
                 inserted += cur.rowcount
             conn.commit()
     log.info(f"  PostgreSQL: {inserted} insertados, {skipped} omitidos")
 
 
-# ── Migración: seriales_gestion (desde logistica) ────────────────────────────
+# ── Migración: seriales desde logistica.seriales_gestion (Mayo en adelante) ──
 
 def migrate_seriales(dry_run: bool):
+    """
+    Importa logistica.seriales_gestion al ERP.
+    MySQL usa 'fecha_escaner' (= f_esc en ERP).
+    Preserva precios, cod_men, estado y editado_manualmente.
+    """
     log.info("── seriales_gestion (desde logistica) ────────────────")
-    with mysql_cursor(MYSQL_CFG["db_log"]) as my:
-        my.execute("""
-            SELECT serial, f_emi, f_esc, planilla, cod_men,
-                   tipo_gestion, tipo_envio, ambito,
-                   precio_cliente, precio_mensajero,
-                   estado, origen, editado_manualmente, observaciones,
-                   fecha_creacion
-            FROM seriales_gestion
-            ORDER BY f_esc, id
-        """)
-        rows = my.fetchall()
-
-    log.info(f"  MySQL: {len(rows)} seriales")
-    if dry_run or not rows:
-        return
-
-    _insertar_seriales(rows)
-
-
-def migrate_histo(dry_run: bool):
-    """Migra desde bases_web.histo cuando seriales_gestion no existe en MySQL."""
-    log.info("── seriales_gestion (desde bases_web.histo) ──────────")
-    with mysql_cursor(MYSQL_CFG["db_bw"]) as my:
+    with mysql_conn(MYSQL_LOG) as my:
         my.execute("""
             SELECT
                 serial,
-                fecha_emision   AS f_emi,
-                fecha_escaner   AS f_esc,
+                NULL                AS f_emi,
+                fecha_escaner       AS f_esc_raw,
                 planilla,
-                cod_mensajero   AS cod_men,
+                cod_men,
                 tipo_gestion,
-                'sobre'         AS tipo_envio,
-                'bogota'        AS ambito,
-                0               AS precio_cliente,
-                0               AS precio_mensajero,
-                'pendiente'     AS estado,
-                'scanner'       AS origen,
-                FALSE           AS editado_manualmente,
-                NULL            AS observaciones,
-                fecha_escaner   AS fecha_creacion
-            FROM histo
+                tipo_envio,
+                ambito,
+                precio_cliente,
+                precio_mensajero,
+                estado,
+                origen,
+                editado_manualmente,
+                observaciones,
+                fecha_creacion,
+                cliente             AS cliente_nombre,
+                cliente_id          AS cliente_id_mysql
+            FROM seriales_gestion
             WHERE fecha_escaner IS NOT NULL
             ORDER BY fecha_escaner, id
         """)
         rows = my.fetchall()
-
-    log.info(f"  bases_web.histo: {len(rows)} filas")
+    log.info(f"  MySQL: {len(rows)} seriales")
     if dry_run or not rows:
         return
 
-    _insertar_seriales(rows)
+    # Construir mapa cliente_nombre → cliente_id de PostgreSQL
+    cliente_map = _build_cliente_map()
+
+    _insertar_seriales(rows, cliente_map=cliente_map, fecha_campo="f_esc_raw")
 
 
-def _insertar_seriales(rows):
+# ── Migración: seriales desde bases_web.histo (Enero-Abril) ──────────────────
+
+def migrate_histo(dry_run: bool):
+    """
+    Importa desde bases_web.histo el rango HISTO_DESDE..HISTO_HASTA.
+    Usa cursor no-buffered + fetchmany para evitar cargar 1M+ filas en memoria.
+    """
+    desde_histo = HISTO_DESDE.replace("-", ".")
+    hasta_histo = HISTO_HASTA.replace("-", ".")
+
+    log.info(f"── bases_web.histo ({HISTO_DESDE} → {HISTO_HASTA}) ─────────────")
+
+    if dry_run:
+        # Para dry-run sí contamos con buffered (más rápido)
+        with mysql_conn(MYSQL_BW) as my:
+            my.execute(
+                "SELECT COUNT(*) AS n FROM histo WHERE serial IS NOT NULL "
+                "AND f_esc IS NOT NULL AND f_esc BETWEEN %s AND %s "
+                "AND f_esc NOT LIKE '%%Entr%%' AND f_esc NOT LIKE '%%Devo%%'",
+                (desde_histo, hasta_histo)
+            )
+            total = my.fetchone()["n"]
+        log.info(f"  bases_web.histo: {total} filas (dry-run)")
+        return
+
+    cliente_map = _build_cliente_map()
+
+    # cursor no-buffered para streaming — evita traer todo a RAM de una vez
+    with mysql_conn(MYSQL_BW, buffered=False) as my:
+        my.execute("""
+            SELECT
+                serial,
+                f_emi               AS f_emi_raw,
+                f_esc               AS f_esc_raw,
+                planilla,
+                cod_men,
+                no_entidad          AS cliente_nombre,
+                ret_esc,
+                'sobre'             AS tipo_envio,
+                'bogota'            AS ambito,
+                0                   AS precio_cliente,
+                0                   AS precio_mensajero,
+                'pendiente'         AS estado,
+                'scanner'           AS origen,
+                0                   AS editado_manualmente,
+                NULL                AS observaciones,
+                NULL                AS fecha_creacion,
+                NULL                AS cliente_id_mysql
+            FROM histo
+            WHERE serial IS NOT NULL
+              AND f_esc IS NOT NULL
+              AND f_esc BETWEEN %s AND %s
+              AND f_esc NOT LIKE '%%Entr%%'
+              AND f_esc NOT LIKE '%%Devo%%'
+        """, (desde_histo, hasta_histo))
+
+        ESTADOS = {"pendiente", "liquidado", "facturado", "anulado", "en_revision"}
+        TIPOS_E  = {"sobre", "paquete"}
+        AMBITOS  = {"bogota", "nacional"}
+
+        total_inserted = total_skipped = total_bad = 0
+        chunk_num = 0
+
+        with pg_conn() as (conn, cur):
+            while True:
+                rows = my.fetchmany(BATCH)
+                if not rows:
+                    break
+                chunk_num += 1
+
+                for r in rows:
+                    f_esc = parse_fecha(r.get("f_esc_raw"))
+                    if f_esc is None:
+                        total_bad += 1
+                        continue
+                    f_emi = parse_fecha(r.get("f_emi_raw"))
+                    ret   = (r.get("ret_esc") or "").strip()
+                    tipo_g = "Devolucion" if ret else "Entrega"
+                    tipo_e = r.get("tipo_envio") if r.get("tipo_envio") in TIPOS_E else "sobre"
+                    ambito = r.get("ambito")     if r.get("ambito")     in AMBITOS else "bogota"
+                    estado = r.get("estado")     if r.get("estado")     in ESTADOS else "pendiente"
+                    nombre_cl  = (r.get("cliente_nombre") or "").strip().lower()
+                    cliente_id = cliente_map.get(nombre_cl)
+                    fecha_creacion = r.get("fecha_creacion") or f_esc
+
+                    cur.execute("""
+                        INSERT INTO seriales_gestion
+                            (serial, f_emi, f_esc, planilla, cod_men,
+                             cliente_id, tipo_gestion, tipo_envio, ambito,
+                             precio_cliente, precio_mensajero,
+                             estado, origen, editado_manualmente, observaciones,
+                             fecha_creacion)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        ON CONFLICT (serial) DO NOTHING
+                    """, (
+                        r["serial"], f_emi, f_esc,
+                        r.get("planilla") or "", r.get("cod_men") or "",
+                        cliente_id, tipo_g, tipo_e, ambito,
+                        0, 0, estado, "scanner", False,
+                        r.get("observaciones"), fecha_creacion,
+                    ))
+                    total_inserted += cur.rowcount
+
+                conn.commit()
+                if chunk_num % 10 == 0:
+                    log.info(f"  ... chunk {chunk_num}: {total_inserted} insertados hasta ahora")
+
+    log.info(f"  PostgreSQL: {total_inserted} insertados, {total_skipped} omitidos, {total_bad} sin fecha")
+
+
+# ── Helpers internos ──────────────────────────────────────────────────────────
+
+def _build_cliente_map() -> dict:
+    """
+    Devuelve {nombre_lower: cliente_id} desde PostgreSQL.
+    Incluye variantes conocidas para cubrir diferencias de nombre entre histo y ERP.
+    """
+    ALIASES = {
+        # histo no_entidad lower → nombre_empresa en ERP (lower)
+        "banco caja social":         "banco caja social",
+        "fiduciaria caja social":    "banco caja social",
+        "vehigroup sas":             "vehigrupo sas",
+        "-vehigroup sas":            "vehigrupo sas",
+        "leonisa":                   "leonisa",
+        "pronticourrier express sa": "pronticourier express s.a.s",
+        "pronticourier express sa":  "pronticourier express s.a.s",
+        "imile":                     "imile sas",
+        "imile sas":                 "imile sas",
+    }
+    with pg_conn() as (_, cur):
+        cur.execute("SELECT id, nombre_empresa FROM clientes")
+        base = {r["nombre_empresa"].lower(): r["id"] for r in cur.fetchall()}
+    # Expandir con aliases
+    result = dict(base)
+    for alias, canonical in ALIASES.items():
+        if canonical in base:
+            result[alias] = base[canonical]
+    return result
+
+
+def _insertar_seriales(rows, *, cliente_map: dict, fecha_campo: str, fecha_emi_campo: str = "f_emi"):
     ESTADOS = {"pendiente", "liquidado", "facturado", "anulado", "en_revision"}
     TIPOS_G = {"Entrega", "Devolucion"}
     TIPOS_E = {"sobre", "paquete"}
     AMBITOS = {"bogota", "nacional"}
 
-    with pg_cursor() as (conn, cur):
-        inserted = skipped = 0
+    with pg_conn() as (conn, cur):
+        inserted = skipped = bad_date = 0
         for batch in batched(rows, BATCH):
             for r in batch:
-                # Normalizar / validar
+                # Parsear fechas
+                f_esc = parse_fecha(r.get(fecha_campo))
+                if f_esc is None:
+                    bad_date += 1
+                    continue
+
+                f_emi = parse_fecha(r.get(fecha_emi_campo)) if fecha_emi_campo != "f_emi" else parse_fecha(r.get("f_emi"))
+
+                # Validar tipo_gestion
                 if r.get("tipo_gestion") not in TIPOS_G:
                     skipped += 1
                     continue
-                r["tipo_envio"]  = r.get("tipo_envio")  if r.get("tipo_envio")  in TIPOS_E else "sobre"
-                r["ambito"]      = r.get("ambito")      if r.get("ambito")      in AMBITOS else "bogota"
-                r["estado"]      = r.get("estado")      if r.get("estado")      in ESTADOS else "pendiente"
-                r["origen"]      = r.get("origen")      or "scanner"
-                r["precio_cliente"]   = r.get("precio_cliente")   or 0
-                r["precio_mensajero"] = r.get("precio_mensajero") or 0
-                r["editado_manualmente"] = bool(r.get("editado_manualmente", False))
 
+                # Normalizar enums
+                tipo_envio = r.get("tipo_envio") if r.get("tipo_envio") in TIPOS_E else "sobre"
+                ambito     = r.get("ambito")     if r.get("ambito")     in AMBITOS else "bogota"
+                estado     = r.get("estado")     if r.get("estado")     in ESTADOS else "pendiente"
+                origen     = r.get("origen")     or "scanner"
+                precio_c   = float(r.get("precio_cliente")   or 0)
+                precio_m   = float(r.get("precio_mensajero") or 0)
+                editado    = bool(r.get("editado_manualmente", False))
+
+                # Resolver cliente_id
+                nombre_cl = (r.get("cliente_nombre") or "").strip().lower()
+                cliente_id = cliente_map.get(nombre_cl)
+
+                fecha_creacion = r.get("fecha_creacion") or f_esc
                 cur.execute("""
                     INSERT INTO seriales_gestion
                         (serial, f_emi, f_esc, planilla, cod_men,
+                         cliente_id,
                          tipo_gestion, tipo_envio, ambito,
                          precio_cliente, precio_mensajero,
                          estado, origen, editado_manualmente, observaciones,
                          fecha_creacion)
                     VALUES
-                        (%(serial)s, %(f_emi)s, %(f_esc)s, %(planilla)s, %(cod_men)s,
-                         %(tipo_gestion)s, %(tipo_envio)s, %(ambito)s,
-                         %(precio_cliente)s, %(precio_mensajero)s,
-                         %(estado)s, %(origen)s, %(editado_manualmente)s, %(observaciones)s,
-                         %(fecha_creacion)s)
+                        (%s, %s, %s, %s, %s,
+                         %s,
+                         %s, %s, %s,
+                         %s, %s,
+                         %s, %s, %s, %s,
+                         %s)
                     ON CONFLICT (serial) DO NOTHING
-                """, r)
+                """, (
+                    r["serial"], f_emi, f_esc,
+                    r.get("planilla") or "", r.get("cod_men") or "",
+                    cliente_id,
+                    r["tipo_gestion"], tipo_envio, ambito,
+                    precio_c, precio_m,
+                    estado, origen, editado,
+                    r.get("observaciones"),
+                    fecha_creacion,
+                ))
                 inserted += cur.rowcount
             conn.commit()
-    log.info(f"  PostgreSQL: {inserted} insertados, {skipped} omitidos")
+
+        log.info(f"  PostgreSQL: {inserted} insertados, {skipped} omitidos (tipo inválido), {bad_date} sin fecha")
+
+
+# ── Sincronización incremental: bases_web.histo desde último f_esc migrado ───
+
+def migrate_histo_incremental(dry_run: bool):
+    """
+    Migra registros de bases_web.histo publicados después del último f_esc
+    ya existente en seriales_gestion. Útil para actualizaciones periódicas.
+    """
+    log.info("── histo incremental ─────────────────────────────────")
+
+    with pg_conn() as (_, cur):
+        cur.execute("SELECT MAX(f_esc) AS ultimo FROM seriales_gestion")
+        row = cur.fetchone()
+        ultimo = row["ultimo"] if row else None
+
+    if ultimo is None:
+        log.info("  No hay datos en seriales_gestion. Usa --tabla histo para la carga inicial.")
+        return
+
+    desde = ultimo.isoformat()
+    hasta = date.today().isoformat()
+    log.info(f"  Rango incremental: {desde} → {hasta}")
+
+    desde_histo = desde.replace("-", ".")
+    hasta_histo = hasta.replace("-", ".")
+
+    if dry_run:
+        with mysql_conn(MYSQL_BW) as my:
+            my.execute(
+                "SELECT COUNT(*) AS n FROM histo WHERE serial IS NOT NULL "
+                "AND f_esc IS NOT NULL AND f_esc > %s AND f_esc <= %s "
+                "AND f_esc NOT LIKE '%%Entr%%' AND f_esc NOT LIKE '%%Devo%%'",
+                (desde_histo, hasta_histo)
+            )
+            total = my.fetchone()["n"]
+        log.info(f"  bases_web.histo: {total} filas nuevas (dry-run)")
+        return
+
+    cliente_map = _build_cliente_map()
+
+    with mysql_conn(MYSQL_BW, buffered=False) as my:
+        my.execute("""
+            SELECT
+                serial,
+                f_emi               AS f_emi_raw,
+                f_esc               AS f_esc_raw,
+                planilla,
+                cod_men,
+                no_entidad          AS cliente_nombre,
+                ret_esc,
+                'sobre'             AS tipo_envio,
+                'bogota'            AS ambito,
+                0                   AS precio_cliente,
+                0                   AS precio_mensajero,
+                'pendiente'         AS estado,
+                'scanner'           AS origen,
+                0                   AS editado_manualmente,
+                NULL                AS observaciones,
+                NULL                AS fecha_creacion,
+                NULL                AS cliente_id_mysql
+            FROM histo
+            WHERE serial IS NOT NULL
+              AND f_esc IS NOT NULL
+              AND f_esc > %s AND f_esc <= %s
+              AND f_esc NOT LIKE '%%Entr%%'
+              AND f_esc NOT LIKE '%%Devo%%'
+        """, (desde_histo, hasta_histo))
+
+        ESTADOS = {"pendiente", "liquidado", "facturado", "anulado", "en_revision"}
+        TIPOS_E  = {"sobre", "paquete"}
+        AMBITOS  = {"bogota", "nacional"}
+
+        total_inserted = total_bad = 0
+
+        with pg_conn() as (conn, cur):
+            while True:
+                rows = my.fetchmany(BATCH)
+                if not rows:
+                    break
+                for r in rows:
+                    f_esc = parse_fecha(r.get("f_esc_raw"))
+                    if f_esc is None:
+                        total_bad += 1
+                        continue
+                    f_emi  = parse_fecha(r.get("f_emi_raw"))
+                    ret    = (r.get("ret_esc") or "").strip()
+                    tipo_g = "Devolucion" if ret else "Entrega"
+                    tipo_e = r.get("tipo_envio") if r.get("tipo_envio") in TIPOS_E else "sobre"
+                    ambito = r.get("ambito")     if r.get("ambito")     in AMBITOS else "bogota"
+                    estado = r.get("estado")     if r.get("estado")     in ESTADOS else "pendiente"
+                    nombre_cl  = (r.get("cliente_nombre") or "").strip().lower()
+                    cliente_id = cliente_map.get(nombre_cl)
+                    fecha_creacion = r.get("fecha_creacion") or f_esc
+                    cur.execute("""
+                        INSERT INTO seriales_gestion
+                            (serial, f_emi, f_esc, planilla, cod_men,
+                             cliente_id, tipo_gestion, tipo_envio, ambito,
+                             precio_cliente, precio_mensajero,
+                             estado, origen, editado_manualmente, observaciones,
+                             fecha_creacion)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        ON CONFLICT (serial) DO NOTHING
+                    """, (
+                        r["serial"], f_emi, f_esc,
+                        r.get("planilla") or "", r.get("cod_men") or "",
+                        cliente_id, tipo_g, tipo_e, ambito,
+                        0, 0, estado, "scanner", False,
+                        r.get("observaciones"), fecha_creacion,
+                    ))
+                    total_inserted += cur.rowcount
+                conn.commit()
+
+    log.info(f"  PostgreSQL: {total_inserted} nuevos insertados, {total_bad} sin fecha válida")
+    if total_inserted > 0:
+        log.info("  Ejecuta --tabla mensajeros para resolver mensajero_id en los nuevos registros")
+
+
+# ── Post-migración: asignar mensajero_id desde cod_men ───────────────────────
+
+def asignar_mensajero_ids(dry_run: bool):
+    """
+    Actualiza mensajero_id en seriales_gestion cruzando cod_men con personal.codigo.
+    Correr después de migrate_personal y migrate_seriales/histo.
+    """
+    log.info("── asignar mensajero_id desde cod_men ────────────────")
+    if dry_run:
+        log.info("  (dry-run, no se actualizará nada)")
+        return
+    with pg_conn() as (conn, cur):
+        cur.execute("""
+            UPDATE seriales_gestion sg
+            SET mensajero_id = p.id
+            FROM personal p
+            WHERE sg.cod_men = p.codigo
+              AND sg.mensajero_id IS NULL
+        """)
+        updated = cur.rowcount
+        conn.commit()
+    log.info(f"  Actualizados: {updated} seriales con mensajero_id")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 TABLAS = {
-    "clientes":  migrate_clientes,
-    "personal":  migrate_personal,
-    "seriales":  migrate_seriales,
-    "histo":     migrate_histo,
+    "clientes":          migrate_clientes,
+    "personal":          migrate_personal,
+    "seriales":          migrate_seriales,
+    "histo":             migrate_histo,
+    "histo-incremental": migrate_histo_incremental,
+    "mensajeros":        asignar_mensajero_ids,
 }
 
 def main():
     parser = argparse.ArgumentParser(description="Migración MySQL → PostgreSQL Servilla ERP")
     parser.add_argument(
         "--tabla",
-        default="clientes,personal,seriales",
-        help="Tablas a migrar separadas por coma. Opciones: clientes, personal, seriales, histo",
+        default="clientes,personal,histo,mensajeros",
+        help="Tablas a migrar (coma-separadas): clientes, personal, seriales, histo, histo-incremental, mensajeros",
     )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Solo cuenta filas, no inserta nada",
-    )
+    parser.add_argument("--dry-run", action="store_true", help="Cuenta filas sin insertar")
     args = parser.parse_args()
 
     tablas = [t.strip() for t in args.tabla.split(",")]
@@ -309,11 +650,19 @@ def main():
     if args.dry_run:
         log.info("MODO DRY-RUN — no se escribirá nada en PostgreSQL")
 
+    log.info(f"Tablas a migrar: {tablas}")
+    log.info(f"PostgreSQL: {PG_DSN.split('@')[-1] if '@' in PG_DSN else PG_DSN}")
+    log.info(f"MySQL logistica: {MYSQL_LOG['host']}:{MYSQL_LOG['port']}/{MYSQL_LOG['database']}")
+    if any(t in ("histo", "histo-incremental") for t in tablas):
+        log.info(f"MySQL bases_web: {MYSQL_BW['host']}:{MYSQL_BW['port']}/{MYSQL_BW['database']}")
+        if "histo" in tablas:
+            log.info(f"Rango histo: {HISTO_DESDE} → {HISTO_HASTA}")
+
     for tabla in tablas:
         try:
             TABLAS[tabla](args.dry_run)
         except Exception as e:
-            log.error(f"Error migrando {tabla}: {e}")
+            log.error(f"Error migrando '{tabla}': {e}")
             raise
 
     log.info("✓ Migración completada")
