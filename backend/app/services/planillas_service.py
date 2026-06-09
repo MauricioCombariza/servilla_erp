@@ -175,7 +175,8 @@ async def recalcular_precios(req: RecalcularRequest, db: AsyncSession) -> Recalc
                    sg.cliente_id,
                    sg.tipo_envio,
                    sg.ambito,
-                   sg.f_esc
+                   sg.f_esc,
+                   sg.mensajero_id
             FROM seriales_gestion sg
             WHERE {where_clause}
               AND sg.editado_manualmente = FALSE
@@ -185,9 +186,13 @@ async def recalcular_precios(req: RecalcularRequest, db: AsyncSession) -> Recalc
                    c.id                          AS serial_id,
                    c.tipo_gestion,
                    c.precio_cliente              AS precio_cli_actual,
+                   c.ambito,
                    pc.precio_entrega,
                    pc.costo_mensajero_entrega,
-                   pc.costo_mensajero_devolucion
+                   pc.costo_mensajero_devolucion,
+                   men.tipo_personal             AS tipo_men,
+                   men.precio_local              AS men_local,
+                   men.precio_nacional           AS men_nac
             FROM candidatos c
             JOIN precios_cliente pc
               ON pc.cliente_id    = c.cliente_id
@@ -196,6 +201,7 @@ async def recalcular_precios(req: RecalcularRequest, db: AsyncSession) -> Recalc
              AND pc.activo        = TRUE
              AND pc.vigencia_desde <= c.f_esc
              AND (pc.vigencia_hasta IS NULL OR pc.vigencia_hasta >= c.f_esc)
+            LEFT JOIN personal men ON men.id = c.mensajero_id
             ORDER BY c.id, pc.vigencia_desde DESC
         ),
         updated AS (
@@ -205,6 +211,12 @@ async def recalcular_precios(req: RecalcularRequest, db: AsyncSession) -> Recalc
                                      ELSE pv.precio_cli_actual
                                    END,
                 precio_mensajero = CASE
+                                     WHEN pv.tipo_men = 'courier_externo' THEN
+                                         CASE pv.ambito
+                                             WHEN 'bogota'
+                                             THEN COALESCE(NULLIF(pv.men_local, 0), pv.costo_mensajero_entrega)
+                                             ELSE COALESCE(NULLIF(pv.men_nac,   0), pv.costo_mensajero_entrega)
+                                         END
                                      WHEN pv.tipo_gestion = 'Entrega'
                                      THEN pv.costo_mensajero_entrega
                                      ELSE pv.costo_mensajero_devolucion

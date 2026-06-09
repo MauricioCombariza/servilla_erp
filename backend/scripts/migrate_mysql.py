@@ -202,7 +202,9 @@ def migrate_personal(dry_run: bool):
             SELECT codigo, nombre_completo, identificacion, telefono, email,
                    tipo_personal, banco, numero_cuenta, tipo_cuenta,
                    dia_pago, activo, observaciones, fecha_ingreso,
-                   precio_local, precio_nacional, fecha_creacion
+                   COALESCE(tarifa_entrega_local,  precio_local,    0) AS precio_local,
+                   COALESCE(tarifa_entrega_nacional, precio_nacional, 0) AS precio_nacional,
+                   fecha_creacion
             FROM personal ORDER BY id
         """)
         rows = my.fetchall()
@@ -227,7 +229,9 @@ def migrate_personal(dry_run: bool):
                          dia_pago, activo, observaciones, fecha_ingreso,
                          precio_local, precio_nacional, fecha_creacion)
                     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                    ON CONFLICT (codigo) DO NOTHING
+                    ON CONFLICT (codigo) DO UPDATE SET
+                        precio_local    = EXCLUDED.precio_local,
+                        precio_nacional = EXCLUDED.precio_nacional
                 """, (
                     r["codigo"], r["nombre_completo"], ident,
                     r.get("telefono"), r.get("email"),
