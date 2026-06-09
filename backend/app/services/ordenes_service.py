@@ -1,11 +1,17 @@
 """
 Lógica de negocio para carga masiva de órdenes desde CSV.
 
-Formato esperado del CSV (columnas requeridas):
-  orden, serial, fecha_recepcion, nombre_cliente, tipo_servicio, ambito
+Formato esperado del CSV:
+  Columnas requeridas: orden, serial, fecha_recepcion, nombre_cliente, tipo_servicio, ambito
+  Columnas opcionales: planilla, cod_men, f_emi
 
-Paso 1: un serial por fila → seriales_gestion (ON CONFLICT DO NOTHING — idempotente)
-Paso 2: agrupar por orden  → ordenes (crear o actualizar totales)
+Reglas de procesamiento:
+  - Solo se procesan filas con fecha_recepcion >= 2026-01-01.
+  - Paso 1: un serial por fila → seriales_gestion.
+      · Serial nuevo       → INSERT.
+      · Serial existente, estado = 'pendiente' → UPDATE campos operativos.
+      · Serial existente, otro estado          → no se toca.
+  - Paso 2: agrupar por orden → ordenes (crear o actualizar totales).
 """
 from __future__ import annotations
 
@@ -18,25 +24,26 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.clientes import Cliente, PrecioCliente
+from app.models.personal import Personal
 from app.schemas.ordenes import CargaMasivaResult
 
 logger = logging.getLogger(__name__)
 
 COLUMNAS_REQUERIDAS = {"orden", "serial", "fecha_recepcion", "nombre_cliente", "tipo_servicio", "ambito"}
+DATE_CORTE = date(2026, 1, 1)
 
 
-async def _cargar_maestros(db: AsyncSession) -> tuple[dict, dict, dict]:
-    """Devuelve (clientes_by_name, precios_cli, precios_men).
+async def _cargar_maestros(db: AsyncSession) -> tuple[dict, dict, dict, dict]:
+    """Devuelve (clientes_by_name, precios_cli, precios_men, personal_by_code).
 
     clientes_by_name:  {nombre_lower -> cliente_id}
     precios_cli:       {(cliente_id, tipo_servicio, ambito) -> precio_entrega}
     precios_men:       {(cliente_id, tipo_servicio, ambito) -> costo_mensajero_entrega}
+    personal_by_code:  {codigo_upper -> personal_id}
     """
-    # Clientes
     rows_c = (await db.execute(select(Cliente.id, Cliente.nombre_empresa))).all()
     clientes_by_name = {r.nombre_empresa.strip().lower(): r.id for r in rows_c}
 
-    # Precios vigentes activos
     rows_p = (
         await db.execute(
             select(
@@ -56,7 +63,14 @@ async def _cargar_maestros(db: AsyncSession) -> tuple[dict, dict, dict]:
         precios_cli[key] = float(r.precio_entrega or 0)
         precios_men[key] = float(r.costo_mensajero_entrega or 0)
 
-    return clientes_by_name, precios_cli, precios_men
+    rows_per = (
+        await db.execute(
+            select(Personal.id, Personal.codigo).where(Personal.activo == True)  # noqa: E712
+        )
+    ).all()
+    personal_by_code = {r.codigo.strip().upper(): r.id for r in rows_per}
+
+    return clientes_by_name, precios_cli, precios_men, personal_by_code
 
 
 def _parse_date(val: str) -> date | None:
@@ -78,15 +92,15 @@ async def procesar_csv(
         df = pd.read_csv(io.BytesIO(contenido), dtype=str, low_memory=False).dropna(how="all")
     except Exception as e:
         return CargaMasivaResult(
-            total_filas=0, seriales_nuevos=0, ordenes_nuevas=0,
-            ordenes_actualizadas=0, errores=[f"Error leyendo CSV: {e}"]
+            total_filas=0, filas_ignoradas=0, seriales_nuevos=0, seriales_actualizados=0,
+            ordenes_nuevas=0, ordenes_actualizadas=0, errores=[f"Error leyendo CSV: {e}"]
         )
 
     faltantes = COLUMNAS_REQUERIDAS - set(df.columns)
     if faltantes:
         return CargaMasivaResult(
-            total_filas=len(df), seriales_nuevos=0, ordenes_nuevas=0,
-            ordenes_actualizadas=0,
+            total_filas=len(df), filas_ignoradas=0, seriales_nuevos=0, seriales_actualizados=0,
+            ordenes_nuevas=0, ordenes_actualizadas=0,
             errores=[f"Columnas faltantes: {', '.join(sorted(faltantes))}"],
         )
 
@@ -94,12 +108,23 @@ async def procesar_csv(
     df["_orden"] = df["orden"].str.strip().str.replace(r"\.0$", "", regex=True)
     df["_es_local"] = df["ambito"].str.lower().str.strip().str.contains("bog", na=False)
 
+    # Columnas opcionales
+    df["_planilla"] = df["planilla"].str.strip() if "planilla" in df.columns else ""
+    df["_cod_men"] = df["cod_men"].str.strip().str.upper() if "cod_men" in df.columns else ""
+
+    # ── Filtro de fecha de corte ──────────────────────────────────────────────
+    df["_fecha_parsed"] = df["fecha_recepcion"].apply(lambda x: _parse_date(str(x).strip()))
     total_filas = len(df)
+    df = df[df["_fecha_parsed"].apply(lambda d: d is not None and d >= DATE_CORTE)].copy()
+    filas_ignoradas = total_filas - len(df)
+
     errores: list[str] = []
-    clientes_by_name, precios_cli, precios_men = await _cargar_maestros(db)
+    clientes_by_name, precios_cli, precios_men, personal_by_code = await _cargar_maestros(db)
 
     # ── Paso 1: seriales_gestion ──────────────────────────────────────────────
     sg_nuevos = 0
+    sg_actualizados = 0
+
     for i, fila in df.iterrows():
         try:
             cliente_nom = str(fila["nombre_cliente"]).strip()
@@ -110,34 +135,47 @@ async def procesar_csv(
 
             serial = str(fila["serial"]).strip()
             num_orden = str(fila["_orden"])
-            fecha_str = str(fila["fecha_recepcion"]).strip()
-            fecha_parsed = _parse_date(fecha_str)
-            if not fecha_parsed:
-                errores.append(f"Fila {int(i)+2}: fecha inválida '{fecha_str}'")  # type: ignore[arg-type]
-                continue
+            fecha_parsed: date = fila["_fecha_parsed"]  # ya filtrada arriba
 
             tipo_ser = str(fila["tipo_servicio"]).lower().strip()
             ambito_val = "bogota" if fila["_es_local"] else "nacional"
+            planilla_val = str(fila["_planilla"]) if fila["_planilla"] else ""
+            cod_men_val = str(fila["_cod_men"]) if fila["_cod_men"] else ""
 
             precio_cli = precios_cli.get((id_cliente, tipo_ser, ambito_val), 0.0)
             precio_men = precios_men.get((id_cliente, tipo_ser, ambito_val), 0.0)
+            mensajero_id = personal_by_code.get(cod_men_val) if cod_men_val else None
 
-            # ON CONFLICT DO NOTHING → idempotente
+            # Nuevo → INSERT; existente con estado='pendiente' → UPDATE; otro estado → no-op
             result = await db.execute(
                 text("""
                     INSERT INTO seriales_gestion
-                        (serial, planilla, f_emi, f_esc, cod_men, cliente_id,
-                         tipo_gestion, tipo_envio, ambito,
+                        (serial, orden, planilla, f_emi, f_esc, cod_men, mensajero_id,
+                         cliente_id, tipo_gestion, tipo_envio, ambito,
                          precio_cliente, precio_mensajero, estado, origen)
                     VALUES
-                        (:serial, '', :fecha, :fecha, '', :cliente_id,
-                         'Entrega', :tipo_envio, :ambito,
+                        (:serial, :orden, :planilla, :fecha, :fecha, :cod_men, :mensajero_id,
+                         :cliente_id, 'Entrega', :tipo_envio, :ambito,
                          :precio_cli, :precio_men, 'pendiente', 'manual')
-                    ON CONFLICT (serial) DO NOTHING
+                    ON CONFLICT (serial) DO UPDATE SET
+                        orden            = EXCLUDED.orden,
+                        planilla         = EXCLUDED.planilla,
+                        f_esc            = EXCLUDED.f_esc,
+                        cod_men          = EXCLUDED.cod_men,
+                        mensajero_id     = EXCLUDED.mensajero_id,
+                        precio_cliente   = EXCLUDED.precio_cliente,
+                        precio_mensajero = EXCLUDED.precio_mensajero,
+                        origen           = EXCLUDED.origen
+                    WHERE seriales_gestion.estado = 'pendiente'
+                    RETURNING (xmax = 0) AS es_nuevo
                 """),
                 {
                     "serial": serial,
+                    "orden": num_orden,
+                    "planilla": planilla_val,
                     "fecha": fecha_parsed,
+                    "cod_men": cod_men_val,
+                    "mensajero_id": mensajero_id,
                     "cliente_id": id_cliente,
                     "tipo_envio": tipo_ser,
                     "ambito": ambito_val,
@@ -145,8 +183,12 @@ async def procesar_csv(
                     "precio_men": precio_men,
                 },
             )
-            if result.rowcount > 0:
-                sg_nuevos += 1
+            row = result.fetchone()
+            if row is not None:
+                if row[0]:  # xmax = 0 → INSERT nuevo
+                    sg_nuevos += 1
+                else:       # xmax != 0 → UPDATE de pendiente
+                    sg_actualizados += 1
 
         except Exception as e:
             errores.append(f"Fila {int(i)+2}: {e}")  # type: ignore[arg-type]
@@ -226,13 +268,17 @@ async def procesar_csv(
 
     await db.commit()
     logger.info(
-        "Carga masiva: órdenes_nuevas=%d actualizadas=%d seriales_gestion=%d errores=%d",
-        ordenes_nuevas, ordenes_actualizadas, sg_nuevos, len(errores),
+        "Carga masiva: órdenes_nuevas=%d actualizadas=%d "
+        "seriales_nuevos=%d actualizados=%d ignoradas=%d errores=%d",
+        ordenes_nuevas, ordenes_actualizadas, sg_nuevos, sg_actualizados,
+        filas_ignoradas, len(errores),
     )
     return CargaMasivaResult(
         total_filas=total_filas,
+        filas_ignoradas=filas_ignoradas,
         seriales_nuevos=sg_nuevos,
+        seriales_actualizados=sg_actualizados,
         ordenes_nuevas=ordenes_nuevas,
         ordenes_actualizadas=ordenes_actualizadas,
-        errores=errores[:50],  # max 50 errores en respuesta
+        errores=errores[:50],
     )

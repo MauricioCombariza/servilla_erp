@@ -81,7 +81,9 @@ class OrdenRead(BaseModel):
 
 class CargaMasivaResult(BaseModel):
     total_filas: int
+    filas_ignoradas: int
     seriales_nuevos: int
+    seriales_actualizados: int
     ordenes_nuevas: int
     ordenes_actualizadas: int
     errores: list[str]

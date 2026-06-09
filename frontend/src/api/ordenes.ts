@@ -3,7 +3,9 @@ import type { Orden } from "@/types/domain";
 
 export interface CargaMasivaResult {
   total_filas: number;
+  filas_ignoradas: number;
   seriales_nuevos: number;
+  seriales_actualizados: number;
   ordenes_nuevas: number;
   ordenes_actualizadas: number;
   errores: string[];

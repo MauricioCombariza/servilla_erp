@@ -38,8 +38,14 @@ export function CargaMasivaPage() {
       </button>
 
       <h1 className="text-xl font-semibold text-gray-900 mb-1">Carga masiva de órdenes</h1>
-      <p className="text-sm text-gray-500 mb-6">
-        Sube un CSV con columnas: <code className="bg-gray-100 px-1 rounded text-xs">orden, serial, fecha_recepcion, nombre_cliente, tipo_servicio, ambito</code>
+      <p className="text-sm text-gray-500 mb-2">
+        Columnas requeridas:{" "}
+        <code className="bg-gray-100 px-1 rounded text-xs">orden, serial, fecha_recepcion, nombre_cliente, tipo_servicio, ambito</code>
+      </p>
+      <p className="text-sm text-gray-400 mb-6">
+        Columnas opcionales:{" "}
+        <code className="bg-gray-100 px-1 rounded text-xs">planilla, cod_men</code>
+        {" "}· Solo se procesan filas con fecha ≥ 2026-01-01
       </p>
 
       {/* Zona de drop */}
@@ -110,7 +116,9 @@ export function CargaMasivaPage() {
             <div className="grid grid-cols-2 gap-3 text-sm">
               {[
                 { label: "Filas leídas", value: result.total_filas },
+                { label: "Filas ignoradas (antes 2026)", value: result.filas_ignoradas, color: "text-gray-400" },
                 { label: "Seriales nuevos", value: result.seriales_nuevos, color: "text-green-700" },
+                { label: "Seriales actualizados", value: result.seriales_actualizados, color: "text-teal-700" },
                 { label: "Órdenes nuevas", value: result.ordenes_nuevas, color: "text-blue-700" },
                 { label: "Órdenes actualizadas", value: result.ordenes_actualizadas, color: "text-orange-600" },
               ].map(({ label, value, color }) => (

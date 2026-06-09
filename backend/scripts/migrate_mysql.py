@@ -12,6 +12,9 @@ Tablas soportadas (en orden de dependencias):
     histo             → migra bases_web.histo desde HISTO_FECHA_DESDE hasta HISTO_FECHA_HASTA
     histo-incremental → migra bases_web.histo desde el último f_esc ya migrado hasta hoy
     mensajeros        → resuelve cod_men → mensajero_id (ejecutar al final)
+    tipo_gestion      → corrige tipo_gestion en seriales históricos de histo (Entrega/Devolucion)
+    precios           → activa precios_cliente 2026 (activo=false → true) para backfill
+    imile             → migra imile.paquetes (ene–abr 2026) a seriales_gestion
 
 Idempotente: usa INSERT ... ON CONFLICT DO NOTHING.
 
@@ -33,6 +36,11 @@ Variables adicionales para bases_web.histo:
     MYSQL_DB_BW               (default: bases_web)
     HISTO_FECHA_DESDE         (default: 2026-01-01)
     HISTO_FECHA_HASTA         (default: hoy)
+
+Variables para imile.paquetes:
+    MYSQL_DB_IMILE            (default: imile)
+    IMILE_FECHA_DESDE         (default: 2026-01-01)
+    IMILE_FECHA_HASTA         (default: 2026-04-30)
 """
 
 import argparse
@@ -66,6 +74,16 @@ MYSQL_BW = {
 _hoy = date.today().isoformat()
 HISTO_DESDE = os.environ.get("HISTO_FECHA_DESDE", "2026-01-01")
 HISTO_HASTA = os.environ.get("HISTO_FECHA_HASTA", _hoy)
+
+MYSQL_IMILE = {
+    "host":     os.environ.get("MYSQL_HOST", "127.0.0.1"),
+    "port":     int(os.environ.get("MYSQL_PORT", 3306)),
+    "user":     os.environ.get("MYSQL_USER", "root"),
+    "password": os.environ.get("MYSQL_PASSWORD", ""),
+    "database": os.environ.get("MYSQL_DB_IMILE", "imile"),
+}
+IMILE_DESDE = os.environ.get("IMILE_FECHA_DESDE", "2026-01-01")
+IMILE_HASTA = os.environ.get("IMILE_FECHA_HASTA", "2026-04-30")
 
 _db_url = os.environ.get("DATABASE_URL")
 if not _db_url:
@@ -289,11 +307,12 @@ def migrate_histo(dry_run: bool):
             my.execute(
                 "SELECT COUNT(*) AS n FROM histo WHERE serial IS NOT NULL "
                 "AND f_esc IS NOT NULL AND f_esc BETWEEN %s AND %s "
-                "AND f_esc NOT LIKE '%%Entr%%' AND f_esc NOT LIKE '%%Devo%%'",
+                "AND f_esc NOT LIKE '%%Entr%%' AND f_esc NOT LIKE '%%Devo%%' "
+                "AND cod_men NOT IN (SELECT cod_men FROM mensajeros WHERE nombre IN ('Lecta', 'Prindel'))",
                 (desde_histo, hasta_histo)
             )
             total = my.fetchone()["n"]
-        log.info(f"  bases_web.histo: {total} filas (dry-run)")
+        log.info(f"  bases_web.histo: {total} filas (dry-run, excluye Lecta/Prindel)")
         return
 
     cliente_map = _build_cliente_map()
@@ -309,13 +328,13 @@ def migrate_histo(dry_run: bool):
                 cod_men,
                 no_entidad          AS cliente_nombre,
                 ret_esc,
+                motivo,
+                ciudad              AS ciudad_raw,
                 'sobre'             AS tipo_envio,
-                'bogota'            AS ambito,
                 0                   AS precio_cliente,
                 0                   AS precio_mensajero,
                 'pendiente'         AS estado,
                 'scanner'           AS origen,
-                0                   AS editado_manualmente,
                 NULL                AS observaciones,
                 NULL                AS fecha_creacion,
                 NULL                AS cliente_id_mysql
@@ -325,13 +344,17 @@ def migrate_histo(dry_run: bool):
               AND f_esc BETWEEN %s AND %s
               AND f_esc NOT LIKE '%%Entr%%'
               AND f_esc NOT LIKE '%%Devo%%'
+              AND cod_men NOT IN (
+                  SELECT cod_men FROM mensajeros
+                  WHERE nombre IN ('Lecta', 'Prindel')
+              )
         """, (desde_histo, hasta_histo))
 
         ESTADOS = {"pendiente", "liquidado", "facturado", "anulado", "en_revision"}
         TIPOS_E  = {"sobre", "paquete"}
         AMBITOS  = {"bogota", "nacional"}
 
-        total_inserted = total_skipped = total_bad = 0
+        total_inserted = total_skipped = total_bad = total_motivo21 = 0
         chunk_num = 0
 
         with pg_conn() as (conn, cur):
@@ -350,11 +373,22 @@ def migrate_histo(dry_run: bool):
                     ret   = (r.get("ret_esc") or "").strip()
                     tipo_g = "Devolucion" if ret else "Entrega"
                     tipo_e = r.get("tipo_envio") if r.get("tipo_envio") in TIPOS_E else "sobre"
-                    ambito = r.get("ambito")     if r.get("ambito")     in AMBITOS else "bogota"
+                    # Determinar ambito desde campo ciudad: Bogotá → 'bogota', resto → 'nacional'
+                    _BOGOTA = {"BOGOTA", "BOGOTÁ", "BOGOTA D.C.", "BOGOTÁ D.C.",
+                                "SANTA FE DE BOGOTA", "SANTA FE DE BOGOTÁ"}
+                    ciudad  = (r.get("ciudad_raw") or "").strip().upper()
+                    ambito  = "bogota" if ciudad in _BOGOTA else "nacional"
                     estado = r.get("estado")     if r.get("estado")     in ESTADOS else "pendiente"
                     nombre_cl  = (r.get("cliente_nombre") or "").strip().lower()
                     cliente_id = cliente_map.get(nombre_cl)
                     fecha_creacion = r.get("fecha_creacion") or f_esc
+
+                    # Motivo 21 → devolución sin cobro; editado_manualmente protege
+                    # el precio $0 frente a recalculaciones futuras de precios
+                    motivo = str(r.get("motivo") or "").strip()
+                    es_motivo21 = (motivo == "21")
+                    if es_motivo21:
+                        total_motivo21 += 1
 
                     cur.execute("""
                         INSERT INTO seriales_gestion
@@ -364,12 +398,17 @@ def migrate_histo(dry_run: bool):
                              estado, origen, editado_manualmente, observaciones,
                              fecha_creacion)
                         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                        ON CONFLICT (serial) DO NOTHING
+                        ON CONFLICT (serial) DO UPDATE SET
+                            ambito       = EXCLUDED.ambito,
+                            tipo_gestion = EXCLUDED.tipo_gestion,
+                            precio_cliente  = EXCLUDED.precio_cliente,
+                            precio_mensajero = EXCLUDED.precio_mensajero
+                        WHERE seriales_gestion.editado_manualmente = FALSE
                     """, (
                         r["serial"], f_emi, f_esc,
                         r.get("planilla") or "", r.get("cod_men") or "",
                         cliente_id, tipo_g, tipo_e, ambito,
-                        0, 0, estado, "scanner", False,
+                        0, 0, estado, "scanner", es_motivo21,
                         r.get("observaciones"), fecha_creacion,
                     ))
                     total_inserted += cur.rowcount
@@ -378,7 +417,10 @@ def migrate_histo(dry_run: bool):
                 if chunk_num % 10 == 0:
                     log.info(f"  ... chunk {chunk_num}: {total_inserted} insertados hasta ahora")
 
-    log.info(f"  PostgreSQL: {total_inserted} insertados, {total_skipped} omitidos, {total_bad} sin fecha")
+    log.info(
+        f"  PostgreSQL: {total_inserted} insertados, {total_skipped} omitidos, "
+        f"{total_bad} sin fecha, {total_motivo21} motivo-21 (precio=0 protegido)"
+    )
 
 
 # ── Helpers internos ──────────────────────────────────────────────────────────
@@ -510,11 +552,12 @@ def migrate_histo_incremental(dry_run: bool):
             my.execute(
                 "SELECT COUNT(*) AS n FROM histo WHERE serial IS NOT NULL "
                 "AND f_esc IS NOT NULL AND f_esc > %s AND f_esc <= %s "
-                "AND f_esc NOT LIKE '%%Entr%%' AND f_esc NOT LIKE '%%Devo%%'",
+                "AND f_esc NOT LIKE '%%Entr%%' AND f_esc NOT LIKE '%%Devo%%' "
+                "AND cod_men NOT IN (SELECT cod_men FROM mensajeros WHERE nombre IN ('Lecta', 'Prindel'))",
                 (desde_histo, hasta_histo)
             )
             total = my.fetchone()["n"]
-        log.info(f"  bases_web.histo: {total} filas nuevas (dry-run)")
+        log.info(f"  bases_web.histo: {total} filas nuevas (dry-run, excluye Lecta/Prindel)")
         return
 
     cliente_map = _build_cliente_map()
@@ -529,13 +572,13 @@ def migrate_histo_incremental(dry_run: bool):
                 cod_men,
                 no_entidad          AS cliente_nombre,
                 ret_esc,
+                motivo,
+                ciudad              AS ciudad_raw,
                 'sobre'             AS tipo_envio,
-                'bogota'            AS ambito,
                 0                   AS precio_cliente,
                 0                   AS precio_mensajero,
                 'pendiente'         AS estado,
                 'scanner'           AS origen,
-                0                   AS editado_manualmente,
                 NULL                AS observaciones,
                 NULL                AS fecha_creacion,
                 NULL                AS cliente_id_mysql
@@ -545,13 +588,17 @@ def migrate_histo_incremental(dry_run: bool):
               AND f_esc > %s AND f_esc <= %s
               AND f_esc NOT LIKE '%%Entr%%'
               AND f_esc NOT LIKE '%%Devo%%'
+              AND cod_men NOT IN (
+                  SELECT cod_men FROM mensajeros
+                  WHERE nombre IN ('Lecta', 'Prindel')
+              )
         """, (desde_histo, hasta_histo))
 
         ESTADOS = {"pendiente", "liquidado", "facturado", "anulado", "en_revision"}
         TIPOS_E  = {"sobre", "paquete"}
         AMBITOS  = {"bogota", "nacional"}
 
-        total_inserted = total_bad = 0
+        total_inserted = total_bad = total_motivo21 = 0
 
         with pg_conn() as (conn, cur):
             while True:
@@ -567,11 +614,21 @@ def migrate_histo_incremental(dry_run: bool):
                     ret    = (r.get("ret_esc") or "").strip()
                     tipo_g = "Devolucion" if ret else "Entrega"
                     tipo_e = r.get("tipo_envio") if r.get("tipo_envio") in TIPOS_E else "sobre"
-                    ambito = r.get("ambito")     if r.get("ambito")     in AMBITOS else "bogota"
+                    # Determinar ambito desde campo ciudad: Bogotá → 'bogota', resto → 'nacional'
+                    _BOGOTA = {"BOGOTA", "BOGOTÁ", "BOGOTA D.C.", "BOGOTÁ D.C.",
+                                "SANTA FE DE BOGOTA", "SANTA FE DE BOGOTÁ"}
+                    ciudad  = (r.get("ciudad_raw") or "").strip().upper()
+                    ambito  = "bogota" if ciudad in _BOGOTA else "nacional"
                     estado = r.get("estado")     if r.get("estado")     in ESTADOS else "pendiente"
                     nombre_cl  = (r.get("cliente_nombre") or "").strip().lower()
                     cliente_id = cliente_map.get(nombre_cl)
                     fecha_creacion = r.get("fecha_creacion") or f_esc
+
+                    motivo = str(r.get("motivo") or "").strip()
+                    es_motivo21 = (motivo == "21")
+                    if es_motivo21:
+                        total_motivo21 += 1
+
                     cur.execute("""
                         INSERT INTO seriales_gestion
                             (serial, f_emi, f_esc, planilla, cod_men,
@@ -580,20 +637,141 @@ def migrate_histo_incremental(dry_run: bool):
                              estado, origen, editado_manualmente, observaciones,
                              fecha_creacion)
                         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                        ON CONFLICT (serial) DO NOTHING
+                        ON CONFLICT (serial) DO UPDATE SET
+                            ambito       = EXCLUDED.ambito,
+                            tipo_gestion = EXCLUDED.tipo_gestion,
+                            precio_cliente  = EXCLUDED.precio_cliente,
+                            precio_mensajero = EXCLUDED.precio_mensajero
+                        WHERE seriales_gestion.editado_manualmente = FALSE
                     """, (
                         r["serial"], f_emi, f_esc,
                         r.get("planilla") or "", r.get("cod_men") or "",
                         cliente_id, tipo_g, tipo_e, ambito,
-                        0, 0, estado, "scanner", False,
+                        0, 0, estado, "scanner", es_motivo21,
                         r.get("observaciones"), fecha_creacion,
                     ))
                     total_inserted += cur.rowcount
                 conn.commit()
 
-    log.info(f"  PostgreSQL: {total_inserted} nuevos insertados, {total_bad} sin fecha válida")
+    log.info(
+        f"  PostgreSQL: {total_inserted} nuevos insertados, {total_bad} sin fecha válida, "
+        f"{total_motivo21} motivo-21 (precio=0 protegido)"
+    )
     if total_inserted > 0:
         log.info("  Ejecuta --tabla mensajeros para resolver mensajero_id en los nuevos registros")
+
+
+# ── Activar precios históricos 2026 en precios_cliente ───────────────────────
+
+def activar_precios_historicos(dry_run: bool):
+    """
+    Marca activo=TRUE en precios_cliente para registros de 2026 cuya
+    vigencia_hasta >= vigencia_desde (es decir, registros válidos).
+    Deja inactivos los que tienen vigencia_hasta anterior a vigencia_desde
+    (datos inconsistentes ingresados por error).
+    """
+    log.info("── activar precios históricos 2026 ───────────────────")
+    if dry_run:
+        with pg_conn() as (conn, cur):
+            cur.execute("""
+                SELECT COUNT(*) AS n FROM precios_cliente
+                WHERE activo = FALSE
+                  AND vigencia_desde >= '2026-01-01'
+                  AND (vigencia_hasta IS NULL OR vigencia_hasta >= vigencia_desde)
+            """)
+            n = cur.fetchone()["n"]
+        log.info(f"  (dry-run) {n} precios serían activados")
+        return
+
+    with pg_conn() as (conn, cur):
+        cur.execute("""
+            UPDATE precios_cliente
+            SET activo = TRUE
+            WHERE activo = FALSE
+              AND vigencia_desde >= '2026-01-01'
+              AND (vigencia_hasta IS NULL OR vigencia_hasta >= vigencia_desde)
+        """)
+        activados = cur.rowcount
+        conn.commit()
+    log.info(f"  Activados: {activados} registros de precios_cliente")
+
+
+# ── Corregir tipo_gestion en seriales migrados desde histo ───────────────────
+
+def corregir_tipo_gestion_histo(dry_run: bool):
+    """
+    Relee bases_web.histo y corrige tipo_gestion en seriales_gestion para el
+    período histórico (HISTO_FECHA_DESDE..HISTO_FECHA_HASTA).
+
+    Lógica: ret_esc se considera un retorno real solo si su valor tiene formato
+    de fecha (YYYY.MM.DD o similar). Si contiene otro tipo de dato (código,
+    planilla, etc.) se trata como Entrega. Esto corrige el error original de
+    la migración donde ret_esc siempre era truthy aunque no fuera una fecha de
+    retorno real.
+    """
+    import re
+    DATE_RE = re.compile(r"^\d{4}[.\-/]\d{2}[.\-/]\d{2}$")
+
+    desde_histo = HISTO_DESDE.replace("-", ".")
+    hasta_histo = HISTO_HASTA.replace("-", ".")
+
+    log.info(f"── corregir tipo_gestion histo ({HISTO_DESDE} → {HISTO_HASTA}) ──")
+
+    with mysql_conn(MYSQL_BW, buffered=False) as my:
+        my.execute("""
+            SELECT serial, ret_esc
+            FROM histo
+            WHERE serial IS NOT NULL
+              AND f_esc IS NOT NULL
+              AND f_esc BETWEEN %s AND %s
+              AND f_esc NOT LIKE '%%Entr%%'
+              AND f_esc NOT LIKE '%%Devo%%'
+        """, (desde_histo, hasta_histo))
+
+        entregas = devoluciones = omitidos = 0
+        batch_e: list[str] = []   # seriales → Entrega
+        batch_d: list[str] = []   # seriales → Devolucion
+
+        with pg_conn() as (conn, cur):
+            while True:
+                rows = my.fetchmany(BATCH)
+                if not rows:
+                    break
+
+                for r in rows:
+                    serial = r["serial"]
+                    ret = (r.get("ret_esc") or "").strip()
+                    # ret_esc es un retorno real solo si tiene formato de fecha
+                    es_devolucion = bool(ret and DATE_RE.match(ret))
+
+                    if es_devolucion:
+                        batch_d.append(serial)
+                        devoluciones += 1
+                    else:
+                        batch_e.append(serial)
+                        entregas += 1
+
+                if not dry_run:
+                    if batch_e:
+                        cur.executemany(
+                            "UPDATE seriales_gestion SET tipo_gestion = 'Entrega' "
+                            "WHERE serial = %s AND editado_manualmente = FALSE",
+                            [(s,) for s in batch_e],
+                        )
+                    if batch_d:
+                        cur.executemany(
+                            "UPDATE seriales_gestion SET tipo_gestion = 'Devolucion' "
+                            "WHERE serial = %s AND editado_manualmente = FALSE",
+                            [(s,) for s in batch_d],
+                        )
+                    conn.commit()
+
+                batch_e.clear()
+                batch_d.clear()
+
+    log.info(f"  Resultado: {entregas} Entregas, {devoluciones} Devoluciones, {omitidos} omitidos")
+    if dry_run:
+        log.info("  (dry-run — no se actualizó nada)")
 
 
 # ── Post-migración: asignar mensajero_id desde cod_men ───────────────────────
@@ -620,6 +798,111 @@ def asignar_mensajero_ids(dry_run: bool):
     log.info(f"  Actualizados: {updated} seriales con mensajero_id")
 
 
+# ── Migración: imile.paquetes (ene–abr 2026) → seriales_gestion ──────────────
+
+def migrate_imile(dry_run: bool):
+    """
+    Migra imile.paquetes (ene–abr 2026) a seriales_gestion.
+
+    imile.paquetes no tiene mensajero por serial: se toma el cod_mensajero
+    principal del día desde logistica.gestiones_mensajero (el que más seriales
+    manejó ese día). Si un día no tiene registro en gestiones_mensajero se usa
+    'IMIL' como placeholder (varchar 4 requerido).
+
+    Valores fijos: paquete / bogota / Entrega / $2900 cliente / $1600 mensajero.
+    f_esc = f_emi (mejor aproximación disponible).
+    planilla = 'IM' + YYYYMMDD (mismo formato que los registros de mayo en PG).
+    Idempotente: ON CONFLICT (serial) DO NOTHING.
+    """
+    log.info(f"── imile.paquetes ({IMILE_DESDE} → {IMILE_HASTA}) ───────────────")
+
+    # 1. Mapa fecha → cod_mensajero principal desde gestiones_mensajero
+    cod_men_por_fecha: dict[date, str] = {}
+    with mysql_conn(MYSQL_LOG) as my:
+        my.execute("""
+            SELECT fecha_registro, cod_mensajero, SUM(total_seriales) AS total
+            FROM gestiones_mensajero
+            WHERE cliente LIKE %s
+              AND fecha_registro BETWEEN %s AND %s
+            GROUP BY fecha_registro, cod_mensajero
+            ORDER BY fecha_registro, total DESC
+        """, ("%mile%", IMILE_DESDE, IMILE_HASTA))
+        for row in my.fetchall():
+            f = row["fecha_registro"]
+            if isinstance(f, str):
+                try:
+                    f = date.fromisoformat(f)
+                except ValueError:
+                    continue
+            # Solo guardamos el primero por fecha (ORDER BY total DESC → el de mayor volumen)
+            if f not in cod_men_por_fecha:
+                cod_men_por_fecha[f] = (row["cod_mensajero"] or "IMIL")[:4]
+    log.info(f"  gestiones_mensajero: {len(cod_men_por_fecha)} días con mensajero asignado")
+
+    # 2. Leer paquetes Imile del período
+    with mysql_conn(MYSQL_IMILE) as my:
+        my.execute("""
+            SELECT serial, f_emi
+            FROM paquetes
+            WHERE f_emi BETWEEN %s AND %s
+            ORDER BY f_emi, serial
+        """, (IMILE_DESDE, IMILE_HASTA))
+        paquetes = my.fetchall()
+    log.info(f"  imile.paquetes: {len(paquetes)} registros")
+
+    if dry_run or not paquetes:
+        if dry_run:
+            log.info("  (dry-run — no se escribirá nada)")
+        return
+
+    # 3. Obtener cliente_id de Imile SAS en PG
+    cliente_map = _build_cliente_map()
+    imile_id = cliente_map.get("imile sas")
+    if imile_id is None:
+        log.error("  No se encontró 'Imile SAS' en clientes de PG. Abortando.")
+        return
+
+    # 4. Insertar en seriales_gestion
+    with pg_conn() as (conn, cur):
+        inserted = skipped_dup = bad_date = 0
+        for batch in batched(paquetes, BATCH):
+            for r in batch:
+                f_emi = parse_fecha(r.get("f_emi"))
+                if f_emi is None:
+                    bad_date += 1
+                    continue
+
+                planilla  = f"IM{f_emi.strftime('%Y%m%d')}"
+                cod_men   = cod_men_por_fecha.get(f_emi, "IMIL")
+
+                cur.execute("""
+                    INSERT INTO seriales_gestion
+                        (serial, f_emi, f_esc, planilla, cod_men,
+                         cliente_id, tipo_gestion, tipo_envio, ambito,
+                         precio_cliente, precio_mensajero,
+                         estado, origen, editado_manualmente)
+                    VALUES
+                        (%s, %s, %s, %s, %s,
+                         %s, %s, %s, %s,
+                         %s, %s,
+                         %s, %s, %s)
+                    ON CONFLICT (serial) DO NOTHING
+                """, (
+                    str(r["serial"]), f_emi, f_emi, planilla, cod_men,
+                    imile_id, "Entrega", "paquete", "bogota",
+                    2900.00, 1600.00,
+                    "pendiente", "imile", False,
+                ))
+                if cur.rowcount:
+                    inserted += 1
+                else:
+                    skipped_dup += 1
+
+            conn.commit()
+
+    log.info(f"  PostgreSQL: {inserted} insertados, {skipped_dup} duplicados ignorados, {bad_date} sin fecha")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 TABLAS = {
@@ -629,6 +912,9 @@ TABLAS = {
     "histo":             migrate_histo,
     "histo-incremental": migrate_histo_incremental,
     "mensajeros":        asignar_mensajero_ids,
+    "tipo_gestion":      corregir_tipo_gestion_histo,
+    "precios":           activar_precios_historicos,
+    "imile":             migrate_imile,
 }
 
 def main():
@@ -636,7 +922,7 @@ def main():
     parser.add_argument(
         "--tabla",
         default="clientes,personal,histo,mensajeros",
-        help="Tablas a migrar (coma-separadas): clientes, personal, seriales, histo, histo-incremental, mensajeros",
+        help="Tablas a migrar (coma-separadas): clientes, personal, seriales, histo, histo-incremental, mensajeros, tipo_gestion, precios, imile",
     )
     parser.add_argument("--dry-run", action="store_true", help="Cuenta filas sin insertar")
     args = parser.parse_args()

@@ -6,7 +6,6 @@ from datetime import date
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.clientes import PrecioCliente
 from app.models.gestiones import SerialGestion
 from app.schemas.gestiones import (
     CambiarMensajeroRequest,
@@ -140,52 +139,96 @@ async def desbloquear_planilla(planilla: str, db: AsyncSession) -> PlanillaActio
 
 
 async def recalcular_precios(req: RecalcularRequest, db: AsyncSession) -> RecalcularResult:
-    rows_p = (
-        await db.execute(
-            select(
-                PrecioCliente.cliente_id,
-                PrecioCliente.tipo_servicio,
-                PrecioCliente.ambito,
-                PrecioCliente.precio_entrega,
-                PrecioCliente.costo_mensajero_entrega,
-            ).where(PrecioCliente.activo == True)  # noqa: E712
-        )
-    ).all()
+    # Filtros opcionales del WHERE sobre seriales_gestion
+    filtros = ["sg.editado_manualmente = FALSE"]
+    params: dict = {}
 
-    precios_cli: dict = {}
-    precios_men: dict = {}
-    for r in rows_p:
-        key = (r.cliente_id, r.tipo_servicio.lower(), r.ambito.lower())
-        precios_cli[key] = float(r.precio_entrega or 0)
-        precios_men[key] = float(r.costo_mensajero_entrega or 0)
-
-    q = select(SerialGestion).where(SerialGestion.editado_manualmente == False)  # noqa: E712
     if req.solo_precio_cero:
-        q = q.where(SerialGestion.precio_mensajero == 0)
+        filtros.append("sg.precio_mensajero = 0")
     if req.fecha_desde:
-        q = q.where(SerialGestion.f_esc >= req.fecha_desde)
+        filtros.append("sg.f_esc >= :fecha_desde")
+        params["fecha_desde"] = req.fecha_desde
     if req.fecha_hasta:
-        q = q.where(SerialGestion.f_esc <= req.fecha_hasta)
+        filtros.append("sg.f_esc <= :fecha_hasta")
+        params["fecha_hasta"] = req.fecha_hasta
     if req.cliente_id:
-        q = q.where(SerialGestion.cliente_id == req.cliente_id)
+        filtros.append("sg.cliente_id = :cliente_id")
+        params["cliente_id"] = req.cliente_id
     if req.cod_men:
-        q = q.where(SerialGestion.cod_men == req.cod_men)
+        filtros.append("sg.cod_men = :cod_men")
+        params["cod_men"] = req.cod_men
 
-    seriales = list((await db.execute(q)).scalars().all())
-    actualizados = 0
-    sin_precio = 0
+    where_clause = " AND ".join(filtros)
 
-    for sg in seriales:
-        key = (sg.cliente_id, sg.tipo_envio.lower(), sg.ambito.lower())
-        p_men = precios_men.get(key)
-        p_cli = precios_cli.get(key)
-        if p_men is None:
-            sin_precio += 1
-        else:
-            sg.precio_mensajero = p_men
-            if p_cli is not None:
-                sg.precio_cliente = p_cli
-            actualizados += 1
+    # CTE que selecciona, por cada serial candidato, el precio vigente más reciente
+    # según (cliente_id, tipo_envio, ambito, f_esc). DISTINCT ON garantiza una fila
+    # por serial tomando el precio con vigencia_desde más alta.
+    # Regla de precio: entrega y devolución tienen el mismo precio (precio_entrega).
+    # Excepción: editado_manualmente=TRUE indica precio especial (ej. motivo 21 = $0)
+    # que no debe ser sobreescrito.
+    update_sql = text(f"""
+        WITH candidatos AS (
+            SELECT sg.id,
+                   sg.tipo_gestion,
+                   sg.precio_cliente,
+                   sg.editado_manualmente,
+                   sg.cliente_id,
+                   sg.tipo_envio,
+                   sg.ambito,
+                   sg.f_esc
+            FROM seriales_gestion sg
+            WHERE {where_clause}
+              AND sg.editado_manualmente = FALSE
+        ),
+        precio_vigente AS (
+            SELECT DISTINCT ON (c.id)
+                   c.id                          AS serial_id,
+                   c.tipo_gestion,
+                   c.precio_cliente              AS precio_cli_actual,
+                   pc.precio_entrega,
+                   pc.costo_mensajero_entrega,
+                   pc.costo_mensajero_devolucion
+            FROM candidatos c
+            JOIN precios_cliente pc
+              ON pc.cliente_id    = c.cliente_id
+             AND pc.tipo_servicio = c.tipo_envio
+             AND pc.ambito        = c.ambito
+             AND pc.activo        = TRUE
+             AND pc.vigencia_desde <= c.f_esc
+             AND (pc.vigencia_hasta IS NULL OR pc.vigencia_hasta >= c.f_esc)
+            ORDER BY c.id, pc.vigencia_desde DESC
+        ),
+        updated AS (
+            UPDATE seriales_gestion sg
+            SET precio_cliente   = CASE
+                                     WHEN pv.precio_entrega > 0 THEN pv.precio_entrega
+                                     ELSE pv.precio_cli_actual
+                                   END,
+                precio_mensajero = CASE
+                                     WHEN pv.tipo_gestion = 'Entrega'
+                                     THEN pv.costo_mensajero_entrega
+                                     ELSE pv.costo_mensajero_devolucion
+                                   END
+            FROM precio_vigente pv
+            WHERE sg.id = pv.serial_id
+            RETURNING sg.id
+        )
+        SELECT COUNT(*) AS actualizados FROM updated
+    """)
+
+    # Seriales sin precio: los que quedan con precio_mensajero = 0 tras el UPDATE
+    count_sql = text(f"""
+        SELECT COUNT(*) AS sin_precio
+        FROM seriales_gestion sg
+        WHERE sg.precio_mensajero = 0
+          AND {where_clause}
+    """)
+
+    result = (await db.execute(update_sql, params)).mappings().one()
+    actualizados = int(result["actualizados"])
+
+    sin_precio_row = (await db.execute(count_sql, params)).mappings().one()
+    sin_precio = int(sin_precio_row["sin_precio"])
 
     await db.commit()
     logger.info("Recalcular: actualizados=%d sin_precio=%d", actualizados, sin_precio)
