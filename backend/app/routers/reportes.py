@@ -48,7 +48,7 @@ async def get_operacional(
                 COALESCE(SUM(sg.precio_mensajero), 0)     AS costo_mensajero
             FROM seriales_gestion sg
             LEFT JOIN clientes c ON sg.cliente_id = c.id
-            WHERE sg.f_esc BETWEEN :desde AND :hasta
+            WHERE sg.f_emi BETWEEN :desde AND :hasta
             GROUP BY c.id, c.nombre_empresa
             ORDER BY ingreso_cliente DESC
         """),
@@ -95,7 +95,7 @@ async def get_mensajeros(
                 COALESCE(SUM(sg.precio_mensajero), 0)     AS total_mensajero
             FROM seriales_gestion sg
             LEFT JOIN personal p ON sg.mensajero_id = p.id
-            WHERE sg.f_esc BETWEEN :desde AND :hasta
+            WHERE sg.f_emi BETWEEN :desde AND :hasta
             GROUP BY sg.cod_men, p.nombre_completo
             ORDER BY total_mensajero DESC
         """),
@@ -219,15 +219,15 @@ async def get_tendencias(
     rows = (await db.execute(
         text("""
             SELECT
-                TO_CHAR(DATE_TRUNC('month', sg.f_esc), 'YYYY-MM') AS mes,
+                TO_CHAR(DATE_TRUNC('month', sg.f_emi), 'YYYY-MM') AS mes,
                 COUNT(*)::int                                       AS total_seriales,
                 COUNT(CASE WHEN sg.tipo_gestion = 'Entrega'   THEN 1 END)::int AS entregas,
                 COUNT(CASE WHEN sg.tipo_gestion = 'Devolucion' THEN 1 END)::int AS devoluciones,
                 COALESCE(SUM(sg.precio_cliente),   0)              AS ingreso_estimado,
                 COALESCE(SUM(sg.precio_mensajero), 0)              AS costo_mensajero
             FROM seriales_gestion sg
-            WHERE sg.f_esc >= DATE_TRUNC('month', CURRENT_DATE) - (:meses - 1) * INTERVAL '1 month'
-            GROUP BY DATE_TRUNC('month', sg.f_esc)
+            WHERE sg.f_emi >= DATE_TRUNC('month', CURRENT_DATE) - (:meses - 1) * INTERVAL '1 month'
+            GROUP BY DATE_TRUNC('month', sg.f_emi)
             ORDER BY mes
         """),
         {"meses": meses},
