@@ -189,14 +189,29 @@ async def procesar_csv(
     df["_es_local"]      = df["ambito"].str.lower().str.strip().str.contains("bog", na=False)
     df["_planilla"]      = df["planilla"].str.strip() if "planilla" in df.columns else ""
     df["_cod_men"]       = df["cod_men"].str.strip().str.upper() if "cod_men" in df.columns else ""
-    # tipo_gestion: 'Entrega' si el estado del CSV dice 'entrega', si no 'Devolucion'
+    # Mapear estado CSV → (db_estado, tipo_gestion)
+    # pendiente = aún en tránsito (0, lleva mensajero, lleva ciudad)
+    # entregado = confirmado entregado
+    # devuelto  = no entregado por cualquier motivo
+    _PENDIENTE = {"0", "lleva mensajero", "lleva ciudad"}
+
+    def _mapear_estado(v: str) -> tuple[str, str]:
+        v = (v or "").strip().lower()
+        if v in _PENDIENTE:
+            return ("pendiente", "Entrega")
+        if v == "entrega":
+            return ("entregado", "Entrega")
+        return ("devuelto", "Devolucion")
+
     if es_imile:
+        df["_db_estado"]    = "pendiente"
         df["_tipo_gestion"] = "Entrega"
     elif "estado" in df.columns:
-        df["_tipo_gestion"] = df["estado"].str.strip().str.lower().apply(
-            lambda v: "Entrega" if v == "entrega" else "Devolucion"
-        )
+        mapped = df["estado"].apply(_mapear_estado)
+        df["_db_estado"]    = mapped.apply(lambda t: t[0])
+        df["_tipo_gestion"] = mapped.apply(lambda t: t[1])
     else:
+        df["_db_estado"]    = "pendiente"
         df["_tipo_gestion"] = "Entrega"
 
     # ── Filtro de fecha de corte ──────────────────────────────────────────────
@@ -246,6 +261,7 @@ async def procesar_csv(
             planilla_val    = str(fila["_planilla"]) if fila["_planilla"] else ""
             cod_men_val     = str(fila["_cod_men"]) if fila["_cod_men"] else ""
             tipo_gestion_val = str(fila["_tipo_gestion"])
+            db_estado_val    = str(fila["_db_estado"])
 
             precio_cli   = precios_cli.get((id_cliente, tipo_ser, ambito_val), 0.0)
             precio_men   = precios_men.get((id_cliente, tipo_ser, ambito_val), 0.0)
@@ -260,7 +276,7 @@ async def procesar_csv(
                     VALUES
                         (:serial, :orden, :planilla, :fecha, :fecha, :cod_men, :mensajero_id,
                          :cliente_id, :tipo_gestion, :tipo_envio, :ambito,
-                         :precio_cli, :precio_men, 'pendiente', 'manual')
+                         :precio_cli, :precio_men, :db_estado, 'manual')
                     ON CONFLICT (serial) DO UPDATE SET
                         orden            = EXCLUDED.orden,
                         planilla         = EXCLUDED.planilla,
@@ -268,6 +284,7 @@ async def procesar_csv(
                         cod_men          = EXCLUDED.cod_men,
                         mensajero_id     = EXCLUDED.mensajero_id,
                         tipo_gestion     = EXCLUDED.tipo_gestion,
+                        estado           = EXCLUDED.estado,
                         precio_cliente   = EXCLUDED.precio_cliente,
                         precio_mensajero = EXCLUDED.precio_mensajero,
                         origen           = EXCLUDED.origen
@@ -280,6 +297,7 @@ async def procesar_csv(
                     "cliente_id": id_cliente, "tipo_gestion": tipo_gestion_val,
                     "tipo_envio": tipo_ser, "ambito": ambito_val,
                     "precio_cli": precio_cli, "precio_men": precio_men,
+                    "db_estado": db_estado_val,
                 },
             )
             row = result.fetchone()
