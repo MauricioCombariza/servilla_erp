@@ -1,17 +1,29 @@
 """
 Lógica de negocio para carga masiva de órdenes desde CSV.
 
-Formato esperado del CSV:
-  Columnas requeridas: orden, serial, fecha_recepcion, nombre_cliente, tipo_servicio, ambito
-  Columnas opcionales: planilla, cod_men, f_emi
+Soporta dos formatos de origen:
 
-Reglas de procesamiento:
-  - Solo se procesan filas con fecha_recepcion >= 2026-01-01.
-  - Paso 1: un serial por fila → seriales_gestion.
-      · Serial nuevo       → INSERT.
-      · Serial existente, estado = 'pendiente' → UPDATE campos operativos.
-      · Serial existente, otro estado          → no se toca.
-  - Paso 2: agrupar por orden → ordenes (crear o actualizar totales).
+  Flujo 1 — CSV manual:
+    Columnas: orden, serial, fecha_recepcion, nombre_cliente, tipo_servicio, ambito
+    tipo_servicio y ambito vienen del archivo (se normalizan).
+    Opcionales: planilla, cod_men
+
+  Flujo 2 — iMile escáner (detectado por columna 'Waybill No.'):
+    Columnas origen: 'Scan time', 'Waybill No.', 'DA'
+    Transformaciones:
+      - serial          = Waybill No.
+      - fecha_recepcion = fecha de Scan time
+      - orden           = "IM" + YYYYMMDD  (generado desde Scan time)
+      - planilla        = mismo valor que orden
+      - nombre_cliente  = 'Imile SAS' (fijo)
+      - tipo_servicio   = 'paquete' (fijo)
+      - ambito          = 'bogota' (fijo)
+      - cod_men         = resuelto desde DA vía tabla personal (por nombre)
+
+Reglas comunes:
+  - Solo se procesan filas con fecha >= 2026-01-01.
+  - Serial nuevo → INSERT; existente con estado='pendiente' → UPDATE; otro estado → no-op.
+  - Al finalizar seriales, upsert en ordenes agrupando por número de orden.
 """
 from __future__ import annotations
 
@@ -29,18 +41,53 @@ from app.schemas.ordenes import CargaMasivaResult
 
 logger = logging.getLogger(__name__)
 
-COLUMNAS_REQUERIDAS = {"orden", "serial", "fecha_recepcion", "nombre_cliente", "tipo_servicio", "ambito"}
 DATE_CORTE = date(2026, 1, 1)
+_CLIENTE_IMILE = "imile sas"
 
 
-async def _cargar_maestros(db: AsyncSession) -> tuple[dict, dict, dict, dict]:
-    """Devuelve (clientes_by_name, precios_cli, precios_men, personal_by_code).
+def _es_flujo_imile(df: pd.DataFrame) -> bool:
+    return "Waybill No." in df.columns and "Scan time" in df.columns
 
-    clientes_by_name:  {nombre_lower -> cliente_id}
-    precios_cli:       {(cliente_id, tipo_servicio, ambito) -> precio_entrega}
-    precios_men:       {(cliente_id, tipo_servicio, ambito) -> costo_mensajero_entrega}
-    personal_by_code:  {codigo_upper -> personal_id}
+
+def _transformar_imile(df: pd.DataFrame) -> pd.DataFrame:
+    """Convierte columnas del escáner iMile al esquema estándar interno.
+
+    Entrada:  Scan time | Waybill No. | DA | ...
+    Salida:   serial | fecha_recepcion | orden | planilla | nombre_cliente |
+              tipo_servicio | ambito | cod_men_da (nombre del DA, sin resolver aún)
     """
+    df = df.copy()
+
+    # Parsear Scan time → datetime
+    df["_scan_dt"] = pd.to_datetime(df["Scan time"], errors="coerce", dayfirst=False)
+
+    # serial
+    df["serial"] = df["Waybill No."].str.strip()
+
+    # fecha_recepcion = solo la fecha
+    df["fecha_recepcion"] = df["_scan_dt"].dt.date.astype(str)
+
+    # orden = lot_esc = "IM" + YYYYMMDD
+    df["orden"] = "IM" + df["_scan_dt"].dt.strftime("%Y%m%d")
+
+    # planilla = mismo que orden (el lote del día)
+    df["planilla"] = df["orden"]
+
+    # campos fijos
+    df["nombre_cliente"] = "Imile SAS"
+    df["tipo_servicio"]  = "paquete"
+    df["ambito"]         = "bogota"
+
+    # DA → guardar nombre para resolución posterior en el loop
+    df["_da_nombre"] = df["DA"].str.strip() if "DA" in df.columns else ""
+
+    return df
+
+
+async def _cargar_maestros(
+    db: AsyncSession,
+) -> tuple[dict, dict, dict, dict, dict]:
+    """Devuelve (clientes_by_name, precios_cli, precios_men, personal_by_code, personal_by_name)."""
     rows_c = (await db.execute(select(Cliente.id, Cliente.nombre_empresa))).all()
     clientes_by_name = {r.nombre_empresa.strip().lower(): r.id for r in rows_c}
 
@@ -65,16 +112,21 @@ async def _cargar_maestros(db: AsyncSession) -> tuple[dict, dict, dict, dict]:
 
     rows_per = (
         await db.execute(
-            select(Personal.id, Personal.codigo).where(Personal.activo == True)  # noqa: E712
+            select(Personal.id, Personal.codigo, Personal.nombre_completo).where(
+                Personal.activo == True  # noqa: E712
+            )
         )
     ).all()
-    personal_by_code = {r.codigo.strip().upper(): r.id for r in rows_per}
+    personal_by_code = {r.codigo.strip().upper(): r.id for r in rows_per if r.codigo}
+    personal_by_name = {
+        r.nombre_completo.strip().lower(): r.id for r in rows_per if r.nombre_completo
+    }
 
-    return clientes_by_name, precios_cli, precios_men, personal_by_code
+    return clientes_by_name, precios_cli, precios_men, personal_by_code, personal_by_name
 
 
 def _parse_date(val: str) -> date | None:
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d", "%Y.%m.%d"):
         try:
             from datetime import datetime as dt
             return dt.strptime(val.strip(), fmt).date()
@@ -96,7 +148,24 @@ async def procesar_csv(
             ordenes_nuevas=0, ordenes_actualizadas=0, errores=[f"Error leyendo CSV: {e}"]
         )
 
-    faltantes = COLUMNAS_REQUERIDAS - set(df.columns)
+    # ── Detectar flujo y normalizar columnas ──────────────────────────────────
+    es_imile = _es_flujo_imile(df)
+    if es_imile:
+        df = _transformar_imile(df)
+    else:
+        # Flujo manual: renombrar alias si existen
+        if "fecha_recepcion" not in df.columns and "f_emi" in df.columns:
+            df = df.rename(columns={"f_emi": "fecha_recepcion"})
+        if "nombre_cliente" not in df.columns and "no_entidad" in df.columns:
+            df = df.rename(columns={"no_entidad": "nombre_cliente"})
+        if "tipo_servicio" not in df.columns:
+            df["tipo_servicio"] = "sobre"
+        if "ambito" not in df.columns:
+            df["ambito"] = "nacional"
+
+    # ── Validar columnas mínimas ──────────────────────────────────────────────
+    cols = set(df.columns)
+    faltantes = {"serial", "orden", "fecha_recepcion", "nombre_cliente"} - cols
     if faltantes:
         return CargaMasivaResult(
             total_filas=len(df), filas_ignoradas=0, seriales_nuevos=0, seriales_actualizados=0,
@@ -104,13 +173,12 @@ async def procesar_csv(
             errores=[f"Columnas faltantes: {', '.join(sorted(faltantes))}"],
         )
 
-    # ── Normalizar ────────────────────────────────────────────────────────────
-    df["_orden"] = df["orden"].str.strip().str.replace(r"\.0$", "", regex=True)
-    df["_es_local"] = df["ambito"].str.lower().str.strip().str.contains("bog", na=False)
-
-    # Columnas opcionales
-    df["_planilla"] = df["planilla"].str.strip() if "planilla" in df.columns else ""
-    df["_cod_men"] = df["cod_men"].str.strip().str.upper() if "cod_men" in df.columns else ""
+    # ── Normalizar valores internos ───────────────────────────────────────────
+    df["_orden"]         = df["orden"].str.strip().str.replace(r"\.0$", "", regex=True)
+    df["_tipo_servicio"] = df["tipo_servicio"].str.lower().str.strip()
+    df["_es_local"]      = df["ambito"].str.lower().str.strip().str.contains("bog", na=False)
+    df["_planilla"]      = df["planilla"].str.strip() if "planilla" in df.columns else ""
+    df["_cod_men"]       = df["cod_men"].str.strip().str.upper() if "cod_men" in df.columns else ""
 
     # ── Filtro de fecha de corte ──────────────────────────────────────────────
     df["_fecha_parsed"] = df["fecha_recepcion"].apply(lambda x: _parse_date(str(x).strip()))
@@ -119,7 +187,25 @@ async def procesar_csv(
     filas_ignoradas = total_filas - len(df)
 
     errores: list[str] = []
-    clientes_by_name, precios_cli, precios_men, personal_by_code = await _cargar_maestros(db)
+    clientes_by_name, precios_cli, precios_men, personal_by_code, personal_by_name = (
+        await _cargar_maestros(db)
+    )
+
+    # ── Resolver DA → cod_men para filas iMile ────────────────────────────────
+    if es_imile and "_da_nombre" in df.columns:
+        def _resolver_da(nombre: str) -> str:
+            nombre = (nombre or "").strip()
+            if not nombre:
+                return ""
+            pid = personal_by_name.get(nombre.lower())
+            if pid:
+                # buscar código inverso
+                for cod, eid in personal_by_code.items():
+                    if eid == pid:
+                        return cod
+            return nombre.upper()[:20]
+
+        df["_cod_men"] = df["_da_nombre"].apply(_resolver_da)
 
     # ── Paso 1: seriales_gestion ──────────────────────────────────────────────
     sg_nuevos = 0
@@ -133,20 +219,18 @@ async def procesar_csv(
                 errores.append(f"Fila {int(i)+2}: cliente '{cliente_nom}' no encontrado")  # type: ignore[arg-type]
                 continue
 
-            serial = str(fila["serial"]).strip()
-            num_orden = str(fila["_orden"])
-            fecha_parsed: date = fila["_fecha_parsed"]  # ya filtrada arriba
-
-            tipo_ser = str(fila["tipo_servicio"]).lower().strip()
-            ambito_val = "bogota" if fila["_es_local"] else "nacional"
+            serial       = str(fila["serial"]).strip()
+            num_orden    = str(fila["_orden"])
+            fecha_parsed: date = fila["_fecha_parsed"]
+            tipo_ser     = str(fila["_tipo_servicio"])
+            ambito_val   = "bogota" if fila["_es_local"] else "nacional"
             planilla_val = str(fila["_planilla"]) if fila["_planilla"] else ""
-            cod_men_val = str(fila["_cod_men"]) if fila["_cod_men"] else ""
+            cod_men_val  = str(fila["_cod_men"]) if fila["_cod_men"] else ""
 
-            precio_cli = precios_cli.get((id_cliente, tipo_ser, ambito_val), 0.0)
-            precio_men = precios_men.get((id_cliente, tipo_ser, ambito_val), 0.0)
+            precio_cli  = precios_cli.get((id_cliente, tipo_ser, ambito_val), 0.0)
+            precio_men  = precios_men.get((id_cliente, tipo_ser, ambito_val), 0.0)
             mensajero_id = personal_by_code.get(cod_men_val) if cod_men_val else None
 
-            # Nuevo → INSERT; existente con estado='pendiente' → UPDATE; otro estado → no-op
             result = await db.execute(
                 text("""
                     INSERT INTO seriales_gestion
@@ -170,24 +254,17 @@ async def procesar_csv(
                     RETURNING (xmax = 0) AS es_nuevo
                 """),
                 {
-                    "serial": serial,
-                    "orden": num_orden,
-                    "planilla": planilla_val,
-                    "fecha": fecha_parsed,
-                    "cod_men": cod_men_val,
-                    "mensajero_id": mensajero_id,
-                    "cliente_id": id_cliente,
-                    "tipo_envio": tipo_ser,
-                    "ambito": ambito_val,
-                    "precio_cli": precio_cli,
-                    "precio_men": precio_men,
+                    "serial": serial, "orden": num_orden, "planilla": planilla_val,
+                    "fecha": fecha_parsed, "cod_men": cod_men_val, "mensajero_id": mensajero_id,
+                    "cliente_id": id_cliente, "tipo_envio": tipo_ser, "ambito": ambito_val,
+                    "precio_cli": precio_cli, "precio_men": precio_men,
                 },
             )
             row = result.fetchone()
             if row is not None:
-                if row[0]:  # xmax = 0 → INSERT nuevo
+                if row[0]:
                     sg_nuevos += 1
-                else:       # xmax != 0 → UPDATE de pendiente
+                else:
                     sg_actualizados += 1
 
         except Exception as e:
@@ -195,8 +272,11 @@ async def procesar_csv(
 
     # ── Paso 2: ordenes (agrupar por número de orden) ─────────────────────────
     resumen = (
-        df.groupby(["_orden", "fecha_recepcion", "nombre_cliente", "tipo_servicio"])
-        .agg(cant_local=("_es_local", "sum"), cant_nac=("_es_local", lambda x: (~x.astype(bool)).sum()))
+        df.groupby(["_orden", "fecha_recepcion", "nombre_cliente", "_tipo_servicio"])
+        .agg(
+            cant_local=("_es_local", "sum"),
+            cant_nac=("_es_local", lambda x: (~x.astype(bool)).sum()),
+        )
         .reset_index()
     )
 
@@ -208,26 +288,25 @@ async def procesar_csv(
             cliente_nom = str(grp["nombre_cliente"]).strip()
             id_cliente = clientes_by_name.get(cliente_nom.lower())
             if not id_cliente:
-                continue  # ya reportado en paso 1
+                continue
 
-            num_orden = str(grp["_orden"])
+            num_orden    = str(grp["_orden"])
             fecha_parsed = _parse_date(str(grp["fecha_recepcion"]).strip())
             if not fecha_parsed:
                 continue
 
-            tipo_ser = str(grp["tipo_servicio"]).lower().strip()
-            c_local = int(grp["cant_local"])
-            c_nac = int(grp["cant_nac"])
-            c_total = c_local + c_nac
+            tipo_ser = str(grp["_tipo_servicio"])
+            c_local  = int(grp["cant_local"])
+            c_nac    = int(grp["cant_nac"])
+            c_total  = c_local + c_nac
 
-            p_local = precios_cli.get((id_cliente, tipo_ser, "bogota"), 0.0)
-            p_nac = precios_cli.get((id_cliente, tipo_ser, "nacional"), 0.0)
+            p_local = precios_cli.get((id_cliente, tipo_ser, "bogota"),   0.0)
+            p_nac   = precios_cli.get((id_cliente, tipo_ser, "nacional"), 0.0)
             v_total = (c_local * p_local) + (c_nac * p_nac)
 
             existing = (
                 await db.execute(
-                    text("SELECT id FROM ordenes WHERE numero_orden = :n"),
-                    {"n": num_orden},
+                    text("SELECT id FROM ordenes WHERE numero_orden = :n"), {"n": num_orden}
                 )
             ).fetchone()
 
@@ -249,16 +328,11 @@ async def procesar_csv(
                         INSERT INTO ordenes
                             (numero_orden, cliente_id, fecha_recepcion, tipo_servicio,
                              cantidad_total, cantidad_recibido, valor_total, estado)
-                        VALUES
-                            (:num, :cli, :fecha, :tipo, :total, :total, :valor, 'activa')
+                        VALUES (:num, :cli, :fecha, :tipo, :total, :total, :valor, 'activa')
                     """),
                     {
-                        "num": num_orden,
-                        "cli": id_cliente,
-                        "fecha": fecha_parsed,
-                        "tipo": tipo_ser,
-                        "total": c_total,
-                        "valor": v_total,
+                        "num": num_orden, "cli": id_cliente, "fecha": fecha_parsed,
+                        "tipo": tipo_ser, "total": c_total, "valor": v_total,
                     },
                 )
                 ordenes_nuevas += 1
