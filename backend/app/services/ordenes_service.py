@@ -193,12 +193,12 @@ async def procesar_csv(
     # pendiente = aún en tránsito (0, lleva mensajero, lleva ciudad)
     # entregado = confirmado entregado
     # devuelto  = no entregado por cualquier motivo
-    _PENDIENTE = {"0", "lleva mensajero", "lleva ciudad"}
+    _PENDIENTE = {"0", "lleva mensajero", "lleva ciudad", "pendiente"}
 
     def _mapear_estado(v: str) -> tuple[str, str]:
         v = (v or "").strip().lower()
         if v in _PENDIENTE:
-            return ("pendiente", "Pendiente")
+            return ("pendiente", "Entrega")
         if v == "entrega":
             return ("entregado", "Entrega")
         return ("devuelto", "Devolucion")
@@ -246,13 +246,13 @@ async def procesar_csv(
     sg_actualizados = 0
 
     for i, fila in df.iterrows():
-        try:
-            cliente_nom = str(fila["nombre_cliente"]).strip()
-            id_cliente = clientes_by_name.get(cliente_nom.lower())
-            if not id_cliente:
-                errores.append(f"Fila {int(i)+2}: cliente '{cliente_nom}' no encontrado")  # type: ignore[arg-type]
-                continue
+        cliente_nom = str(fila["nombre_cliente"]).strip()
+        id_cliente = clientes_by_name.get(cliente_nom.lower())
+        if not id_cliente:
+            errores.append(f"Fila {int(i)+2}: cliente '{cliente_nom}' no encontrado")  # type: ignore[arg-type]
+            continue
 
+        try:
             serial          = str(fila["serial"]).strip()
             num_orden       = str(fila["_orden"])
             fecha_parsed: date = fila["_fecha_parsed"]
@@ -267,6 +267,7 @@ async def procesar_csv(
             precio_men   = precios_men.get((id_cliente, tipo_ser, ambito_val), 0.0)
             mensajero_id = personal_by_code.get(cod_men_val) if cod_men_val else None
 
+            await db.execute(text("SAVEPOINT sp_serial"))
             result = await db.execute(
                 text("""
                     INSERT INTO seriales_gestion
@@ -300,6 +301,7 @@ async def procesar_csv(
                     "db_estado": db_estado_val,
                 },
             )
+            await db.execute(text("RELEASE SAVEPOINT sp_serial"))
             row = result.fetchone()
             if row is not None:
                 if row[0]:
@@ -308,6 +310,7 @@ async def procesar_csv(
                     sg_actualizados += 1
 
         except Exception as e:
+            await db.execute(text("ROLLBACK TO SAVEPOINT sp_serial"))
             errores.append(f"Fila {int(i)+2}: {e}")  # type: ignore[arg-type]
 
     # ── Paso 2: ordenes (agrupar por número de orden) ─────────────────────────
