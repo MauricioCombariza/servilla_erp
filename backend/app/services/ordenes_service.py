@@ -160,8 +160,18 @@ async def procesar_csv(
             df = df.rename(columns={"no_entidad": "nombre_cliente"})
         if "tipo_servicio" not in df.columns:
             df["tipo_servicio"] = "sobre"
+        # ambito: prioridad colum_ciudad (local/nacional) > ciudad1 > default
         if "ambito" not in df.columns:
-            df["ambito"] = "nacional"
+            if "colum_ciudad" in df.columns:
+                df["ambito"] = df["colum_ciudad"].str.strip().str.lower().apply(
+                    lambda v: "bogota" if v == "local" else "nacional"
+                )
+            elif "ciudad1" in df.columns:
+                df["ambito"] = df["ciudad1"].str.strip().str.lower().apply(
+                    lambda v: "bogota" if "bog" in str(v) else "nacional"
+                )
+            else:
+                df["ambito"] = "nacional"
 
     # ── Validar columnas mínimas ──────────────────────────────────────────────
     cols = set(df.columns)
@@ -179,6 +189,15 @@ async def procesar_csv(
     df["_es_local"]      = df["ambito"].str.lower().str.strip().str.contains("bog", na=False)
     df["_planilla"]      = df["planilla"].str.strip() if "planilla" in df.columns else ""
     df["_cod_men"]       = df["cod_men"].str.strip().str.upper() if "cod_men" in df.columns else ""
+    # tipo_gestion: 'Entrega' si el estado del CSV dice 'entrega', si no 'Devolucion'
+    if es_imile:
+        df["_tipo_gestion"] = "Entrega"
+    elif "estado" in df.columns:
+        df["_tipo_gestion"] = df["estado"].str.strip().str.lower().apply(
+            lambda v: "Entrega" if v == "entrega" else "Devolucion"
+        )
+    else:
+        df["_tipo_gestion"] = "Entrega"
 
     # ── Filtro de fecha de corte ──────────────────────────────────────────────
     df["_fecha_parsed"] = df["fecha_recepcion"].apply(lambda x: _parse_date(str(x).strip()))
@@ -219,16 +238,17 @@ async def procesar_csv(
                 errores.append(f"Fila {int(i)+2}: cliente '{cliente_nom}' no encontrado")  # type: ignore[arg-type]
                 continue
 
-            serial       = str(fila["serial"]).strip()
-            num_orden    = str(fila["_orden"])
+            serial          = str(fila["serial"]).strip()
+            num_orden       = str(fila["_orden"])
             fecha_parsed: date = fila["_fecha_parsed"]
-            tipo_ser     = str(fila["_tipo_servicio"])
-            ambito_val   = "bogota" if fila["_es_local"] else "nacional"
-            planilla_val = str(fila["_planilla"]) if fila["_planilla"] else ""
-            cod_men_val  = str(fila["_cod_men"]) if fila["_cod_men"] else ""
+            tipo_ser        = str(fila["_tipo_servicio"])
+            ambito_val      = "bogota" if fila["_es_local"] else "nacional"
+            planilla_val    = str(fila["_planilla"]) if fila["_planilla"] else ""
+            cod_men_val     = str(fila["_cod_men"]) if fila["_cod_men"] else ""
+            tipo_gestion_val = str(fila["_tipo_gestion"])
 
-            precio_cli  = precios_cli.get((id_cliente, tipo_ser, ambito_val), 0.0)
-            precio_men  = precios_men.get((id_cliente, tipo_ser, ambito_val), 0.0)
+            precio_cli   = precios_cli.get((id_cliente, tipo_ser, ambito_val), 0.0)
+            precio_men   = precios_men.get((id_cliente, tipo_ser, ambito_val), 0.0)
             mensajero_id = personal_by_code.get(cod_men_val) if cod_men_val else None
 
             result = await db.execute(
@@ -239,7 +259,7 @@ async def procesar_csv(
                          precio_cliente, precio_mensajero, estado, origen)
                     VALUES
                         (:serial, :orden, :planilla, :fecha, :fecha, :cod_men, :mensajero_id,
-                         :cliente_id, 'Entrega', :tipo_envio, :ambito,
+                         :cliente_id, :tipo_gestion, :tipo_envio, :ambito,
                          :precio_cli, :precio_men, 'pendiente', 'manual')
                     ON CONFLICT (serial) DO UPDATE SET
                         orden            = EXCLUDED.orden,
@@ -247,6 +267,7 @@ async def procesar_csv(
                         f_esc            = EXCLUDED.f_esc,
                         cod_men          = EXCLUDED.cod_men,
                         mensajero_id     = EXCLUDED.mensajero_id,
+                        tipo_gestion     = EXCLUDED.tipo_gestion,
                         precio_cliente   = EXCLUDED.precio_cliente,
                         precio_mensajero = EXCLUDED.precio_mensajero,
                         origen           = EXCLUDED.origen
@@ -256,7 +277,8 @@ async def procesar_csv(
                 {
                     "serial": serial, "orden": num_orden, "planilla": planilla_val,
                     "fecha": fecha_parsed, "cod_men": cod_men_val, "mensajero_id": mensajero_id,
-                    "cliente_id": id_cliente, "tipo_envio": tipo_ser, "ambito": ambito_val,
+                    "cliente_id": id_cliente, "tipo_gestion": tipo_gestion_val,
+                    "tipo_envio": tipo_ser, "ambito": ambito_val,
                     "precio_cli": precio_cli, "precio_men": precio_men,
                 },
             )
