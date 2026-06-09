@@ -741,8 +741,12 @@ def corregir_tipo_gestion_histo(dry_run: bool):
                 for r in rows:
                     serial = r["serial"]
                     ret = (r.get("ret_esc") or "").strip()
-                    # ret_esc es un retorno real solo si tiene formato de fecha
-                    es_devolucion = bool(ret and DATE_RE.match(ret))
+                    # 'D' = código explícito de devolución; fecha = retorno real
+                    # 'E' y minúsculas (i, p, l...) → Entrega/pendiente
+                    es_devolucion = (
+                        ret == 'D' or
+                        bool(ret and DATE_RE.match(ret))
+                    )
 
                     if es_devolucion:
                         batch_d.append(serial)
