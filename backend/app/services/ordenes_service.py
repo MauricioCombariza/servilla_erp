@@ -198,7 +198,7 @@ async def procesar_csv(
     def _mapear_estado(v: str) -> tuple[str, str]:
         v = (v or "").strip().lower()
         if v in _PENDIENTE:
-            return ("pendiente", "Entrega")
+            return ("pendiente", "Pendiente")
         if v == "entrega":
             return ("entregado", "Entrega")
         return ("devuelto", "Devolucion")
