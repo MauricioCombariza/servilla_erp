@@ -23,7 +23,7 @@ function hhmmToDecimal(v: string): number | null {
 function decimalToHhmm(v: number): string {
   const h = Math.floor(v);
   const m = Math.round((v - h) * 60);
-  return `${h}:${m.toString().padStart(2, "0")}`;
+  return m > 0 ? `${h} hr ${m} min` : `${h} hr`;
 }
 
 // ── Hook: carga tarifas al inicio ─────────────────────────────────────────────
@@ -339,7 +339,7 @@ export function LaboresPage() {
                 {resumen.map(r => (
                   <tr key={r.personal_id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium text-gray-900">{r.nombre_completo}</td>
-                    <td className="px-4 py-3 text-gray-600">{fmt.format(r.total_horas)}h</td>
+                    <td className="px-4 py-3 text-gray-600">{decimalToHhmm(r.total_horas)}</td>
                     <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_horas_monto} /></td>
                     <td className="px-4 py-3 text-gray-600">{r.total_labores}</td>
                     <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_labores_monto} /></td>
