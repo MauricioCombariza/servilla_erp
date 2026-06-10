@@ -62,7 +62,7 @@ export function CargaMasivaPage() {
         <input
           ref={inputRef}
           type="file"
-          accept=".csv"
+          accept=".csv,.xlsx"
           className="hidden"
           onChange={(e) => {
             const f = e.target.files?.[0];
@@ -78,8 +78,8 @@ export function CargaMasivaPage() {
         ) : (
           <div className="flex flex-col items-center gap-2">
             <Upload size={32} className="text-gray-400" />
-            <p className="font-medium text-gray-700">Arrastra el CSV aquí o haz clic para seleccionar</p>
-            <p className="text-xs text-gray-400">Solo archivos .csv · máx 10 MB</p>
+            <p className="font-medium text-gray-700">Arrastra el archivo aquí o haz clic para seleccionar</p>
+            <p className="text-xs text-gray-400">CSV o Excel (.xlsx) · máx 10 MB</p>
           </div>
         )}
       </div>

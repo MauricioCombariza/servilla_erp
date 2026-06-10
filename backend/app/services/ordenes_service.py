@@ -151,14 +151,18 @@ _ORDEN_EXISTS = (
 async def procesar_csv(
     contenido: bytes,
     db: AsyncSession,
+    filename: str = "",
 ) -> CargaMasivaResult:
-    # ── Leer CSV ──────────────────────────────────────────────────────────────
+    # ── Leer archivo (CSV o XLSX) ─────────────────────────────────────────────
     try:
-        df = pd.read_csv(io.BytesIO(contenido), dtype=str, low_memory=False).dropna(how="all")
+        if filename.endswith(".xlsx"):
+            df = pd.read_excel(io.BytesIO(contenido), dtype=str).dropna(how="all")
+        else:
+            df = pd.read_csv(io.BytesIO(contenido), dtype=str, low_memory=False).dropna(how="all")
     except Exception as e:
         return CargaMasivaResult(
             total_filas=0, filas_ignoradas=0, seriales_nuevos=0, seriales_actualizados=0,
-            ordenes_nuevas=0, ordenes_actualizadas=0, errores=[f"Error leyendo CSV: {e}"]
+            ordenes_nuevas=0, ordenes_actualizadas=0, errores=[f"Error leyendo archivo: {e}"]
         )
 
     # ── Detectar flujo y normalizar columnas ──────────────────────────────────

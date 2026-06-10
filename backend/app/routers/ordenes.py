@@ -89,9 +89,10 @@ async def carga_masiva(
     db: AsyncSession = Depends(get_db),
     _=_auth,
 ):
-    if not file.filename or not file.filename.lower().endswith(".csv"):
-        raise HTTPException(status_code=400, detail="Solo se aceptan archivos CSV")
+    fname = (file.filename or "").lower()
+    if not fname.endswith((".csv", ".xlsx")):
+        raise HTTPException(status_code=400, detail="Solo se aceptan archivos CSV o Excel (.xlsx)")
     contenido = await file.read()
     if len(contenido) > 450 * 1024 * 1024:  # 450 MB max
         raise HTTPException(status_code=413, detail="Archivo demasiado grande (max 450 MB)")
-    return await procesar_csv(contenido, db)
+    return await procesar_csv(contenido, db, filename=fname)
