@@ -14,7 +14,9 @@ api.interceptors.response.use(
   async (error) => {
     if (error.response?.status === 401) {
       const { refreshToken, logout, setTokens } = useAuthStore.getState();
-      if (refreshToken && !error.config._retry) {
+      const isFormData = error.config?.data instanceof FormData;
+
+      if (refreshToken && !error.config._retry && !isFormData) {
         error.config._retry = true;
         try {
           const res = await axios.post("/api/auth/refresh", { refresh_token: refreshToken });

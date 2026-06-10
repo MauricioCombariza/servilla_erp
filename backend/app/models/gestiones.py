@@ -14,6 +14,7 @@ class SerialGestion(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     serial: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    orden: Mapped[str | None] = mapped_column(String(50))
     f_emi: Mapped[date | None] = mapped_column()
     f_esc: Mapped[date] = mapped_column(nullable=False)
     planilla: Mapped[str] = mapped_column(String(50), nullable=False)

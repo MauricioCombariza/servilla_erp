@@ -38,9 +38,21 @@ export function CargaMasivaPage() {
       </button>
 
       <h1 className="text-xl font-semibold text-gray-900 mb-1">Carga masiva de órdenes</h1>
-      <p className="text-sm text-gray-500 mb-6">
-        Sube un CSV con columnas: <code className="bg-gray-100 px-1 rounded text-xs">orden, serial, fecha_recepcion, nombre_cliente, tipo_servicio, ambito</code>
-      </p>
+      <div className="text-sm text-gray-500 mb-6 space-y-1">
+        <p><span className="font-medium">CSV manual:</span>{" "}
+          <code className="bg-gray-100 px-1 rounded text-xs">orden, serial, fecha_recepcion, nombre_cliente, tipo_servicio, ambito</code>
+        </p>
+        <p><span className="font-medium">iMile histórico:</span>{" "}
+          <code className="bg-gray-100 px-1 rounded text-xs">orden, serial, f_emi, no_entidad, ciudad1</code>
+          {" "}— tipo_servicio='sobre', ambito derivado de ciudad1
+        </p>
+        <p><span className="font-medium">iMile escáner:</span>{" "}
+          <code className="bg-gray-100 px-1 rounded text-xs">orden, serial, f_emi, no_entidad</code>
+          {" "}+ columna <code className="bg-gray-100 px-1 rounded text-xs">Waybill No.</code>
+          {" "}— tipo_servicio='paquete', ambito='bogota'
+        </p>
+        <p className="text-gray-400">Opcionales: <code className="bg-gray-100 px-1 rounded text-xs">planilla, cod_men</code> · Solo filas con fecha ≥ 2026-01-01</p>
+      </div>
 
       {/* Zona de drop */}
       <div
@@ -110,7 +122,9 @@ export function CargaMasivaPage() {
             <div className="grid grid-cols-2 gap-3 text-sm">
               {[
                 { label: "Filas leídas", value: result.total_filas },
+                { label: "Filas ignoradas (antes 2026)", value: result.filas_ignoradas, color: "text-gray-400" },
                 { label: "Seriales nuevos", value: result.seriales_nuevos, color: "text-green-700" },
+                { label: "Seriales actualizados", value: result.seriales_actualizados, color: "text-teal-700" },
                 { label: "Órdenes nuevas", value: result.ordenes_nuevas, color: "text-blue-700" },
                 { label: "Órdenes actualizadas", value: result.ordenes_actualizadas, color: "text-orange-600" },
               ].map(({ label, value, color }) => (

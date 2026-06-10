@@ -20,6 +20,7 @@ class SerialGestionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     serial: str
+    orden: str | None
     f_emi: date | None
     f_esc: date
     planilla: str
