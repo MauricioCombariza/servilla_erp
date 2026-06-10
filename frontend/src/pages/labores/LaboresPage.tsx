@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, CheckCircle, Trash2, X } from "lucide-react";
+import { Plus, CheckCircle, Trash2, X, FileDown } from "lucide-react";
 import { laboresApi } from "@/api/labores";
 import { ordenesApi } from "@/api/ordenes";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
+import { generarPdfPegado } from "@/utils/pdfPegado";
 import type { RegistroHoras, RegistroLabores } from "@/types/domain";
 
 const fmt = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 });
@@ -151,10 +152,30 @@ export function LaboresPage() {
             </button>
           )}
           {tab === "labores" && (
-            <button onClick={() => setShowLaborForm(true)}
-              className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-              <Plus size={16} /> Registrar labor
-            </button>
+            <>
+              {labores.some(l => l.tipo_labor === "pegado_guia") && (
+                <button
+                  onClick={() => {
+                    const pegado = labores
+                      .filter(l => l.tipo_labor === "pegado_guia")
+                      .map(l => ({
+                        fecha: l.fecha,
+                        personal_nombre: (l as RegistroLabores & { personal_nombre?: string }).personal_nombre ?? String(l.personal_id),
+                        cantidad: l.cantidad,
+                        tarifa_unitaria: l.tarifa_unitaria,
+                        total: l.total ?? l.cantidad * l.tarifa_unitaria,
+                      }));
+                    generarPdfPegado(pegado, `${MESES[mes - 1]} ${anio}`);
+                  }}
+                  className="flex items-center gap-2 border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                  <FileDown size={16} /> PDF Pegado
+                </button>
+              )}
+              <button onClick={() => setShowLaborForm(true)}
+                className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                <Plus size={16} /> Registrar labor
+              </button>
+            </>
           )}
         </div>
       </div>
