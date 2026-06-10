@@ -122,6 +122,11 @@ export function LaboresPage() {
 
   const totalHoras = horas.reduce((s, h) => s + h.horas_trabajadas, 0);
   const totalHorasMonto = horas.reduce((s, h) => s + (h.total ?? h.horas_trabajadas * h.tarifa_hora), 0);
+  const totalHorasDisplay = (() => {
+    const h = Math.floor(totalHoras);
+    const m = Math.round((totalHoras - h) * 60);
+    return m > 0 ? `${h} hr ${m} min` : `${h} hr`;
+  })();
 
   return (
     <div>
@@ -173,7 +178,7 @@ export function LaboresPage() {
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div className="bg-white rounded-xl border border-gray-200 p-4">
                 <p className="text-xs text-gray-500 uppercase tracking-wide">Total horas</p>
-                <p className="text-xl font-semibold text-gray-900 mt-1">{fmt.format(totalHoras)} h</p>
+                <p className="text-xl font-semibold text-gray-900 mt-1">{totalHorasDisplay}</p>
               </div>
               <div className="bg-white rounded-xl border border-gray-200 p-4">
                 <p className="text-xs text-gray-500 uppercase tracking-wide">Total a pagar</p>
