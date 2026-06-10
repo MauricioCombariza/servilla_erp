@@ -32,7 +32,7 @@ import logging
 from datetime import date
 
 import pandas as pd
-from sqlalchemy import select, text
+from sqlalchemy import ARRAY, String, bindparam, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.clientes import Cliente, PrecioCliente
@@ -50,37 +50,16 @@ def _es_flujo_imile(df: pd.DataFrame) -> bool:
 
 
 def _transformar_imile(df: pd.DataFrame) -> pd.DataFrame:
-    """Convierte columnas del escáner iMile al esquema estándar interno.
-
-    Entrada:  Scan time | Waybill No. | DA | ...
-    Salida:   serial | fecha_recepcion | orden | planilla | nombre_cliente |
-              tipo_servicio | ambito | cod_men_da (nombre del DA, sin resolver aún)
-    """
     df = df.copy()
-
-    # Parsear Scan time → datetime
     df["_scan_dt"] = pd.to_datetime(df["Scan time"], errors="coerce", dayfirst=False)
-
-    # serial
     df["serial"] = df["Waybill No."].str.strip()
-
-    # fecha_recepcion = solo la fecha
     df["fecha_recepcion"] = df["_scan_dt"].dt.date.astype(str)
-
-    # orden = lot_esc = "IM" + YYYYMMDD
     df["orden"] = "IM" + df["_scan_dt"].dt.strftime("%Y%m%d")
-
-    # planilla = mismo que orden (el lote del día)
     df["planilla"] = df["orden"]
-
-    # campos fijos
     df["nombre_cliente"] = "Imile SAS"
     df["tipo_servicio"]  = "paquete"
     df["ambito"]         = "bogota"
-
-    # DA → guardar nombre para resolución posterior en el loop
     df["_da_nombre"] = df["DA"].str.strip() if "DA" in df.columns else ""
-
     return df
 
 
@@ -135,6 +114,40 @@ def _parse_date(val: str) -> date | None:
     return None
 
 
+_SERIAL_UPSERT = text("""
+    INSERT INTO seriales_gestion
+        (serial, orden, planilla, f_emi, f_esc, cod_men, mensajero_id,
+         cliente_id, tipo_gestion, tipo_envio, ambito,
+         precio_cliente, precio_mensajero, estado, origen)
+    VALUES
+        (:serial, :orden, :planilla, :fecha, :fecha, :cod_men, :mensajero_id,
+         :cliente_id, :tipo_gestion, :tipo_envio, :ambito,
+         :precio_cli, :precio_men, :db_estado, 'manual')
+    ON CONFLICT (serial) DO UPDATE SET
+        orden            = EXCLUDED.orden,
+        planilla         = EXCLUDED.planilla,
+        f_esc            = EXCLUDED.f_esc,
+        cod_men          = EXCLUDED.cod_men,
+        mensajero_id     = EXCLUDED.mensajero_id,
+        tipo_gestion     = EXCLUDED.tipo_gestion,
+        estado           = EXCLUDED.estado,
+        precio_cliente   = EXCLUDED.precio_cliente,
+        precio_mensajero = EXCLUDED.precio_mensajero,
+        origen           = EXCLUDED.origen
+    WHERE seriales_gestion.estado = 'pendiente'
+""")
+
+_SERIAL_EXISTS = (
+    text("SELECT serial, estado FROM seriales_gestion WHERE serial = ANY(:serials)")
+    .bindparams(bindparam("serials", type_=ARRAY(String)))
+)
+
+_ORDEN_EXISTS = (
+    text("SELECT numero_orden, id FROM ordenes WHERE numero_orden = ANY(:nums)")
+    .bindparams(bindparam("nums", type_=ARRAY(String)))
+)
+
+
 async def procesar_csv(
     contenido: bytes,
     db: AsyncSession,
@@ -153,14 +166,12 @@ async def procesar_csv(
     if es_imile:
         df = _transformar_imile(df)
     else:
-        # Flujo manual: renombrar alias si existen
         if "fecha_recepcion" not in df.columns and "f_emi" in df.columns:
             df = df.rename(columns={"f_emi": "fecha_recepcion"})
         if "nombre_cliente" not in df.columns and "no_entidad" in df.columns:
             df = df.rename(columns={"no_entidad": "nombre_cliente"})
         if "tipo_servicio" not in df.columns:
             df["tipo_servicio"] = "sobre"
-        # ambito: prioridad colum_ciudad (local/nacional) > ciudad1 > default
         if "ambito" not in df.columns:
             if "colum_ciudad" in df.columns:
                 df["ambito"] = df["colum_ciudad"].str.strip().str.lower().apply(
@@ -189,10 +200,7 @@ async def procesar_csv(
     df["_es_local"]      = df["ambito"].str.lower().str.strip().str.contains("bog", na=False)
     df["_planilla"]      = df["planilla"].str.strip() if "planilla" in df.columns else ""
     df["_cod_men"]       = df["cod_men"].str.strip().str.upper() if "cod_men" in df.columns else ""
-    # Mapear estado CSV → (db_estado, tipo_gestion)
-    # pendiente = aún en tránsito (0, lleva mensajero, lleva ciudad)
-    # entregado = confirmado entregado
-    # devuelto  = no entregado por cualquier motivo
+
     _PENDIENTE = {"0", "lleva mensajero", "lleva ciudad", "pendiente"}
 
     def _mapear_estado(v: str) -> tuple[str, str]:
@@ -233,7 +241,6 @@ async def procesar_csv(
                 return ""
             pid = personal_by_name.get(nombre.lower())
             if pid:
-                # buscar código inverso
                 for cod, eid in personal_by_code.items():
                     if eid == pid:
                         return cod
@@ -241,9 +248,8 @@ async def procesar_csv(
 
         df["_cod_men"] = df["_da_nombre"].apply(_resolver_da)
 
-    # ── Paso 1: seriales_gestion ──────────────────────────────────────────────
-    sg_nuevos = 0
-    sg_actualizados = 0
+    # ── Paso 1: construir params en Python (sin DB) ───────────────────────────
+    all_serial_params: list[dict] = []
 
     for i, fila in df.iterrows():
         cliente_nom = str(fila["nombre_cliente"]).strip()
@@ -252,66 +258,55 @@ async def procesar_csv(
             errores.append(f"Fila {int(i)+2}: cliente '{cliente_nom}' no encontrado")  # type: ignore[arg-type]
             continue
 
-        try:
-            serial          = str(fila["serial"]).strip()
-            num_orden       = str(fila["_orden"])
-            fecha_parsed: date = fila["_fecha_parsed"]
-            tipo_ser        = str(fila["_tipo_servicio"])
-            ambito_val      = "bogota" if fila["_es_local"] else "nacional"
-            planilla_val    = str(fila["_planilla"]) if fila["_planilla"] else ""
-            cod_men_val     = str(fila["_cod_men"]) if fila["_cod_men"] else ""
-            tipo_gestion_val = str(fila["_tipo_gestion"])
-            db_estado_val    = str(fila["_db_estado"])
+        serial           = str(fila["serial"]).strip()
+        num_orden        = str(fila["_orden"])
+        fecha_parsed: date = fila["_fecha_parsed"]
+        tipo_ser         = str(fila["_tipo_servicio"])
+        ambito_val       = "bogota" if fila["_es_local"] else "nacional"
+        planilla_val     = str(fila["_planilla"]) if fila["_planilla"] else ""
+        cod_men_val      = str(fila["_cod_men"]) if fila["_cod_men"] else ""
+        tipo_gestion_val = str(fila["_tipo_gestion"])
+        db_estado_val    = str(fila["_db_estado"])
 
-            precio_cli   = precios_cli.get((id_cliente, tipo_ser, ambito_val), 0.0)
-            precio_men   = precios_men.get((id_cliente, tipo_ser, ambito_val), 0.0)
-            mensajero_id = personal_by_code.get(cod_men_val) if cod_men_val else None
+        precio_cli   = precios_cli.get((id_cliente, tipo_ser, ambito_val), 0.0)
+        precio_men   = precios_men.get((id_cliente, tipo_ser, ambito_val), 0.0)
+        mensajero_id = personal_by_code.get(cod_men_val) if cod_men_val else None
 
-            await db.execute(text("SAVEPOINT sp_serial"))
-            result = await db.execute(
-                text("""
-                    INSERT INTO seriales_gestion
-                        (serial, orden, planilla, f_emi, f_esc, cod_men, mensajero_id,
-                         cliente_id, tipo_gestion, tipo_envio, ambito,
-                         precio_cliente, precio_mensajero, estado, origen)
-                    VALUES
-                        (:serial, :orden, :planilla, :fecha, :fecha, :cod_men, :mensajero_id,
-                         :cliente_id, :tipo_gestion, :tipo_envio, :ambito,
-                         :precio_cli, :precio_men, :db_estado, 'manual')
-                    ON CONFLICT (serial) DO UPDATE SET
-                        orden            = EXCLUDED.orden,
-                        planilla         = EXCLUDED.planilla,
-                        f_esc            = EXCLUDED.f_esc,
-                        cod_men          = EXCLUDED.cod_men,
-                        mensajero_id     = EXCLUDED.mensajero_id,
-                        tipo_gestion     = EXCLUDED.tipo_gestion,
-                        estado           = EXCLUDED.estado,
-                        precio_cliente   = EXCLUDED.precio_cliente,
-                        precio_mensajero = EXCLUDED.precio_mensajero,
-                        origen           = EXCLUDED.origen
-                    WHERE seriales_gestion.estado = 'pendiente'
-                    RETURNING (xmax = 0) AS es_nuevo
-                """),
-                {
-                    "serial": serial, "orden": num_orden, "planilla": planilla_val,
-                    "fecha": fecha_parsed, "cod_men": cod_men_val, "mensajero_id": mensajero_id,
-                    "cliente_id": id_cliente, "tipo_gestion": tipo_gestion_val,
-                    "tipo_envio": tipo_ser, "ambito": ambito_val,
-                    "precio_cli": precio_cli, "precio_men": precio_men,
-                    "db_estado": db_estado_val,
-                },
-            )
-            await db.execute(text("RELEASE SAVEPOINT sp_serial"))
-            row = result.fetchone()
-            if row is not None:
-                if row[0]:
-                    sg_nuevos += 1
-                else:
-                    sg_actualizados += 1
+        all_serial_params.append({
+            "serial": serial, "orden": num_orden, "planilla": planilla_val,
+            "fecha": fecha_parsed, "cod_men": cod_men_val, "mensajero_id": mensajero_id,
+            "cliente_id": id_cliente, "tipo_gestion": tipo_gestion_val,
+            "tipo_envio": tipo_ser, "ambito": ambito_val,
+            "precio_cli": precio_cli, "precio_men": precio_men,
+            "db_estado": db_estado_val,
+        })
 
-        except Exception as e:
-            await db.execute(text("ROLLBACK TO SAVEPOINT sp_serial"))
-            errores.append(f"Fila {int(i)+2}: {e}")  # type: ignore[arg-type]
+    # ── Paso 1b: resolver nuevos vs actualizados (1 query) ────────────────────
+    sg_nuevos = 0
+    sg_actualizados = 0
+
+    if all_serial_params:
+        incoming_serials = [p["serial"] for p in all_serial_params]
+        rows = (await db.execute(_SERIAL_EXISTS, {"serials": incoming_serials})).fetchall()
+        existing_map = {r[0]: r[1] for r in rows}  # serial → estado actual
+
+        params_to_process: list[dict] = []
+        for p in all_serial_params:
+            s = p["serial"]
+            if s not in existing_map:
+                sg_nuevos += 1
+                params_to_process.append(p)
+            elif existing_map[s] == "pendiente":
+                sg_actualizados += 1
+                params_to_process.append(p)
+            # estado != pendiente → no-op (no se inserta ni actualiza)
+
+        # ── Paso 1c: batch upsert seriales (1 round-trip) ─────────────────────
+        if params_to_process:
+            try:
+                await db.execute(_SERIAL_UPSERT, params_to_process)
+            except Exception as e:
+                errores.append(f"Error en batch seriales: {e}")
 
     # ── Paso 2: ordenes (agrupar por número de orden) ─────────────────────────
     resumen = (
@@ -326,34 +321,57 @@ async def procesar_csv(
     ordenes_nuevas = 0
     ordenes_actualizadas = 0
 
+    orden_rows: list[dict] = []
     for _, grp in resumen.iterrows():
-        try:
-            cliente_nom = str(grp["nombre_cliente"]).strip()
-            id_cliente = clientes_by_name.get(cliente_nom.lower())
-            if not id_cliente:
-                continue
+        cliente_nom = str(grp["nombre_cliente"]).strip()
+        id_cliente = clientes_by_name.get(cliente_nom.lower())
+        if not id_cliente:
+            continue
+        num_orden    = str(grp["_orden"])
+        fecha_parsed = _parse_date(str(grp["fecha_recepcion"]).strip())
+        if not fecha_parsed:
+            continue
+        tipo_ser = str(grp["_tipo_servicio"])
+        c_local  = int(grp["cant_local"])
+        c_nac    = int(grp["cant_nac"])
+        c_total  = c_local + c_nac
+        p_local  = precios_cli.get((id_cliente, tipo_ser, "bogota"),   0.0)
+        p_nac    = precios_cli.get((id_cliente, tipo_ser, "nacional"), 0.0)
+        v_total  = (c_local * p_local) + (c_nac * p_nac)
+        orden_rows.append({
+            "num": num_orden, "cli": id_cliente, "fecha": fecha_parsed,
+            "tipo": tipo_ser, "total": c_total, "valor": v_total,
+        })
 
-            num_orden    = str(grp["_orden"])
-            fecha_parsed = _parse_date(str(grp["fecha_recepcion"]).strip())
-            if not fecha_parsed:
-                continue
+    if orden_rows:
+        # 1 query para saber cuáles ya existen
+        nums = [r["num"] for r in orden_rows]
+        rows = (await db.execute(_ORDEN_EXISTS, {"nums": nums})).fetchall()
+        existing_ordenes = {r[0]: r[1] for r in rows}
 
-            tipo_ser = str(grp["_tipo_servicio"])
-            c_local  = int(grp["cant_local"])
-            c_nac    = int(grp["cant_nac"])
-            c_total  = c_local + c_nac
+        new_orden_params = [r for r in orden_rows if r["num"] not in existing_ordenes]
+        upd_orden_params = [
+            {"total": r["total"], "valor": r["valor"], "id": existing_ordenes[r["num"]]}
+            for r in orden_rows if r["num"] in existing_ordenes
+        ]
 
-            p_local = precios_cli.get((id_cliente, tipo_ser, "bogota"),   0.0)
-            p_nac   = precios_cli.get((id_cliente, tipo_ser, "nacional"), 0.0)
-            v_total = (c_local * p_local) + (c_nac * p_nac)
-
-            existing = (
+        if new_orden_params:
+            try:
                 await db.execute(
-                    text("SELECT id FROM ordenes WHERE numero_orden = :n"), {"n": num_orden}
+                    text("""
+                        INSERT INTO ordenes
+                            (numero_orden, cliente_id, fecha_recepcion, tipo_servicio,
+                             cantidad_total, cantidad_recibido, valor_total, estado)
+                        VALUES (:num, :cli, :fecha, :tipo, :total, :total, :valor, 'activa')
+                    """),
+                    new_orden_params,
                 )
-            ).fetchone()
+                ordenes_nuevas = len(new_orden_params)
+            except Exception as e:
+                errores.append(f"Error en batch ordenes nuevas: {e}")
 
-            if existing:
+        if upd_orden_params:
+            try:
                 await db.execute(
                     text("""
                         UPDATE ordenes
@@ -362,26 +380,11 @@ async def procesar_csv(
                             valor_total       = :valor
                         WHERE id = :id
                     """),
-                    {"total": c_total, "valor": v_total, "id": existing[0]},
+                    upd_orden_params,
                 )
-                ordenes_actualizadas += 1
-            else:
-                await db.execute(
-                    text("""
-                        INSERT INTO ordenes
-                            (numero_orden, cliente_id, fecha_recepcion, tipo_servicio,
-                             cantidad_total, cantidad_recibido, valor_total, estado)
-                        VALUES (:num, :cli, :fecha, :tipo, :total, :total, :valor, 'activa')
-                    """),
-                    {
-                        "num": num_orden, "cli": id_cliente, "fecha": fecha_parsed,
-                        "tipo": tipo_ser, "total": c_total, "valor": v_total,
-                    },
-                )
-                ordenes_nuevas += 1
-
-        except Exception as e:
-            errores.append(f"Orden {grp.get('_orden', '?')}: {e}")
+                ordenes_actualizadas = len(upd_orden_params)
+            except Exception as e:
+                errores.append(f"Error en batch ordenes actualizadas: {e}")
 
     await db.commit()
     logger.info(
