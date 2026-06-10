@@ -83,6 +83,18 @@ export function LaboresPage() {
   const [showHoraForm, setShowHoraForm] = useState(false);
   const [showLaborForm, setShowLaborForm] = useState(false);
   const [tipoLaborActivo, setTipoLaborActivo] = useState<TipoLabor>("pegado_guia");
+  const [showPdfMenu, setShowPdfMenu] = useState(false);
+  const pdfMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (pdfMenuRef.current && !pdfMenuRef.current.contains(e.target as Node)) {
+        setShowPdfMenu(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
 
   const filtros = { mes, anio };
 
@@ -154,22 +166,39 @@ export function LaboresPage() {
           {tab === "labores" && (
             <>
               {labores.some(l => l.tipo_labor === "pegado_guia") && (
-                <button
-                  onClick={() => {
-                    const pegado = labores
-                      .filter(l => l.tipo_labor === "pegado_guia")
-                      .map(l => ({
-                        fecha: l.fecha,
-                        personal_nombre: (l as RegistroLabores & { personal_nombre?: string }).personal_nombre ?? String(l.personal_id),
-                        cantidad: l.cantidad,
-                        tarifa_unitaria: l.tarifa_unitaria,
-                        total: l.total ?? l.cantidad * l.tarifa_unitaria,
-                      }));
-                    generarPdfPegado(pegado, `${MESES[mes - 1]} ${anio}`);
-                  }}
-                  className="flex items-center gap-2 border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-                  <FileDown size={16} /> PDF Pegado
-                </button>
+                <div className="relative" ref={pdfMenuRef}>
+                  <button
+                    onClick={() => setShowPdfMenu(v => !v)}
+                    className="flex items-center gap-2 border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                    <FileDown size={16} /> PDF Pegado ▾
+                  </button>
+                  {showPdfMenu && (
+                    <div className="absolute right-0 top-full mt-1 z-20 bg-white border border-gray-200 rounded-xl shadow-lg py-1 min-w-[180px]">
+                      {[...new Set(
+                        labores.filter(l => l.tipo_labor === "pegado_guia").map(l => l.fecha)
+                      )].sort().map(fecha => (
+                        <button
+                          key={fecha}
+                          onClick={() => {
+                            const pegado = labores
+                              .filter(l => l.tipo_labor === "pegado_guia" && l.fecha === fecha)
+                              .map(l => ({
+                                fecha: l.fecha,
+                                personal_nombre: (l as RegistroLabores & { personal_nombre?: string }).personal_nombre ?? String(l.personal_id),
+                                cantidad: l.cantidad,
+                                tarifa_unitaria: l.tarifa_unitaria,
+                                total: l.total ?? l.cantidad * l.tarifa_unitaria,
+                              }));
+                            generarPdfPegado(pegado, fecha);
+                            setShowPdfMenu(false);
+                          }}
+                          className="flex items-center gap-2 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                          <FileDown size={13} className="text-gray-400" /> {fecha}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
               <button onClick={() => setShowLaborForm(true)}
                 className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
