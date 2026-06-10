@@ -246,7 +246,7 @@ async def procesar_csv(
                 for cod, eid in personal_by_code.items():
                     if eid == pid:
                         return cod
-            return nombre.upper()[:20]
+            return ""  # DA no encontrado → sin código asignado
 
         df["_cod_men"] = df["_da_nombre"].apply(_resolver_da)
 
@@ -266,7 +266,7 @@ async def procesar_csv(
         tipo_ser         = str(fila["_tipo_servicio"])
         ambito_val       = "bogota" if fila["_es_local"] else "nacional"
         planilla_val     = str(fila["_planilla"]) if fila["_planilla"] else ""
-        cod_men_val      = str(fila["_cod_men"]) if fila["_cod_men"] else ""
+        cod_men_val      = (str(fila["_cod_men"]) if fila["_cod_men"] else "")[:4]
         tipo_gestion_val = str(fila["_tipo_gestion"])
         db_estado_val    = str(fila["_db_estado"])
 
