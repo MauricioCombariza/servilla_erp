@@ -27,87 +27,55 @@ export function generarPdfPegado(filas: FilaPegado[], periodo: string): void {
   doc.text(`Período: ${periodo}`, 105, 25, { align: "center" });
   doc.text(`Generado: ${new Date().toLocaleDateString("es-CO")}`, 105, 31, { align: "center" });
 
-  // ── Agrupar por fecha ─────────────────────────────────────────────────────
-  const porFecha = new Map<string, FilaPegado[]>();
+  // ── Agrupar por persona (sumar todo el mes) ───────────────────────────────
+  const porPersona = new Map<string, { cantidad: number; tarifa: number; total: number }>();
   for (const f of filas) {
-    const key = f.fecha;
-    if (!porFecha.has(key)) porFecha.set(key, []);
-    porFecha.get(key)!.push(f);
-  }
-  const fechasOrdenadas = [...porFecha.keys()].sort();
-
-  let y = 38;
-  let totalGenGuias = 0;
-  let totalGenValor = 0;
-
-  for (const fecha of fechasOrdenadas) {
-    const rows = porFecha.get(fecha)!;
-    const totalGuiasFecha = rows.reduce((s, r) => s + r.cantidad, 0);
-    const totalValorFecha = rows.reduce((s, r) => s + r.total, 0);
-    totalGenGuias += totalGuiasFecha;
-    totalGenValor += totalValorFecha;
-
-    // Encabezado de fecha
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "bold");
-    doc.setFillColor(230, 230, 250);
-    doc.rect(14, y, 183, 7, "F");
-    doc.text(
-      `Fecha: ${fecha}   |   Guías: ${fmtNum(totalGuiasFecha)}   |   Total: ${fmtCop(totalValorFecha)}`,
-      16,
-      y + 5
-    );
-    y += 9;
-
-    autoTable(doc, {
-      startY: y,
-      head: [["Personal", "Guías pegadas", "Tarifa / guía", "Total"]],
-      body: rows.map(r => [
-        r.personal_nombre,
-        fmtNum(r.cantidad),
-        fmtCop(r.tarifa_unitaria),
-        fmtCop(r.total),
-      ]),
-      foot: [[
-        { content: "Subtotal fecha", styles: { fontStyle: "bold" } },
-        { content: fmtNum(totalGuiasFecha), styles: { fontStyle: "bold" } },
-        "",
-        { content: fmtCop(totalValorFecha), styles: { fontStyle: "bold" } },
-      ]],
-      theme: "striped",
-      headStyles: { fillColor: [63, 81, 181], fontSize: 9, fontStyle: "bold" },
-      footStyles: { fillColor: [220, 220, 235], textColor: [30, 30, 30], fontSize: 9 },
-      bodyStyles: { fontSize: 9 },
-      columnStyles: {
-        0: { cellWidth: 80 },
-        1: { halign: "right", cellWidth: 30 },
-        2: { halign: "right", cellWidth: 37 },
-        3: { halign: "right", cellWidth: 36 },
-      },
-      margin: { left: 14, right: 14 },
-      showFoot: "lastPage",
-    });
-
-    y = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
-
-    if (y > 240 && fechasOrdenadas.indexOf(fecha) < fechasOrdenadas.length - 1) {
-      doc.addPage();
-      y = 18;
+    const prev = porPersona.get(f.personal_nombre);
+    if (prev) {
+      prev.cantidad += f.cantidad;
+      prev.total += f.total;
+    } else {
+      porPersona.set(f.personal_nombre, {
+        cantidad: f.cantidad,
+        tarifa: f.tarifa_unitaria,
+        total: f.total,
+      });
     }
   }
 
-  // ── Totales generales ─────────────────────────────────────────────────────
-  if (y > 250) { doc.addPage(); y = 18; }
+  const rows = [...porPersona.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  const totalGuias = rows.reduce((s, [, v]) => s + v.cantidad, 0);
+  const totalValor = rows.reduce((s, [, v]) => s + v.total, 0);
+  const tarifaRef = rows[0]?.[1].tarifa ?? 0;
 
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "bold");
-  doc.setFillColor(63, 81, 181);
-  doc.setTextColor(255, 255, 255);
-  doc.rect(14, y, 183, 9, "F");
-  doc.text("TOTAL GENERAL", 16, y + 6);
-  doc.text(fmtNum(totalGenGuias) + " guías", 100, y + 6, { align: "right" });
-  doc.text(fmtCop(totalGenValor), 197, y + 6, { align: "right" });
-  doc.setTextColor(0, 0, 0);
+  autoTable(doc, {
+    startY: 38,
+    head: [["Personal", "Guías pegadas", "Tarifa / guía", "Total"]],
+    body: rows.map(([nombre, v]) => [
+      nombre,
+      fmtNum(v.cantidad),
+      fmtCop(v.tarifa),
+      fmtCop(v.total),
+    ]),
+    foot: [[
+      { content: "TOTAL MES", styles: { fontStyle: "bold" } },
+      { content: fmtNum(totalGuias), styles: { fontStyle: "bold" } },
+      { content: fmtCop(tarifaRef), styles: { fontStyle: "bold" } },
+      { content: fmtCop(totalValor), styles: { fontStyle: "bold" } },
+    ]],
+    theme: "striped",
+    headStyles: { fillColor: [63, 81, 181], fontSize: 10, fontStyle: "bold" },
+    footStyles: { fillColor: [63, 81, 181], textColor: [255, 255, 255], fontSize: 10, fontStyle: "bold" },
+    bodyStyles: { fontSize: 10 },
+    columnStyles: {
+      0: { cellWidth: 80 },
+      1: { halign: "right", cellWidth: 32 },
+      2: { halign: "right", cellWidth: 38 },
+      3: { halign: "right", cellWidth: 33 },
+    },
+    margin: { left: 14, right: 14 },
+    showFoot: "lastPage",
+  });
 
   // ── Pie de página ─────────────────────────────────────────────────────────
   const pages = doc.getNumberOfPages();
