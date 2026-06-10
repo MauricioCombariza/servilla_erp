@@ -12,6 +12,9 @@ interface FilaPegado {
 const fmtCop = (v: number) =>
   new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 }).format(v);
 
+const fmtTarifa = (v: number) =>
+  new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
+
 const fmtNum = (v: number) =>
   new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 }).format(v);
 
@@ -73,7 +76,7 @@ export function generarPdfPegado(filas: FilaPegado[], periodo: string): void {
       body: rows.map(([nombre, v]) => [
         nombre,
         fmtNum(v.cantidad),
-        fmtCop(v.tarifa),
+        fmtTarifa(v.tarifa),
         fmtCop(v.total),
       ]),
       foot: [[

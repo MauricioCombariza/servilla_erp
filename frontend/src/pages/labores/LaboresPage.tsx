@@ -77,6 +77,7 @@ function usePersonalLookup() {
 
 export function LaboresPage() {
   const qc = useQueryClient();
+  const tarifas = useTarifas();
   const [tab, setTab] = useState<Tab>("horas");
   const [mes, setMes] = useState(HOY.getMonth() + 1);
   const [anio, setAnio] = useState(HOY.getFullYear());
@@ -186,8 +187,8 @@ export function LaboresPage() {
                                 fecha: l.fecha,
                                 personal_nombre: (l as RegistroLabores & { personal_nombre?: string }).personal_nombre ?? String(l.personal_id),
                                 cantidad: l.cantidad,
-                                tarifa_unitaria: l.tarifa_unitaria,
-                                total: l.total ?? l.cantidad * l.tarifa_unitaria,
+                                tarifa_unitaria: tarifas.pegado,
+                                total: l.cantidad * tarifas.pegado,
                               }));
                             generarPdfPegado(pegado, fecha);
                             setShowPdfMenu(false);
