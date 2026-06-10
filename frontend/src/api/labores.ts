@@ -53,6 +53,9 @@ export const laboresApi = {
   resumen: (params?: { mes?: number; anio?: number }) =>
     api.get<ResumenLabores[]>("/labores/resumen", { params }),
 
+  resumenDiario: (params?: { mes?: number; anio?: number }) =>
+    api.get<(ResumenLabores & { fecha: string })[]>("/labores/resumen/diario", { params }),
+
   lookupPersonalCodigo: (codigo: string) =>
     api.get<{ id: number; nombre_completo: string; identificacion?: string; codigo: string }>(`/personal/by-code/${codigo}`),
 

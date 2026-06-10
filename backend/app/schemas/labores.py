@@ -95,3 +95,14 @@ class ResumenLabores(BaseModel):
     total_labores: int
     total_labores_monto: float
     total_general: float
+
+
+class ResumenDiario(BaseModel):
+    personal_id: int
+    nombre_completo: str
+    fecha: date
+    total_horas: float
+    total_horas_monto: float
+    total_labores: int
+    total_labores_monto: float
+    total_general: float

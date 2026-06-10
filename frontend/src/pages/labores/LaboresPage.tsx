@@ -85,6 +85,7 @@ export function LaboresPage() {
   const [showLaborForm, setShowLaborForm] = useState(false);
   const [tipoLaborActivo, setTipoLaborActivo] = useState<TipoLabor>("pegado_guia");
   const [showPdfMenu, setShowPdfMenu] = useState(false);
+  const [vistaDiaria, setVistaDiaria] = useState(false);
   const pdfMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -114,7 +115,13 @@ export function LaboresPage() {
   const { data: resumen = [] } = useQuery({
     queryKey: ["labores-resumen", mes, anio],
     queryFn: () => laboresApi.resumen(filtros).then(r => r.data),
-    enabled: tab === "resumen",
+    enabled: tab === "resumen" && !vistaDiaria,
+  });
+
+  const { data: resumenDiario = [] } = useQuery({
+    queryKey: ["labores-resumen-diario", mes, anio],
+    queryFn: () => laboresApi.resumenDiario(filtros).then(r => r.data),
+    enabled: tab === "resumen" && vistaDiaria,
   });
 
   const aprobarHora = useMutation({
@@ -374,33 +381,82 @@ export function LaboresPage() {
 
       {/* ── Tab Resumen ── */}
       {tab === "resumen" && (
-        resumen.length === 0 ? (
-          <div className="text-center py-16 text-gray-400">Sin datos en este período</div>
-        ) : (
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  {["Personal", "Horas", "Monto horas", "Labores", "Monto labores", "Total"].map(h => (
-                    <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {resumen.map(r => (
-                  <tr key={r.personal_id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-medium text-gray-900">{r.nombre_completo}</td>
-                    <td className="px-4 py-3 text-gray-600">{decimalToHhmm(r.total_horas)}</td>
-                    <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_horas_monto} /></td>
-                    <td className="px-4 py-3 text-gray-600">{r.total_labores}</td>
-                    <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_labores_monto} /></td>
-                    <td className="px-4 py-3 font-semibold text-gray-900"><CurrencyCell value={r.total_general} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <>
+          <div className="flex items-center gap-2 mb-4">
+            <span className="text-sm text-gray-600">Vista:</span>
+            <button
+              onClick={() => setVistaDiaria(false)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${!vistaDiaria ? "bg-primary text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+              Mes
+            </button>
+            <button
+              onClick={() => setVistaDiaria(true)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${vistaDiaria ? "bg-primary text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+              Diario
+            </button>
           </div>
-        )
+
+          {!vistaDiaria && (
+            resumen.length === 0 ? (
+              <div className="text-center py-16 text-gray-400">Sin datos en este período</div>
+            ) : (
+              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      {["Personal", "Horas", "Monto horas", "Labores", "Monto labores", "Total"].map(h => (
+                        <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {resumen.map(r => (
+                      <tr key={r.personal_id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 font-medium text-gray-900">{r.nombre_completo}</td>
+                        <td className="px-4 py-3 text-gray-600">{decimalToHhmm(r.total_horas)}</td>
+                        <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_horas_monto} /></td>
+                        <td className="px-4 py-3 text-gray-600">{r.total_labores}</td>
+                        <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_labores_monto} /></td>
+                        <td className="px-4 py-3 font-semibold text-gray-900"><CurrencyCell value={r.total_general} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          )}
+
+          {vistaDiaria && (
+            resumenDiario.length === 0 ? (
+              <div className="text-center py-16 text-gray-400">Sin datos en este período</div>
+            ) : (
+              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      {["Fecha", "Personal", "Horas", "Monto horas", "Labores", "Monto labores", "Total"].map(h => (
+                        <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {resumenDiario.map((r, i) => (
+                      <tr key={`${r.personal_id}-${r.fecha}-${i}`} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 font-mono text-xs text-gray-500">{r.fecha}</td>
+                        <td className="px-4 py-3 font-medium text-gray-900">{r.nombre_completo}</td>
+                        <td className="px-4 py-3 text-gray-600">{decimalToHhmm(r.total_horas)}</td>
+                        <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_horas_monto} /></td>
+                        <td className="px-4 py-3 text-gray-600">{r.total_labores}</td>
+                        <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_labores_monto} /></td>
+                        <td className="px-4 py-3 font-semibold text-gray-900"><CurrencyCell value={r.total_general} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          )}
+        </>
       )}
 
       {/* Modales */}
