@@ -205,11 +205,9 @@ async def procesar_csv(
 
     def _mapear_estado(v: str) -> tuple[str, str]:
         v = (v if isinstance(v, str) else "").strip().lower()
-        if v in _PENDIENTE:
+        if v in _PENDIENTE or v in {"entrega", "entregado"}:
             return ("pendiente", "Entrega")
-        if v == "entrega":
-            return ("entregado", "Entrega")
-        return ("devuelto", "Devolucion")
+        return ("pendiente", "Devolucion")
 
     if es_imile:
         df["_db_estado"]    = "pendiente"
@@ -304,8 +302,12 @@ async def procesar_csv(
         # ── Paso 1c: batch upsert seriales (1 round-trip) ─────────────────────
         if params_to_process:
             try:
+                await db.execute(text("SAVEPOINT sp_batch_serial"))
                 await db.execute(_SERIAL_UPSERT, params_to_process)
+                await db.execute(text("RELEASE SAVEPOINT sp_batch_serial"))
             except Exception as e:
+                await db.execute(text("ROLLBACK TO SAVEPOINT sp_batch_serial"))
+                logger.error("Error en batch seriales: %s", e)
                 errores.append(f"Error en batch seriales: {e}")
 
     # ── Paso 2: ordenes (agrupar por número de orden) ─────────────────────────
