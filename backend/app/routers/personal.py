@@ -53,6 +53,17 @@ async def create_personal(body: PersonalCreate, db: AsyncSession = Depends(get_d
     return personal
 
 
+@router.get("/by-code/{codigo}", response_model=PersonalRead)
+async def get_personal_by_codigo(codigo: str, db: AsyncSession = Depends(get_db), _=_auth):
+    result = await db.execute(
+        select(Personal).where(Personal.codigo == codigo, Personal.activo == True)  # noqa: E712
+    )
+    p = result.scalar_one_or_none()
+    if p is None:
+        raise HTTPException(status_code=404, detail="Personal no encontrado")
+    return p
+
+
 @router.get("/{personal_id}", response_model=PersonalWithCiudades)
 async def get_personal(personal_id: int, db: AsyncSession = Depends(get_db), _=_auth):
     result = await db.execute(select(Personal).where(Personal.id == personal_id))

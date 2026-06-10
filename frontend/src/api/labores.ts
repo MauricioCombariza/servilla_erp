@@ -3,12 +3,29 @@ import type { RegistroHoras, RegistroLabores, ResumenLabores } from "@/types/dom
 
 type FiltrosPeriodo = { personal_id?: number; mes?: number; anio?: number; aprobado?: boolean };
 
+export interface HoraBulkItem {
+  orden_id: number;
+  horas_trabajadas: number;
+  tarifa_hora: number;
+}
+
+export interface RegistroHorasBulkCreate {
+  personal_id: number;
+  fecha: string;
+  tipo_trabajo: string;
+  observaciones?: string | null;
+  items: HoraBulkItem[];
+}
+
 export const laboresApi = {
   listHoras: (params?: FiltrosPeriodo) =>
     api.get<RegistroHoras[]>("/labores/horas", { params }),
 
   createHora: (data: Omit<RegistroHoras, "id" | "total" | "aprobado" | "aprobado_por" | "fecha_aprobacion" | "liquidado" | "fecha_creacion">) =>
     api.post<RegistroHoras>("/labores/horas", data),
+
+  createHorasBulk: (data: RegistroHorasBulkCreate) =>
+    api.post<{ creados: number }>("/labores/horas/bulk", data),
 
   updateHora: (id: number, data: Partial<RegistroHoras>) =>
     api.put<RegistroHoras>(`/labores/horas/${id}`, data),
@@ -23,6 +40,9 @@ export const laboresApi = {
   createLabor: (data: Omit<RegistroLabores, "id" | "total" | "aprobado" | "aprobado_por" | "fecha_aprobacion" | "liquidado" | "fecha_creacion">) =>
     api.post<RegistroLabores>("/labores/labores", data),
 
+  createLaboresBulk: (data: Omit<RegistroLabores, "id" | "total" | "aprobado" | "aprobado_por" | "fecha_aprobacion" | "liquidado" | "fecha_creacion">[]) =>
+    api.post<{ creados: number }>("/labores/labores/bulk", data),
+
   updateLabor: (id: number, data: Partial<RegistroLabores>) =>
     api.put<RegistroLabores>(`/labores/labores/${id}`, data),
 
@@ -32,4 +52,10 @@ export const laboresApi = {
 
   resumen: (params?: { mes?: number; anio?: number }) =>
     api.get<ResumenLabores[]>("/labores/resumen", { params }),
+
+  lookupPersonalCodigo: (codigo: string) =>
+    api.get<{ id: number; nombre_completo: string; identificacion?: string; codigo: string }>(`/personal/by-code/${codigo}`),
+
+  getTarifa: (tipo: string) =>
+    api.get<{ tipo_servicio: string; tarifa: number }>(`/labores/tarifas/${tipo}`),
 };

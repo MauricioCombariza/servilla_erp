@@ -34,6 +34,22 @@ class RegistroHorasRead(RegistroHorasBase):
     fecha_aprobacion: datetime | None = None
     liquidado: bool
     fecha_creacion: datetime | None = None
+    personal_nombre: str | None = None
+    orden_numero: str | None = None
+
+
+class HoraBulkItem(BaseModel):
+    orden_id: int
+    horas_trabajadas: float
+    tarifa_hora: float
+
+
+class RegistroHorasBulkCreate(BaseModel):
+    personal_id: int
+    fecha: date
+    tipo_trabajo: str
+    observaciones: str | None = None
+    items: list[HoraBulkItem]
 
 
 class RegistroLaboresBase(BaseModel):
@@ -67,6 +83,8 @@ class RegistroLaboresRead(RegistroLaboresBase):
     fecha_aprobacion: datetime | None = None
     liquidado: bool
     fecha_creacion: datetime | None = None
+    personal_nombre: str | None = None
+    orden_numero: str | None = None
 
 
 class ResumenLabores(BaseModel):
