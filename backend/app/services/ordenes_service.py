@@ -196,7 +196,7 @@ async def procesar_csv(
     _PENDIENTE = {"0", "lleva mensajero", "lleva ciudad", "pendiente"}
 
     def _mapear_estado(v: str) -> tuple[str, str]:
-        v = (v or "").strip().lower()
+        v = (v if isinstance(v, str) else "").strip().lower()
         if v in _PENDIENTE:
             return ("pendiente", "Entrega")
         if v == "entrega":
