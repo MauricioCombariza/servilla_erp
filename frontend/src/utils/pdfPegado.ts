@@ -27,55 +27,95 @@ export function generarPdfPegado(filas: FilaPegado[], periodo: string): void {
   doc.text(`Período: ${periodo}`, 105, 25, { align: "center" });
   doc.text(`Generado: ${new Date().toLocaleDateString("es-CO")}`, 105, 31, { align: "center" });
 
-  // ── Agrupar por persona (sumar todo el mes) ───────────────────────────────
-  const porPersona = new Map<string, { cantidad: number; tarifa: number; total: number }>();
+  // ── Agrupar: fecha → persona → {cantidad, tarifa, total} ─────────────────
+  const porFecha = new Map<string, Map<string, { cantidad: number; tarifa: number; total: number }>>();
   for (const f of filas) {
+    if (!porFecha.has(f.fecha)) porFecha.set(f.fecha, new Map());
+    const porPersona = porFecha.get(f.fecha)!;
     const prev = porPersona.get(f.personal_nombre);
     if (prev) {
       prev.cantidad += f.cantidad;
-      prev.total += f.total;
+      prev.total    += f.total;
     } else {
-      porPersona.set(f.personal_nombre, {
-        cantidad: f.cantidad,
-        tarifa: f.tarifa_unitaria,
-        total: f.total,
-      });
+      porPersona.set(f.personal_nombre, { cantidad: f.cantidad, tarifa: f.tarifa_unitaria, total: f.total });
     }
   }
 
-  const rows = [...porPersona.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  const totalGuias = rows.reduce((s, [, v]) => s + v.cantidad, 0);
-  const totalValor = rows.reduce((s, [, v]) => s + v.total, 0);
-  const tarifaRef = rows[0]?.[1].tarifa ?? 0;
+  const fechasOrdenadas = [...porFecha.keys()].sort();
+  let totalGenGuias = 0;
+  let totalGenValor = 0;
+  let y = 38;
 
-  autoTable(doc, {
-    startY: 38,
-    head: [["Personal", "Guías pegadas", "Tarifa / guía", "Total"]],
-    body: rows.map(([nombre, v]) => [
-      nombre,
-      fmtNum(v.cantidad),
-      fmtCop(v.tarifa),
-      fmtCop(v.total),
-    ]),
-    foot: [[
-      { content: "TOTAL MES", styles: { fontStyle: "bold" } },
-      { content: fmtNum(totalGuias), styles: { fontStyle: "bold" } },
-      { content: fmtCop(tarifaRef), styles: { fontStyle: "bold" } },
-      { content: fmtCop(totalValor), styles: { fontStyle: "bold" } },
-    ]],
-    theme: "striped",
-    headStyles: { fillColor: [63, 81, 181], fontSize: 10, fontStyle: "bold" },
-    footStyles: { fillColor: [63, 81, 181], textColor: [255, 255, 255], fontSize: 10, fontStyle: "bold" },
-    bodyStyles: { fontSize: 10 },
-    columnStyles: {
-      0: { cellWidth: 80 },
-      1: { halign: "right", cellWidth: 32 },
-      2: { halign: "right", cellWidth: 38 },
-      3: { halign: "right", cellWidth: 33 },
-    },
-    margin: { left: 14, right: 14 },
-    showFoot: "lastPage",
-  });
+  for (const fecha of fechasOrdenadas) {
+    const porPersona = porFecha.get(fecha)!;
+    const rows = [...porPersona.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    const totalGuiasDia = rows.reduce((s, [, v]) => s + v.cantidad, 0);
+    const totalValorDia = rows.reduce((s, [, v]) => s + v.total, 0);
+    totalGenGuias += totalGuiasDia;
+    totalGenValor += totalValorDia;
+
+    // Encabezado de fecha
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.setFillColor(230, 230, 250);
+    doc.rect(14, y, 183, 7, "F");
+    doc.setTextColor(40, 40, 120);
+    doc.text(
+      `${fecha}   ·   ${fmtNum(totalGuiasDia)} guías   ·   ${fmtCop(totalValorDia)}`,
+      16, y + 5
+    );
+    doc.setTextColor(0);
+    y += 9;
+
+    autoTable(doc, {
+      startY: y,
+      head: [["Personal", "Guías pegadas", "Tarifa / guía", "Total"]],
+      body: rows.map(([nombre, v]) => [
+        nombre,
+        fmtNum(v.cantidad),
+        fmtCop(v.tarifa),
+        fmtCop(v.total),
+      ]),
+      foot: [[
+        { content: "Subtotal día", styles: { fontStyle: "bold" } },
+        { content: fmtNum(totalGuiasDia), styles: { fontStyle: "bold" } },
+        "",
+        { content: fmtCop(totalValorDia), styles: { fontStyle: "bold" } },
+      ]],
+      theme: "striped",
+      headStyles: { fillColor: [63, 81, 181], fontSize: 9, fontStyle: "bold" },
+      footStyles: { fillColor: [220, 220, 235], textColor: [30, 30, 30], fontSize: 9 },
+      bodyStyles: { fontSize: 9 },
+      columnStyles: {
+        0: { cellWidth: 80 },
+        1: { halign: "right", cellWidth: 32 },
+        2: { halign: "right", cellWidth: 38 },
+        3: { halign: "right", cellWidth: 33 },
+      },
+      margin: { left: 14, right: 14 },
+      showFoot: "lastPage",
+    });
+
+    y = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
+
+    if (y > 240 && fechasOrdenadas.indexOf(fecha) < fechasOrdenadas.length - 1) {
+      doc.addPage();
+      y = 18;
+    }
+  }
+
+  // ── Total general del mes ─────────────────────────────────────────────────
+  if (y > 250) { doc.addPage(); y = 18; }
+
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.setFillColor(63, 81, 181);
+  doc.setTextColor(255, 255, 255);
+  doc.rect(14, y, 183, 9, "F");
+  doc.text("TOTAL MES", 16, y + 6);
+  doc.text(fmtNum(totalGenGuias) + " guías", 110, y + 6, { align: "right" });
+  doc.text(fmtCop(totalGenValor), 197, y + 6, { align: "right" });
+  doc.setTextColor(0);
 
   // ── Pie de página ─────────────────────────────────────────────────────────
   const pages = doc.getNumberOfPages();
