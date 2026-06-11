@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timezone
+from datetime import date
 
 from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,7 +44,7 @@ async def resumen_planillas(
     seriales = list((await db.execute(q)).scalars().all())
 
     # Cargar planillas revisadas para lookup O(1)
-    revisadas_rows = (await db.execute(select(PlanillaRevisada.planilla))).scalars().all()
+    revisadas_rows = (await db.execute(select(PlanillaRevisada.lot_esc))).scalars().all()
     revisadas: set[str] = set(revisadas_rows)
 
     groups: dict[tuple[str, str], list[SerialGestion]] = {}
@@ -297,13 +297,13 @@ async def bloquear_por_rango(req: BloquearRangoRequest, db: AsyncSession) -> Blo
 
 async def marcar_revisada(planilla: str, revisado_por: str | None, db: AsyncSession) -> MarcarRevisadaResult:
     existing = (
-        await db.execute(select(PlanillaRevisada).where(PlanillaRevisada.planilla == planilla))
+        await db.execute(select(PlanillaRevisada).where(PlanillaRevisada.lot_esc == planilla))
     ).scalar_one_or_none()
 
     if existing is None:
         db.add(PlanillaRevisada(
-            planilla=planilla,
-            fecha_revision=datetime.now(timezone.utc),
+            lot_esc=planilla,
+            fecha_revision=date.today(),
             revisado_por=revisado_por,
         ))
         await db.commit()
@@ -313,7 +313,7 @@ async def marcar_revisada(planilla: str, revisado_por: str | None, db: AsyncSess
 
 async def desmarcar_revisada(planilla: str, db: AsyncSession) -> MarcarRevisadaResult:
     await db.execute(
-        delete(PlanillaRevisada).where(PlanillaRevisada.planilla == planilla)
+        delete(PlanillaRevisada).where(PlanillaRevisada.lot_esc == planilla)
     )
     await db.commit()
     return MarcarRevisadaResult(planilla=planilla, revisada=False)

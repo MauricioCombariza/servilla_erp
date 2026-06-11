@@ -1,4 +1,4 @@
-"""Add planillas_revisadas table
+"""Add revisado_por to planillas_revisadas
 
 Revision ID: 005
 Revises: 004
@@ -16,14 +16,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # La tabla planillas_revisadas ya existe desde 001_initial_schema.
+    # Solo agregamos la columna revisado_por si no existe.
     op.execute("""
-        CREATE TABLE IF NOT EXISTS planillas_revisadas (
-            planilla VARCHAR(100) NOT NULL PRIMARY KEY,
-            fecha_revision TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-            revisado_por VARCHAR(100)
-        )
+        ALTER TABLE planillas_revisadas
+        ADD COLUMN IF NOT EXISTS revisado_por VARCHAR(100)
     """)
 
 
 def downgrade() -> None:
-    op.drop_table("planillas_revisadas")
+    op.execute("ALTER TABLE planillas_revisadas DROP COLUMN IF EXISTS revisado_por")
