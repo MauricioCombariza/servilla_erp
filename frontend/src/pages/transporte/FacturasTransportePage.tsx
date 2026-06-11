@@ -494,6 +494,8 @@ function DetallePanel({
 
 // ── Formulario nueva factura ──────────────────────────────────────────────────
 
+interface LineaOrden { orden: Orden; cantidad_sobres: number }
+
 function FacturaTransporteForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const { data: personal = [] } = useQuery({
     queryKey: ["personal-courier"],
@@ -501,33 +503,68 @@ function FacturaTransporteForm({ onClose, onSaved }: { onClose: () => void; onSa
       r.data.filter((p) => ["courier_externo","transportadora"].includes(p.tipo_personal))
     ),
   });
+  const { data: ordenesDisp = [] } = useQuery({
+    queryKey: ["ordenes-activas-form"],
+    queryFn: () => ordenesApi.list({ estado: "activa", limit: 500 }).then((r) => r.data),
+  });
+
   const [form, setForm] = useState({
     numero_factura: "", courrier_id: 0, fecha_factura: HOY_STR,
-    monto_total: 0, total_sobres: 0, fecha_vencimiento: "", observaciones: "",
+    monto_total: 0, fecha_vencimiento: "", observaciones: "",
   });
+  const [lineas, setLineas] = useState<LineaOrden[]>([]);
+  const [selOrdenId, setSelOrdenId] = useState<number | "">("");
+  const [selSobres, setSelSobres] = useState(1);
   const [saving, setSaving] = useState(false);
+
+  const totalSobres = lineas.reduce((s, l) => s + l.cantidad_sobres, 0);
+  const asignadasIds = new Set(lineas.map((l) => l.orden.id));
+  const disponibles = ordenesDisp.filter((o) => !asignadasIds.has(o.id));
+
+  function agregarLinea() {
+    if (!selOrdenId) return;
+    const orden = ordenesDisp.find((o) => o.id === selOrdenId);
+    if (!orden) return;
+    setLineas((prev) => [...prev, { orden, cantidad_sobres: selSobres }]);
+    setSelOrdenId("");
+    setSelSobres(1);
+  }
+
+  function quitarLinea(idx: number) {
+    setLineas((prev) => prev.filter((_, i) => i !== idx));
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
     try {
-      await transpApi.create({
+      const res = await transpApi.create({
         ...form,
+        total_sobres: 0,
         fecha_vencimiento: form.fecha_vencimiento || null,
         observaciones: form.observaciones || null,
       });
+      const facturaId = (res.data as FacturaTransporte).id;
+      for (const linea of lineas) {
+        await transpApi.addDetalle(facturaId, {
+          orden_id: linea.orden.id,
+          cantidad_sobres: linea.cantidad_sobres,
+        });
+      }
       onSaved();
     } finally { setSaving(false); }
   }
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg">
-        <div className="px-6 py-4 border-b flex items-center justify-between">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+        <div className="px-6 py-4 border-b flex items-center justify-between shrink-0">
           <h2 className="text-base font-semibold">Registrar factura de transporte</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
         </div>
-        <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
+        <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4 overflow-y-auto flex-1">
+
+          {/* Cabecera */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">N° Factura *</label>
@@ -556,27 +593,100 @@ function FacturaTransporteForm({ onClose, onSaved }: { onClose: () => void; onSa
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Total sobres</label>
-              <input type="number" min={0} value={form.total_sobres}
-                onChange={(e) => setForm({ ...form, total_sobres: +e.target.value })}
+              <label className="block text-xs font-medium text-gray-700 mb-1">Fecha vencimiento</label>
+              <input type="date" value={form.fecha_vencimiento} onChange={(e) => setForm({ ...form, fecha_vencimiento: e.target.value })}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
             </div>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Fecha vencimiento</label>
-            <input type="date" value={form.fecha_vencimiento} onChange={(e) => setForm({ ...form, fecha_vencimiento: e.target.value })}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+
+          {/* Detalle por orden */}
+          <div className="border-t pt-4">
+            <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-3">
+              Detalle por orden
+            </p>
+
+            {/* Selector para agregar */}
+            <div className="flex items-center gap-2 mb-3">
+              <select value={selOrdenId} onChange={(e) => setSelOrdenId(e.target.value ? +e.target.value : "")}
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm flex-1">
+                <option value="">— Seleccionar orden —</option>
+                {disponibles.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.numero_orden} · {o.cliente.nombre_empresa} ({o.cantidad_total} items)
+                  </option>
+                ))}
+              </select>
+              <input type="number" min={1} value={selSobres}
+                onChange={(e) => setSelSobres(Math.max(1, +e.target.value))}
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-24"
+                placeholder="Sobres" />
+              <button type="button" onClick={agregarLinea} disabled={!selOrdenId}
+                className="bg-gray-800 text-white rounded-lg px-4 py-2 text-sm hover:bg-gray-700 disabled:opacity-40 whitespace-nowrap">
+                + Agregar
+              </button>
+            </div>
+
+            {/* Tabla preview */}
+            {lineas.length > 0 && (
+              <div className="rounded-lg border border-gray-200 overflow-hidden mb-3">
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      {["Orden","Cliente","Sobres","%","Costo asignado",""].map((h) => (
+                        <th key={h} className="text-left px-3 py-2 font-medium text-gray-500">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {lineas.map((l, idx) => {
+                      const pct = totalSobres > 0 ? (l.cantidad_sobres / totalSobres * 100) : 0;
+                      const costo = totalSobres > 0 ? (form.monto_total * l.cantidad_sobres / totalSobres) : 0;
+                      return (
+                        <tr key={idx} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 font-mono text-gray-700">{l.orden.numero_orden}</td>
+                          <td className="px-3 py-2 text-gray-600">{l.orden.cliente.nombre_empresa}</td>
+                          <td className="px-3 py-2 text-gray-600">{l.cantidad_sobres}</td>
+                          <td className="px-3 py-2 text-gray-500">{pct.toFixed(1)}%</td>
+                          <td className="px-3 py-2 font-medium text-gray-800">
+                            ${fmt.format(costo)}
+                          </td>
+                          <td className="px-3 py-2">
+                            <button type="button" onClick={() => quitarLinea(idx)}
+                              className="text-gray-300 hover:text-red-500">
+                              <X size={13} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot className="bg-gray-50 border-t border-gray-200">
+                    <tr>
+                      <td colSpan={2} className="px-3 py-2 text-xs font-medium text-gray-600">
+                        {lineas.length} orden{lineas.length !== 1 ? "es" : ""}
+                      </td>
+                      <td className="px-3 py-2 font-medium text-gray-700">{totalSobres}</td>
+                      <td className="px-3 py-2 text-gray-500">100%</td>
+                      <td className="px-3 py-2 font-semibold text-gray-800">${fmt.format(form.monto_total)}</td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
           </div>
+
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">Observaciones</label>
             <textarea rows={2} value={form.observaciones} onChange={(e) => setForm({ ...form, observaciones: e.target.value })}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none" />
           </div>
-          <div className="flex justify-end gap-3 pt-2">
+
+          <div className="flex justify-end gap-3 pt-2 border-t">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg">Cancelar</button>
             <button type="submit" disabled={saving}
               className="px-4 py-2 text-sm bg-primary hover:bg-primary-hover text-white rounded-lg disabled:opacity-60">
-              {saving ? "Guardando..." : "Guardar"}
+              {saving ? "Guardando..." : `Guardar factura${lineas.length > 0 ? ` (${lineas.length} órdenes)` : ""}`}
             </button>
           </div>
         </form>
