@@ -16,17 +16,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "planillas_revisadas",
-        sa.Column("planilla", sa.String(100), primary_key=True),
-        sa.Column(
-            "fecha_revision",
-            sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
-            nullable=False,
-        ),
-        sa.Column("revisado_por", sa.String(100), nullable=True),
-    )
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS planillas_revisadas (
+            planilla VARCHAR(100) NOT NULL PRIMARY KEY,
+            fecha_revision TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+            revisado_por VARCHAR(100)
+        )
+    """)
 
 
 def downgrade() -> None:
