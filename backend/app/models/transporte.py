@@ -46,3 +46,4 @@ class DetalleFacturaTransporte(Base):
     costo_asignado: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
 
     factura: Mapped["FacturaTransporte"] = relationship(back_populates="detalles")
+    orden: Mapped["Orden"] = relationship("Orden", lazy="selectin")  # type: ignore[name-defined]

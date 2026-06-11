@@ -10,6 +10,13 @@ class DetalleTransporteRead(BaseModel):
     orden_id: int | None
     cantidad_sobres: int
     costo_asignado: float
+    numero_orden: str | None = None
+    cliente_nombre: str | None = None
+
+
+class DetalleTransporteCreate(BaseModel):
+    orden_id: int
+    cantidad_sobres: int
 
 
 class FacturaTransporteCreate(BaseModel):
@@ -24,9 +31,13 @@ class FacturaTransporteCreate(BaseModel):
 
 class FacturaTransporteUpdate(BaseModel):
     numero_factura: str | None = None
+    fecha_factura: date | None = None
+    courrier_id: int | None = None
     monto_total: float | None = None
     total_sobres: int | None = None
     fecha_vencimiento: date | None = None
+    estado: str | None = None
+    monto_pagado: float | None = None
     observaciones: str | None = None
 
 
@@ -66,3 +77,20 @@ class PrefacturaCourier(BaseModel):
     precio_local_promedio: float
     precio_nacional_promedio: float
     monto_estimado: float
+
+
+class ResumenCourierReal(BaseModel):
+    courrier: str
+    total_facturas: int
+    monto_total: float
+    monto_pagado: float
+    pendiente: float
+    total_sobres: int
+    costo_por_sobre: float
+
+
+class ResumenClienteFlete(BaseModel):
+    cliente: str
+    total_sobres: int
+    costo_total: float
+    costo_por_sobre: float

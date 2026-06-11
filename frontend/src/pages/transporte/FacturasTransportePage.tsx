@@ -1,19 +1,22 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, DollarSign, Trash2 } from "lucide-react";
+import { Plus, DollarSign, Trash2, ChevronDown, ChevronRight, Pencil, X } from "lucide-react";
 import api from "@/api/client";
 import { personalApi } from "@/api/personal";
+import { ordenesApi } from "@/api/ordenes";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
+import type { Orden } from "@/types/domain";
 
 const fmt = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 });
 const MESES = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
 const HOY = new Date();
+const HOY_STR = HOY.toISOString().slice(0, 10);
+const PRIMER_DIA = new Date(HOY.getFullYear(), HOY.getMonth(), 1).toISOString().slice(0, 10);
 
-interface PrefacturaCourier {
-  cod_mensajero: string; mensajero_id: number | null; nombre_completo: string | null;
-  periodo_mes: number; periodo_anio: number; total_planillas: number;
-  total_local: number; total_nacional: number; total_seriales: number;
-  precio_local_promedio: number; precio_nacional_promedio: number; monto_estimado: number;
+interface DetalleFactura {
+  id: number; factura_id: number; orden_id: number | null;
+  cantidad_sobres: number; costo_asignado: number;
+  numero_orden: string | null; cliente_nombre: string | null;
 }
 
 interface FacturaTransporte {
@@ -21,16 +24,34 @@ interface FacturaTransporte {
   courrier_id: number; courrier: { id: number; codigo: string; nombre_completo: string };
   monto_total: number; total_sobres: number; monto_pagado: number;
   estado: string; fecha_vencimiento: string | null; observaciones: string | null;
-  fecha_creacion: string | null; detalles: unknown[];
+  fecha_creacion: string | null; detalles: DetalleFactura[];
+}
+
+interface ResumenCourierReal {
+  courrier: string; total_facturas: number; monto_total: number;
+  monto_pagado: number; pendiente: number; total_sobres: number; costo_por_sobre: number;
+}
+
+interface ResumenClienteFlete {
+  cliente: string; total_sobres: number; costo_total: number; costo_por_sobre: number;
 }
 
 const transpApi = {
   prefacturas: (mes: number, anio: number) =>
-    api.get<PrefacturaCourier[]>("/transporte/prefacturas", { params: { mes, anio } }),
+    api.get("/transporte/prefacturas", { params: { mes, anio } }),
   list: (params: object) => api.get<FacturaTransporte[]>("/transporte/", { params }),
   create: (data: object) => api.post<FacturaTransporte>("/transporte/", data),
+  update: (id: number, data: object) => api.put<FacturaTransporte>(`/transporte/${id}`, data),
   pagar: (id: number, data: object) => api.post<FacturaTransporte>(`/transporte/${id}/pagar`, data),
   delete: (id: number) => api.delete(`/transporte/${id}`),
+  addDetalle: (facturaId: number, data: object) =>
+    api.post<FacturaTransporte>(`/transporte/${facturaId}/detalles`, data),
+  removeDetalle: (facturaId: number, detalleId: number) =>
+    api.delete<FacturaTransporte>(`/transporte/${facturaId}/detalles/${detalleId}`),
+  resumenReal: (anio: number, mes?: number) =>
+    api.get<{ couriers: ResumenCourierReal[]; clientes: ResumenClienteFlete[] }>(
+      "/transporte/resumen-real", { params: { anio, ...(mes ? { mes } : {}) } }
+    ),
 };
 
 const ESTADO_STYLE: Record<string, string> = {
@@ -39,15 +60,22 @@ const ESTADO_STYLE: Record<string, string> = {
   anulada:   "bg-gray-100 text-gray-400",
 };
 
-type Tab = "prefacturas" | "facturas";
+type Tab = "prefacturas" | "resumen" | "facturas";
+
+// ── Página principal ──────────────────────────────────────────────────────────
 
 export function FacturasTransportePage() {
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>("prefacturas");
   const [mes, setMes] = useState(HOY.getMonth() + 1);
   const [anio, setAnio] = useState(HOY.getFullYear());
+  const [desde, setDesde] = useState(PRIMER_DIA);
+  const [hasta, setHasta] = useState(HOY_STR);
+  const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [pagando, setPagando] = useState<FacturaTransporte | null>(null);
+  const [editando, setEditando] = useState<FacturaTransporte | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
 
   const { data: prefacturas = [], isLoading: loadPre } = useQuery({
     queryKey: ["prefacturas", mes, anio],
@@ -55,9 +83,21 @@ export function FacturasTransportePage() {
     enabled: tab === "prefacturas",
   });
 
+  const { data: resumen, isLoading: loadResumen } = useQuery({
+    queryKey: ["transporte-resumen-real", anio, mes],
+    queryFn: () => transpApi.resumenReal(anio, mes).then((r) => r.data),
+    enabled: tab === "resumen",
+  });
+
   const { data: facturas = [], isLoading: loadFact } = useQuery({
-    queryKey: ["facturas-transporte"],
-    queryFn: () => transpApi.list({}).then((r) => r.data),
+    queryKey: ["facturas-transporte", desde, hasta, search],
+    queryFn: () => transpApi.list({ fecha_desde: desde, fecha_hasta: hasta, search: search || undefined }).then((r) => r.data),
+    enabled: tab === "facturas",
+  });
+
+  const { data: ordenes = [] } = useQuery({
+    queryKey: ["ordenes-activas"],
+    queryFn: () => ordenesApi.list({ estado: "activa", limit: 500 }).then((r) => r.data),
     enabled: tab === "facturas",
   });
 
@@ -66,8 +106,14 @@ export function FacturasTransportePage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["facturas-transporte"] }),
   });
 
-  const totalPrefacturas = prefacturas.reduce((s, p) => s + p.monto_estimado, 0);
-  const totalPendienteFact = facturas.filter((f) => f.estado !== "pagada").reduce((s, f) => s + (f.monto_total - f.monto_pagado), 0);
+  const totalPre = (prefacturas as any[]).reduce((s: number, p: any) => s + p.monto_estimado, 0);
+  const totalPendiente = facturas.filter((f) => f.estado !== "pagada").reduce((s, f) => s + (f.monto_total - f.monto_pagado), 0);
+
+  const tabs: { key: Tab; label: string }[] = [
+    { key: "prefacturas", label: "Prefacturas (estimado)" },
+    { key: "resumen",     label: "Resumen real" },
+    { key: "facturas",    label: "Facturas registradas" },
+  ];
 
   return (
     <div>
@@ -75,13 +121,13 @@ export function FacturasTransportePage() {
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Facturas Transporte / Couriers</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            {tab === "prefacturas"
-              ? `${MESES[mes-1]} ${anio} · Estimado: $${fmt.format(totalPrefacturas)}`
-              : `Saldo pendiente: $${fmt.format(totalPendienteFact)}`}
+            {tab === "prefacturas" && `${MESES[mes-1]} ${anio} · Estimado: $${fmt.format(totalPre)}`}
+            {tab === "resumen"     && `${MESES[mes-1]} ${anio}`}
+            {tab === "facturas"   && `Saldo pendiente: $${fmt.format(totalPendiente)}`}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {tab === "prefacturas" && (
+          {(tab === "prefacturas" || tab === "resumen") && (
             <>
               <select value={mes} onChange={(e) => setMes(+e.target.value)}
                 className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm">
@@ -100,104 +146,212 @@ export function FacturasTransportePage() {
         </div>
       </div>
 
+      {/* Tabs */}
       <div className="flex border-b border-gray-200 mb-4">
-        {(["prefacturas","facturas"] as Tab[]).map((t) => (
-          <button key={t} onClick={() => setTab(t)}
+        {tabs.map((t) => (
+          <button key={t.key} onClick={() => setTab(t.key)}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              tab === t ? "border-primary text-primary" : "border-transparent text-gray-500 hover:text-gray-700"
+              tab === t.key ? "border-primary text-primary" : "border-transparent text-gray-500 hover:text-gray-700"
             }`}>
-            {t === "prefacturas" ? "Resumen por courier (prefacturas)" : "Facturas registradas"}
+            {t.label}
           </button>
         ))}
       </div>
 
+      {/* Tab: Prefacturas */}
       {tab === "prefacturas" && (
-        <>
-          {loadPre ? <div className="text-center py-16 text-gray-500">Cargando...</div>
-          : prefacturas.length === 0 ? <div className="text-center py-16 text-gray-400">Sin gestiones de couriers en este período</div>
-          : (
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    {["Courier","Planillas","Local","Nacional","Total seriales","P. local prom.","P. nac. prom.","Monto estimado"].map((h) => (
-                      <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
-                    ))}
+        loadPre ? <div className="text-center py-16 text-gray-500">Cargando...</div>
+        : (prefacturas as any[]).length === 0 ? <div className="text-center py-16 text-gray-400">Sin gestiones de couriers en este período</div>
+        : (
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>{["Courier","Planillas","Local","Nacional","Total seriales","P. local prom.","P. nac. prom.","Monto estimado"].map((h) => (
+                  <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
+                ))}</tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {(prefacturas as any[]).map((p) => (
+                  <tr key={p.cod_mensajero} className="hover:bg-gray-50">
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-gray-900">{p.nombre_completo ?? p.cod_mensajero}</p>
+                      <p className="text-xs text-gray-400">{p.cod_mensajero}</p>
+                    </td>
+                    <td className="px-4 py-3 text-gray-600">{p.total_planillas}</td>
+                    <td className="px-4 py-3 text-gray-600">{p.total_local}</td>
+                    <td className="px-4 py-3 text-gray-600">{p.total_nacional}</td>
+                    <td className="px-4 py-3 text-gray-600">{p.total_seriales}</td>
+                    <td className="px-4 py-3 text-gray-600"><CurrencyCell value={p.precio_local_promedio} /></td>
+                    <td className="px-4 py-3 text-gray-600"><CurrencyCell value={p.precio_nacional_promedio} /></td>
+                    <td className="px-4 py-3 font-semibold text-gray-900"><CurrencyCell value={p.monto_estimado} /></td>
                   </tr>
+                ))}
+              </tbody>
+              <tfoot className="bg-gray-50 border-t border-gray-200">
+                <tr>
+                  <td colSpan={7} className="px-4 py-3 text-sm font-medium text-gray-700">Total estimado</td>
+                  <td className="px-4 py-3 font-semibold text-gray-900"><CurrencyCell value={totalPre} /></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )
+      )}
+
+      {/* Tab: Resumen real */}
+      {tab === "resumen" && (
+        loadResumen ? <div className="text-center py-16 text-gray-500">Cargando...</div>
+        : !resumen || resumen.couriers.length === 0 ? <div className="text-center py-16 text-gray-400">Sin facturas en este período</div>
+        : (
+          <div className="space-y-6">
+            {/* Por courier */}
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
+                <h2 className="text-sm font-semibold text-gray-700">Por courier</h2>
+              </div>
+              <table className="w-full text-sm">
+                <thead className="border-b border-gray-200">
+                  <tr>{["Courier","Facturas","Monto total","Pagado","Pendiente","Sobres","$/Sobre"].map((h) => (
+                    <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
+                  ))}</tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {prefacturas.map((p) => (
-                    <tr key={p.cod_mensajero} className="hover:bg-gray-50">
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-gray-900">{p.nombre_completo ?? p.cod_mensajero}</p>
-                        <p className="text-xs text-gray-400">{p.cod_mensajero}</p>
-                      </td>
-                      <td className="px-4 py-3 text-gray-600">{p.total_planillas}</td>
-                      <td className="px-4 py-3 text-gray-600">{p.total_local}</td>
-                      <td className="px-4 py-3 text-gray-600">{p.total_nacional}</td>
-                      <td className="px-4 py-3 text-gray-600">{p.total_seriales}</td>
-                      <td className="px-4 py-3 text-gray-600"><CurrencyCell value={p.precio_local_promedio} /></td>
-                      <td className="px-4 py-3 text-gray-600"><CurrencyCell value={p.precio_nacional_promedio} /></td>
-                      <td className="px-4 py-3 font-semibold text-gray-900"><CurrencyCell value={p.monto_estimado} /></td>
+                  {resumen.couriers.map((c) => (
+                    <tr key={c.courrier} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 font-medium text-gray-900">{c.courrier}</td>
+                      <td className="px-4 py-3 text-gray-600">{c.total_facturas}</td>
+                      <td className="px-4 py-3 font-semibold"><CurrencyCell value={c.monto_total} /></td>
+                      <td className="px-4 py-3 text-green-700"><CurrencyCell value={c.monto_pagado} /></td>
+                      <td className="px-4 py-3 text-red-600"><CurrencyCell value={c.pendiente} /></td>
+                      <td className="px-4 py-3 text-gray-600">{fmt.format(c.total_sobres)}</td>
+                      <td className="px-4 py-3 text-gray-600"><CurrencyCell value={c.costo_por_sobre} /></td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot className="bg-gray-50 border-t border-gray-200">
                   <tr>
-                    <td colSpan={7} className="px-4 py-3 text-sm font-medium text-gray-700">Total estimado</td>
-                    <td className="px-4 py-3 font-semibold text-gray-900"><CurrencyCell value={totalPrefacturas} /></td>
+                    <td className="px-4 py-3 text-sm font-medium text-gray-700">Total</td>
+                    <td className="px-4 py-3 text-gray-600">{resumen.couriers.reduce((s, c) => s + c.total_facturas, 0)}</td>
+                    <td className="px-4 py-3 font-semibold"><CurrencyCell value={resumen.couriers.reduce((s, c) => s + c.monto_total, 0)} /></td>
+                    <td className="px-4 py-3 text-green-700"><CurrencyCell value={resumen.couriers.reduce((s, c) => s + c.monto_pagado, 0)} /></td>
+                    <td className="px-4 py-3 text-red-600"><CurrencyCell value={resumen.couriers.reduce((s, c) => s + c.pendiente, 0)} /></td>
+                    <td colSpan={2} />
                   </tr>
                 </tfoot>
               </table>
             </div>
-          )}
-        </>
+
+            {/* Por cliente */}
+            {resumen.clientes.length > 0 && (
+              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
+                  <h2 className="text-sm font-semibold text-gray-700">Distribución por cliente</h2>
+                </div>
+                <table className="w-full text-sm">
+                  <thead className="border-b border-gray-200">
+                    <tr>{["Cliente","Sobres","Costo total","$/Sobre"].map((h) => (
+                      <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
+                    ))}</tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {resumen.clientes.map((c) => (
+                      <tr key={c.cliente} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 font-medium text-gray-900">{c.cliente}</td>
+                        <td className="px-4 py-3 text-gray-600">{fmt.format(c.total_sobres)}</td>
+                        <td className="px-4 py-3 font-semibold"><CurrencyCell value={c.costo_total} /></td>
+                        <td className="px-4 py-3 text-gray-600"><CurrencyCell value={c.costo_por_sobre} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )
       )}
 
+      {/* Tab: Facturas */}
       {tab === "facturas" && (
         <>
+          {/* Filtros */}
+          <div className="flex items-center gap-3 mb-4">
+            <input placeholder="Buscar factura o courier..." value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-60" />
+            <label className="text-xs text-gray-500">Desde</label>
+            <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm" />
+            <label className="text-xs text-gray-500">Hasta</label>
+            <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm" />
+          </div>
+
           {loadFact ? <div className="text-center py-16 text-gray-500">Cargando...</div>
-          : facturas.length === 0 ? <div className="text-center py-16 text-gray-400">Sin facturas registradas</div>
+          : facturas.length === 0 ? <div className="text-center py-16 text-gray-400">Sin facturas en el período</div>
           : (
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    {["N° Factura","Courier","Fecha","Vencimiento","Sobres","Total","Pagado","Estado",""].map((h) => (
-                      <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
-                    ))}
-                  </tr>
+                  <tr>{["","N° Factura","Courier","Fecha","Vencimiento","Sobres","Total","Pagado","Estado",""].map((h, i) => (
+                    <th key={i} className="text-left px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
+                  ))}</tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody>
                   {facturas.map((f) => (
-                    <tr key={f.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-mono text-xs text-gray-700">{f.numero_factura}</td>
-                      <td className="px-4 py-3 text-gray-900">{f.courrier?.nombre_completo ?? "—"}</td>
-                      <td className="px-4 py-3 text-gray-600 text-xs">{f.fecha_factura}</td>
-                      <td className="px-4 py-3 text-gray-600 text-xs">{f.fecha_vencimiento ?? "—"}</td>
-                      <td className="px-4 py-3 text-gray-600">{f.total_sobres}</td>
-                      <td className="px-4 py-3 font-medium"><CurrencyCell value={f.monto_total} /></td>
-                      <td className="px-4 py-3 text-green-700"><CurrencyCell value={f.monto_pagado} /></td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${ESTADO_STYLE[f.estado] ?? ""}`}>{f.estado}</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          {f.estado !== "pagada" && (
-                            <button onClick={() => setPagando(f)}
-                              className="text-gray-400 hover:text-green-600" title="Registrar pago">
-                              <DollarSign size={15} />
+                    <>
+                      <tr key={f.id} className={`border-b border-gray-100 hover:bg-gray-50 ${expandedId === f.id ? "bg-blue-50" : ""}`}>
+                        <td className="px-3 py-3 w-6">
+                          <button onClick={() => setExpandedId(expandedId === f.id ? null : f.id)}
+                            className="text-gray-400 hover:text-gray-700">
+                            {expandedId === f.id ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                          </button>
+                        </td>
+                        <td className="px-3 py-3 font-mono text-xs text-gray-700">{f.numero_factura}</td>
+                        <td className="px-3 py-3 text-gray-900">{f.courrier?.nombre_completo ?? "—"}</td>
+                        <td className="px-3 py-3 text-gray-600 text-xs">{f.fecha_factura}</td>
+                        <td className="px-3 py-3 text-gray-600 text-xs">{f.fecha_vencimiento ?? "—"}</td>
+                        <td className="px-3 py-3 text-gray-600">{f.total_sobres}</td>
+                        <td className="px-3 py-3 font-medium"><CurrencyCell value={f.monto_total} /></td>
+                        <td className="px-3 py-3 text-green-700"><CurrencyCell value={f.monto_pagado} /></td>
+                        <td className="px-3 py-3">
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${ESTADO_STYLE[f.estado] ?? ""}`}>{f.estado}</span>
+                        </td>
+                        <td className="px-3 py-3">
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => setEditando(f)} className="text-gray-400 hover:text-blue-600" title="Editar">
+                              <Pencil size={14} />
                             </button>
-                          )}
-                          {f.estado !== "pagada" && (
-                            <button onClick={() => { if (confirm("¿Eliminar factura?")) eliminar.mutate(f.id); }}
-                              className="text-gray-400 hover:text-red-500">
-                              <Trash2 size={15} />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
+                            {f.estado !== "pagada" && (
+                              <button onClick={() => setPagando(f)} className="text-gray-400 hover:text-green-600" title="Registrar pago">
+                                <DollarSign size={14} />
+                              </button>
+                            )}
+                            {f.estado !== "pagada" && (
+                              <button onClick={() => { if (confirm("¿Eliminar factura?")) eliminar.mutate(f.id); }}
+                                className="text-gray-400 hover:text-red-500" title="Eliminar">
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                      {expandedId === f.id && (
+                        <tr key={`det-${f.id}`}>
+                          <td colSpan={10} className="bg-blue-50 px-6 py-4 border-b border-gray-200">
+                            <DetallePanel
+                              factura={f}
+                              ordenes={ordenes}
+                              onUpdated={(updated) => {
+                                qc.setQueryData<FacturaTransporte[]>(
+                                  ["facturas-transporte", desde, hasta, search],
+                                  (prev) => prev?.map((x) => x.id === updated.id ? updated : x) ?? prev
+                                );
+                              }}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </>
                   ))}
                 </tbody>
               </table>
@@ -206,30 +360,164 @@ export function FacturasTransportePage() {
         </>
       )}
 
-      {showForm && <FacturaTransporteForm onClose={() => setShowForm(false)} onSaved={() => { qc.invalidateQueries({ queryKey: ["facturas-transporte"] }); setShowForm(false); }} />}
-      {pagando && <PagarTransporteModal factura={pagando} onClose={() => setPagando(null)} onSaved={() => { qc.invalidateQueries({ queryKey: ["facturas-transporte"] }); setPagando(null); }} />}
+      {showForm && (
+        <FacturaTransporteForm
+          onClose={() => setShowForm(false)}
+          onSaved={() => { qc.invalidateQueries({ queryKey: ["facturas-transporte"] }); setShowForm(false); }}
+        />
+      )}
+      {pagando && (
+        <PagarTransporteModal
+          factura={pagando}
+          onClose={() => setPagando(null)}
+          onSaved={() => { qc.invalidateQueries({ queryKey: ["facturas-transporte"] }); setPagando(null); }}
+        />
+      )}
+      {editando && (
+        <EditFacturaModal
+          factura={editando}
+          onClose={() => setEditando(null)}
+          onSaved={(updated) => {
+            qc.setQueryData<FacturaTransporte[]>(
+              ["facturas-transporte", desde, hasta, search],
+              (prev) => prev?.map((x) => x.id === updated.id ? updated : x) ?? prev
+            );
+            setEditando(null);
+          }}
+        />
+      )}
     </div>
   );
 }
 
-// ── Formulario nueva factura ───────────────────────────────────────────────────
+// ── Panel de detalles (órdenes asignadas) ─────────────────────────────────────
+
+function DetallePanel({
+  factura, ordenes, onUpdated,
+}: {
+  factura: FacturaTransporte;
+  ordenes: Orden[];
+  onUpdated: (updated: FacturaTransporte) => void;
+}) {
+  const [addOrdenId, setAddOrdenId] = useState<number | "">("");
+  const [addSobres, setAddSobres] = useState(1);
+  const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState<number | null>(null);
+
+  const asignadasIds = new Set(factura.detalles.map((d) => d.orden_id));
+  const disponibles = ordenes.filter((o) => !asignadasIds.has(o.id));
+
+  async function handleAdd() {
+    if (!addOrdenId) return;
+    setSaving(true);
+    try {
+      const res = await transpApi.addDetalle(factura.id, { orden_id: addOrdenId, cantidad_sobres: addSobres });
+      onUpdated(res.data);
+      setAddOrdenId("");
+      setAddSobres(1);
+    } finally { setSaving(false); }
+  }
+
+  async function handleRemove(detalleId: number) {
+    setRemoving(detalleId);
+    try {
+      const res = await transpApi.removeDetalle(factura.id, detalleId);
+      onUpdated(res.data);
+    } finally { setRemoving(null); }
+  }
+
+  const totalSobresDetalle = factura.detalles.reduce((s, d) => s + d.cantidad_sobres, 0);
+
+  return (
+    <div>
+      <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">
+        Órdenes asignadas ({factura.detalles.length})
+      </p>
+      {factura.detalles.length > 0 ? (
+        <table className="w-full text-xs mb-3">
+          <thead>
+            <tr className="text-gray-500">
+              <th className="text-left py-1 pr-4 font-medium">Orden</th>
+              <th className="text-left py-1 pr-4 font-medium">Cliente</th>
+              <th className="text-right py-1 pr-4 font-medium">Sobres</th>
+              <th className="text-right py-1 pr-4 font-medium">%</th>
+              <th className="text-right py-1 pr-4 font-medium">Costo asignado</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-blue-100">
+            {factura.detalles.map((d) => {
+              const pct = totalSobresDetalle > 0 ? (d.cantidad_sobres / totalSobresDetalle * 100).toFixed(1) : "0";
+              return (
+                <tr key={d.id} className="text-gray-700">
+                  <td className="py-1 pr-4 font-mono">{d.numero_orden ?? `#${d.orden_id}`}</td>
+                  <td className="py-1 pr-4">{d.cliente_nombre ?? "—"}</td>
+                  <td className="py-1 pr-4 text-right">{d.cantidad_sobres}</td>
+                  <td className="py-1 pr-4 text-right text-gray-500">{pct}%</td>
+                  <td className="py-1 pr-4 text-right font-medium">
+                    <CurrencyCell value={d.costo_asignado} />
+                  </td>
+                  <td className="py-1">
+                    <button onClick={() => handleRemove(d.id)} disabled={removing === d.id}
+                      className="text-gray-300 hover:text-red-500 disabled:opacity-40">
+                      <X size={13} />
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      ) : (
+        <p className="text-xs text-gray-400 mb-3">Sin órdenes asignadas</p>
+      )}
+
+      {/* Agregar orden */}
+      <div className="flex items-center gap-2 mt-1">
+        <select value={addOrdenId} onChange={(e) => setAddOrdenId(e.target.value ? +e.target.value : "")}
+          className="border border-gray-300 rounded px-2 py-1 text-xs flex-1">
+          <option value="">— Agregar orden —</option>
+          {disponibles.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.numero_orden} · {o.cliente.nombre_empresa}
+            </option>
+          ))}
+        </select>
+        <input type="number" min={1} value={addSobres} onChange={(e) => setAddSobres(+e.target.value)}
+          className="border border-gray-300 rounded px-2 py-1 text-xs w-20" placeholder="Sobres" />
+        <button onClick={handleAdd} disabled={!addOrdenId || saving}
+          className="bg-blue-600 text-white rounded px-3 py-1 text-xs hover:bg-blue-700 disabled:opacity-40">
+          {saving ? "..." : "Agregar"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Formulario nueva factura ──────────────────────────────────────────────────
 
 function FacturaTransporteForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const HOY_STR = new Date().toISOString().slice(0, 10);
   const { data: personal = [] } = useQuery({
     queryKey: ["personal-courier"],
     queryFn: () => personalApi.list({ activo: true }).then((r) =>
       r.data.filter((p) => ["courier_externo","transportadora"].includes(p.tipo_personal))
     ),
   });
-  const [form, setForm] = useState({ numero_factura: "", courrier_id: 0, fecha_factura: HOY_STR, monto_total: 0, total_sobres: 0, fecha_vencimiento: "", observaciones: "" });
+  const [form, setForm] = useState({
+    numero_factura: "", courrier_id: 0, fecha_factura: HOY_STR,
+    monto_total: 0, total_sobres: 0, fecha_vencimiento: "", observaciones: "",
+  });
   const [saving, setSaving] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
     try {
-      await transpApi.create({ ...form, fecha_vencimiento: form.fecha_vencimiento || null, observaciones: form.observaciones || null });
+      await transpApi.create({
+        ...form,
+        fecha_vencimiento: form.fecha_vencimiento || null,
+        observaciones: form.observaciones || null,
+      });
       onSaved();
     } finally { setSaving(false); }
   }
@@ -237,7 +525,10 @@ function FacturaTransporteForm({ onClose, onSaved }: { onClose: () => void; onSa
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-lg">
-        <div className="px-6 py-4 border-b"><h2 className="text-base font-semibold">Registrar factura de transporte</h2></div>
+        <div className="px-6 py-4 border-b flex items-center justify-between">
+          <h2 className="text-base font-semibold">Registrar factura de transporte</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
+        </div>
         <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -278,6 +569,11 @@ function FacturaTransporteForm({ onClose, onSaved }: { onClose: () => void; onSa
             <input type="date" value={form.fecha_vencimiento} onChange={(e) => setForm({ ...form, fecha_vencimiento: e.target.value })}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
           </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Observaciones</label>
+            <textarea rows={2} value={form.observaciones} onChange={(e) => setForm({ ...form, observaciones: e.target.value })}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none" />
+          </div>
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg">Cancelar</button>
             <button type="submit" disabled={saving}
@@ -291,9 +587,125 @@ function FacturaTransporteForm({ onClose, onSaved }: { onClose: () => void; onSa
   );
 }
 
-// ── Modal pagar factura transporte ────────────────────────────────────────────
+// ── Modal editar factura ──────────────────────────────────────────────────────
 
-function PagarTransporteModal({ factura, onClose, onSaved }: {
+function EditFacturaModal({
+  factura, onClose, onSaved,
+}: {
+  factura: FacturaTransporte;
+  onClose: () => void;
+  onSaved: (updated: FacturaTransporte) => void;
+}) {
+  const { data: personal = [] } = useQuery({
+    queryKey: ["personal-courier"],
+    queryFn: () => personalApi.list({ activo: true }).then((r) =>
+      r.data.filter((p) => ["courier_externo","transportadora"].includes(p.tipo_personal))
+    ),
+  });
+  const [form, setForm] = useState({
+    numero_factura: factura.numero_factura,
+    fecha_factura: factura.fecha_factura,
+    courrier_id: factura.courrier_id,
+    monto_total: factura.monto_total,
+    total_sobres: factura.total_sobres,
+    fecha_vencimiento: factura.fecha_vencimiento ?? "",
+    estado: factura.estado,
+    monto_pagado: factura.monto_pagado,
+    observaciones: factura.observaciones ?? "",
+  });
+  const [saving, setSaving] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const res = await transpApi.update(factura.id, {
+        ...form,
+        fecha_vencimiento: form.fecha_vencimiento || null,
+        observaciones: form.observaciones || null,
+      });
+      onSaved(res.data);
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="px-6 py-4 border-b flex items-center justify-between sticky top-0 bg-white">
+          <h2 className="text-base font-semibold">Editar factura</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">N° Factura *</label>
+              <input required value={form.numero_factura} onChange={(e) => setForm({ ...form, numero_factura: e.target.value })}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Fecha factura *</label>
+              <input type="date" required value={form.fecha_factura} onChange={(e) => setForm({ ...form, fecha_factura: e.target.value })}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Courier *</label>
+            <select required value={form.courrier_id} onChange={(e) => setForm({ ...form, courrier_id: +e.target.value })}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+              {personal.map((p) => <option key={p.id} value={p.id}>{p.codigo} — {p.nombre_completo}</option>)}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Monto total *</label>
+              <input type="number" required min={0} value={form.monto_total}
+                onChange={(e) => setForm({ ...form, monto_total: +e.target.value })}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Monto pagado</label>
+              <input type="number" min={0} value={form.monto_pagado}
+                onChange={(e) => setForm({ ...form, monto_pagado: +e.target.value })}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Fecha vencimiento</label>
+              <input type="date" value={form.fecha_vencimiento} onChange={(e) => setForm({ ...form, fecha_vencimiento: e.target.value })}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Estado</label>
+              <select value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value })}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                {["pendiente","pagada","anulada"].map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Observaciones</label>
+            <textarea rows={2} value={form.observaciones} onChange={(e) => setForm({ ...form, observaciones: e.target.value })}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none" />
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg">Cancelar</button>
+            <button type="submit" disabled={saving}
+              className="px-4 py-2 text-sm bg-primary hover:bg-primary-hover text-white rounded-lg disabled:opacity-60">
+              {saving ? "Guardando..." : "Guardar cambios"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Modal pagar ───────────────────────────────────────────────────────────────
+
+function PagarTransporteModal({
+  factura, onClose, onSaved,
+}: {
   factura: FacturaTransporte; onClose: () => void; onSaved: () => void;
 }) {
   const saldo = factura.monto_total - factura.monto_pagado;
@@ -304,7 +716,11 @@ function PagarTransporteModal({ factura, onClose, onSaved }: {
     e.preventDefault();
     setSaving(true);
     try {
-      await transpApi.pagar(factura.id, { ...form, referencia: form.referencia || null, observaciones: form.observaciones || null });
+      await transpApi.pagar(factura.id, {
+        ...form,
+        referencia: form.referencia || null,
+        observaciones: form.observaciones || null,
+      });
       onSaved();
     } finally { setSaving(false); }
   }
@@ -312,9 +728,12 @@ function PagarTransporteModal({ factura, onClose, onSaved }: {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
-        <div className="px-6 py-4 border-b">
-          <h2 className="text-base font-semibold">Registrar pago</h2>
-          <p className="text-xs text-gray-500 mt-0.5">{factura.numero_factura} · Saldo: ${fmt.format(saldo)}</p>
+        <div className="px-6 py-4 border-b flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Registrar pago</h2>
+            <p className="text-xs text-gray-500 mt-0.5">{factura.numero_factura} · Saldo: ${fmt.format(saldo)}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
         </div>
         <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
           <div>
