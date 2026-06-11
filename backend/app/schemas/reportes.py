@@ -23,6 +23,7 @@ class ResumenMensajeroRow(BaseModel):
     entregas: int
     devoluciones: int
     total_mensajero: float
+    costo_alistamiento: float
 
 
 class OrdenReporteRow(BaseModel):

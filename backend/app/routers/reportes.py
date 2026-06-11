@@ -85,32 +85,59 @@ async def get_mensajeros(
 ):
     rows = (await db.execute(
         text("""
+            WITH mensajeros_agg AS (
+                SELECT
+                    sg.mensajero_id,
+                    MAX(sg.cod_men)                                    AS cod_men,
+                    COUNT(DISTINCT NULLIF(sg.planilla,''))::int        AS planillas,
+                    COUNT(*)::int                                      AS total_seriales,
+                    COUNT(CASE WHEN sg.tipo_gestion = 'Entrega'   THEN 1 END)::int AS entregas,
+                    COUNT(CASE WHEN sg.tipo_gestion = 'Devolucion' THEN 1 END)::int AS devoluciones,
+                    COALESCE(SUM(sg.precio_mensajero), 0)             AS total_mensajero
+                FROM seriales_gestion sg
+                WHERE sg.f_emi BETWEEN :desde AND :hasta
+                GROUP BY sg.mensajero_id
+            ),
+            alist_agg AS (
+                SELECT personal_id,
+                       COALESCE(SUM(total), 0) AS costo_alistamiento
+                FROM (
+                    SELECT personal_id, total FROM registro_horas
+                    WHERE fecha BETWEEN :desde AND :hasta
+                    UNION ALL
+                    SELECT personal_id, total FROM registro_labores
+                    WHERE fecha BETWEEN :desde AND :hasta
+                ) sub
+                GROUP BY personal_id
+            )
             SELECT
-                sg.cod_men,
+                COALESCE(m.mensajero_id, a.personal_id)   AS personal_id,
+                COALESCE(m.cod_men, p.codigo)              AS cod_men,
                 p.nombre_completo                          AS nombre,
-                COUNT(DISTINCT NULLIF(sg.planilla,''))::int AS planillas,
-                COUNT(*)::int                              AS total_seriales,
-                COUNT(CASE WHEN sg.tipo_gestion = 'Entrega'   THEN 1 END)::int AS entregas,
-                COUNT(CASE WHEN sg.tipo_gestion = 'Devolucion' THEN 1 END)::int AS devoluciones,
-                COALESCE(SUM(sg.precio_mensajero), 0)     AS total_mensajero
-            FROM seriales_gestion sg
-            LEFT JOIN personal p ON sg.mensajero_id = p.id
-            WHERE sg.f_emi BETWEEN :desde AND :hasta
-            GROUP BY sg.cod_men, p.nombre_completo
-            ORDER BY total_mensajero DESC
+                COALESCE(m.planillas,       0)             AS planillas,
+                COALESCE(m.total_seriales,  0)             AS total_seriales,
+                COALESCE(m.entregas,        0)             AS entregas,
+                COALESCE(m.devoluciones,    0)             AS devoluciones,
+                COALESCE(m.total_mensajero, 0)             AS total_mensajero,
+                COALESCE(a.costo_alistamiento, 0)          AS costo_alistamiento
+            FROM mensajeros_agg m
+            FULL OUTER JOIN alist_agg a ON a.personal_id = m.mensajero_id
+            LEFT JOIN personal p ON p.id = COALESCE(m.mensajero_id, a.personal_id)
+            ORDER BY (COALESCE(m.total_mensajero, 0) + COALESCE(a.costo_alistamiento, 0)) DESC
         """),
         {"desde": fecha_desde, "hasta": fecha_hasta},
     )).mappings().all()
 
     return [
         ResumenMensajeroRow(
-            cod_men=r["cod_men"],
+            cod_men=r["cod_men"] or "???",
             nombre=r["nombre"],
             planillas=r["planillas"],
             total_seriales=r["total_seriales"],
             entregas=r["entregas"],
             devoluciones=r["devoluciones"],
             total_mensajero=round(float(r["total_mensajero"]), 2),
+            costo_alistamiento=round(float(r["costo_alistamiento"]), 2),
         )
         for r in rows
     ]

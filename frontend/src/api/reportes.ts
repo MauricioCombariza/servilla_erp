@@ -20,6 +20,7 @@ export interface ResumenMensajeroRow {
   entregas: number;
   devoluciones: number;
   total_mensajero: number;
+  costo_alistamiento: number;
 }
 
 export interface OrdenReporteRow {

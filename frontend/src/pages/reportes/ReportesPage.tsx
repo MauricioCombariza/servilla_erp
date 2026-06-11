@@ -168,24 +168,25 @@ function TabMensajeros() {
       </div>
 
       <MetricCards items={[
-        { label: "Mensajeros", value: data.length.toString() },
+        { label: "Personal", value: data.length.toString() },
         { label: "Total seriales", value: data.reduce((s, r) => s + r.total_seriales, 0).toLocaleString() },
-        { label: "Total mensajero", value: fmt(data.reduce((s, r) => s + r.total_mensajero, 0)) },
-        { label: "Planillas", value: data.reduce((s, r) => s + r.planillas, 0).toLocaleString() },
+        { label: "Costo mensajero", value: fmt(data.reduce((s, r) => s + r.total_mensajero, 0)) },
+        { label: "Costo alistamiento", value: fmt(data.reduce((s, r) => s + r.costo_alistamiento, 0)) },
       ]} />
 
       {isLoading ? <div className="text-center py-16 text-gray-400">Cargando...</div> : (
         <>
           {top10.length > 0 && (
             <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">
-              <p className="text-xs font-medium text-gray-500 uppercase mb-3">Top 10 por costo mensajero</p>
+              <p className="text-xs font-medium text-gray-500 uppercase mb-3">Top 10 por costo total</p>
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={top10} margin={{ left: 10 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="cod_men" tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} />
                   <Tooltip formatter={(v: number) => fmt(v)} />
-                  <Bar dataKey="total_mensajero" name="Total" fill="#6366f1" radius={[4,4,0,0]} />
+                  <Bar dataKey="total_mensajero" name="Mensajero" fill="#6366f1" stackId="a" radius={[0,0,0,0]} />
+                  <Bar dataKey="costo_alistamiento" name="Alistamiento" fill="#f59e0b" stackId="a" radius={[4,4,0,0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -194,7 +195,7 @@ function TabMensajeros() {
           <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
             <table className="w-full text-sm min-w-[650px]">
               <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>{["Mensajero","Nombre","Planillas","Entregas","Dev.","Total Seriales","Total $"].map((h) => (
+                <tr>{["Código","Nombre","Planillas","Entregas","Dev.","Seriales","Costo Mensajero","Costo Alistamiento","Total"].map((h) => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">{h}</th>
                 ))}</tr>
               </thead>
@@ -203,11 +204,13 @@ function TabMensajeros() {
                   <tr key={r.cod_men} className="hover:bg-gray-50">
                     <td className="px-4 py-2.5 font-mono font-medium text-gray-900">{r.cod_men}</td>
                     <td className="px-4 py-2.5 text-gray-700">{r.nombre ?? "—"}</td>
-                    <td className="px-4 py-2.5 text-gray-600">{r.planillas}</td>
-                    <td className="px-4 py-2.5 text-green-700">{r.entregas.toLocaleString()}</td>
-                    <td className="px-4 py-2.5 text-orange-600">{r.devoluciones.toLocaleString()}</td>
-                    <td className="px-4 py-2.5 text-gray-700">{r.total_seriales.toLocaleString()}</td>
+                    <td className="px-4 py-2.5 text-gray-600">{r.planillas || "—"}</td>
+                    <td className="px-4 py-2.5 text-green-700">{r.entregas ? r.entregas.toLocaleString() : "—"}</td>
+                    <td className="px-4 py-2.5 text-orange-600">{r.devoluciones ? r.devoluciones.toLocaleString() : "—"}</td>
+                    <td className="px-4 py-2.5 text-gray-700">{r.total_seriales ? r.total_seriales.toLocaleString() : "—"}</td>
                     <td className="px-4 py-2.5"><CurrencyCell value={r.total_mensajero} /></td>
+                    <td className="px-4 py-2.5"><CurrencyCell value={r.costo_alistamiento} /></td>
+                    <td className="px-4 py-2.5 font-medium"><CurrencyCell value={r.total_mensajero + r.costo_alistamiento} /></td>
                   </tr>
                 ))}
               </tbody>
