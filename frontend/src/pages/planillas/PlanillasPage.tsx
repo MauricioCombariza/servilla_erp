@@ -366,6 +366,7 @@ function BuscarPlanillaSection() {
   const navigate = useNavigate();
   const [input, setInput] = useState("");
   const [busqueda, setBusqueda] = useState("");
+  const [editando, setEditando] = useState<PlanillaResumen | null>(null);
 
   const { data, isFetching, isError } = useQuery({
     queryKey: ["planilla-busqueda", busqueda],
@@ -440,6 +441,17 @@ function BuscarPlanillaSection() {
         <p className="text-sm text-gray-400">No se encontró la planilla <span className="font-mono">{busqueda}</span>.</p>
       )}
 
+      {editando && (
+        <EditModal
+          planilla={editando}
+          onClose={() => setEditando(null)}
+          onSaved={() => {
+            qc.invalidateQueries({ queryKey: ["planilla-busqueda", busqueda] });
+            setEditando(null);
+          }}
+        />
+      )}
+
       {resultados.length > 0 && (
         <div className="space-y-2">
           {resultados.map((p) => {
@@ -461,6 +473,14 @@ function BuscarPlanillaSection() {
                     )}
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
+                    {/* Editar mensajero / precio */}
+                    <button
+                      onClick={() => setEditando(p)}
+                      className="text-gray-400 hover:text-primary transition-colors"
+                      title="Editar mensajero / precio"
+                    >
+                      <Pencil size={15} />
+                    </button>
                     {/* Revisada */}
                     <button
                       onClick={() => toggleRevisada.mutate({ planilla: p.planilla, revisada: p.revisada })}
