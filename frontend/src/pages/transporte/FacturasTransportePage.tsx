@@ -308,7 +308,11 @@ export function FacturasTransportePage() {
                         <td className="px-3 py-3 text-gray-900">{f.courrier?.nombre_completo ?? "—"}</td>
                         <td className="px-3 py-3 text-gray-600 text-xs">{f.fecha_factura}</td>
                         <td className="px-3 py-3 text-gray-600 text-xs">{f.fecha_vencimiento ?? "—"}</td>
-                        <td className="px-3 py-3 text-gray-600">{f.total_sobres}</td>
+                        <td className="px-3 py-3 text-gray-600">
+                          {f.detalles.length > 0
+                            ? f.detalles.reduce((s, d) => s + d.cantidad_sobres, 0)
+                            : f.total_sobres}
+                        </td>
                         <td className="px-3 py-3 font-medium"><CurrencyCell value={f.monto_total} /></td>
                         <td className="px-3 py-3 text-green-700"><CurrencyCell value={f.monto_pagado} /></td>
                         <td className="px-3 py-3">
@@ -764,18 +768,24 @@ function EditFacturaModal({
               {personal.map((p) => <option key={p.id} value={p.id}>{p.codigo} — {p.nombre_completo}</option>)}
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Monto total *</label>
               <input type="number" required min={0} value={form.monto_total}
                 onChange={(e) => setForm({ ...form, monto_total: +e.target.value })}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Total sobres</label>
+              <input type="number" min={0} value={form.total_sobres}
+                onChange={(e) => setForm({ ...form, total_sobres: +e.target.value })}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Monto pagado</label>
               <input type="number" min={0} value={form.monto_pagado}
                 onChange={(e) => setForm({ ...form, monto_pagado: +e.target.value })}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
