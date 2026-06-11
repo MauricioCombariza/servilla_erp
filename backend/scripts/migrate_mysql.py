@@ -152,6 +152,74 @@ def parse_fecha(valor) -> date | None:
     return None
 
 
+# ── Migración: ordenes ────────────────────────────────────────────────────────
+
+def migrate_ordenes(dry_run: bool):
+    log.info("── ordenes ───────────────────────────────────────────")
+    with mysql_conn(MYSQL_LOG) as my:
+        my.execute("""
+            SELECT numero_orden, cliente_id, ciudad_destino_id,
+                   fecha_recepcion, tipo_servicio,
+                   COALESCE(cantidad_total, cantidad_local + cantidad_nacional) AS cantidad_total,
+                   COALESCE(cantidad_recibido,
+                       cantidad_recibido_local + cantidad_recibido_nacional) AS cantidad_recibido,
+                   precio_unitario, valor_total,
+                   costo_mensajero_total, costo_alistamiento_total,
+                   costo_pegado_total, costo_transporte_total, costo_flete_total,
+                   estado, facturado, fecha_finalizacion, observaciones, fecha_creacion
+            FROM ordenes ORDER BY id
+        """)
+        rows = my.fetchall()
+    log.info(f"  MySQL: {len(rows)} órdenes")
+    if dry_run or not rows:
+        return
+    with pg_conn() as (conn, cur):
+        inserted = skipped = 0
+        for batch in batched(rows, BATCH):
+            for r in batch:
+                estado = r.get("estado") or "activa"
+                if estado not in ("activa", "finalizada", "anulada"):
+                    estado = "activa"
+                cur.execute("""
+                    INSERT INTO ordenes
+                        (numero_orden, cliente_id, ciudad_destino_id,
+                         fecha_recepcion, tipo_servicio,
+                         cantidad_total, cantidad_recibido,
+                         precio_unitario, valor_total,
+                         costo_mensajero_total, costo_alistamiento_total,
+                         costo_pegado_total, costo_transporte_total, costo_flete_total,
+                         estado, facturado, fecha_finalizacion, observaciones, fecha_creacion)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (numero_orden) DO NOTHING
+                """, (
+                    str(r["numero_orden"]),
+                    r["cliente_id"],
+                    r.get("ciudad_destino_id"),
+                    parse_fecha(r.get("fecha_recepcion")),
+                    r.get("tipo_servicio") or "sobre",
+                    r.get("cantidad_total") or 0,
+                    r.get("cantidad_recibido") or 0,
+                    r.get("precio_unitario"),
+                    r.get("valor_total") or 0,
+                    r.get("costo_mensajero_total") or 0,
+                    r.get("costo_alistamiento_total") or 0,
+                    r.get("costo_pegado_total") or 0,
+                    r.get("costo_transporte_total") or 0,
+                    r.get("costo_flete_total") or 0,
+                    estado,
+                    bool(r.get("facturado", False)),
+                    parse_fecha(r.get("fecha_finalizacion")),
+                    r.get("observaciones"),
+                    r.get("fecha_creacion"),
+                ))
+                if cur.rowcount:
+                    inserted += 1
+                else:
+                    skipped += 1
+            conn.commit()
+    log.info(f"  PostgreSQL: {inserted} insertadas, {skipped} ya existían")
+
+
 # ── Migración: clientes ───────────────────────────────────────────────────────
 
 def migrate_clientes(dry_run: bool):
@@ -1061,6 +1129,7 @@ def migrate_labores(dry_run: bool):
 TABLAS = {
     "clientes":          migrate_clientes,
     "personal":          migrate_personal,
+    "ordenes":           migrate_ordenes,
     "seriales":          migrate_seriales,
     "histo":             migrate_histo,
     "histo-incremental": migrate_histo_incremental,
@@ -1076,7 +1145,7 @@ def main():
     parser.add_argument(
         "--tabla",
         default="clientes,personal,histo,mensajeros",
-        help="Tablas a migrar (coma-separadas): clientes, personal, seriales, histo, histo-incremental, mensajeros, tipo_gestion, precios, imile, labores",
+        help="Tablas a migrar (coma-separadas): clientes, personal, ordenes, seriales, histo, histo-incremental, mensajeros, tipo_gestion, precios, imile, labores",
     )
     parser.add_argument("--dry-run", action="store_true", help="Cuenta filas sin insertar")
     args = parser.parse_args()
