@@ -911,6 +911,151 @@ def migrate_imile(dry_run: bool):
     log.info(f"  PostgreSQL: {inserted} insertados, {skipped_dup} duplicados ignorados, {bad_date} sin fecha")
 
 
+# ── Migración: registro_horas y registro_labores ──────────────────────────────
+
+def _build_orden_map(pg_cur) -> dict:
+    """Devuelve {numero_orden: pg_id} para todas las órdenes en PostgreSQL."""
+    pg_cur.execute("SELECT id, numero_orden FROM ordenes")
+    return {r["numero_orden"]: r["id"] for r in pg_cur.fetchall()}
+
+
+def _build_usuario_map(pg_cur) -> dict:
+    """Devuelve {username: pg_id} para todos los usuarios en PostgreSQL."""
+    pg_cur.execute("SELECT id, username FROM usuarios")
+    return {r["username"]: r["id"] for r in pg_cur.fetchall()}
+
+
+def _build_aprobado_por_map(my_cur, pg_cur) -> dict:
+    """Devuelve {mysql_usuario_id: pg_usuario_id} mapeando por username."""
+    my_cur.execute("SELECT id, username FROM usuarios")
+    mysql_users = {r["id"]: r["username"] for r in my_cur.fetchall()}
+    pg_users = _build_usuario_map(pg_cur)
+    return {
+        my_id: pg_users[username]
+        for my_id, username in mysql_users.items()
+        if username in pg_users
+    }
+
+
+def migrate_labores(dry_run: bool):
+    log.info("── registro_horas + registro_labores ────────────────")
+
+    with mysql_conn(MYSQL_LOG) as my:
+        my.execute("""
+            SELECT rh.personal_id, rh.orden_id, o.numero_orden,
+                   rh.fecha, rh.horas_trabajadas, rh.tarifa_hora,
+                   rh.tipo_trabajo, rh.aprobado, rh.aprobado_por,
+                   rh.fecha_aprobacion, rh.liquidado, rh.liquidacion_id,
+                   rh.observaciones, rh.fecha_creacion
+            FROM registro_horas rh
+            LEFT JOIN ordenes o ON rh.orden_id = o.id
+            ORDER BY rh.fecha, rh.id
+        """)
+        horas = my.fetchall()
+
+        my.execute("""
+            SELECT rl.personal_id, rl.orden_id, o.numero_orden,
+                   rl.fecha, rl.tipo_labor, rl.cantidad, rl.tarifa_unitaria,
+                   rl.aprobado, rl.aprobado_por,
+                   rl.fecha_aprobacion, rl.liquidado, rl.liquidacion_id,
+                   rl.observaciones, rl.fecha_creacion
+            FROM registro_labores rl
+            LEFT JOIN ordenes o ON rl.orden_id = o.id
+            ORDER BY rl.fecha, rl.id
+        """)
+        labores = my.fetchall()
+
+        aprobado_map_raw = {}
+        my.execute("SELECT id, username FROM usuarios")
+        aprobado_map_raw = {r["id"]: r["username"] for r in my.fetchall()}
+
+    log.info(f"  MySQL: {len(horas)} horas, {len(labores)} labores")
+
+    if dry_run:
+        return
+
+    with pg_conn() as (conn, pg_cur):
+        orden_map = _build_orden_map(pg_cur)
+        pg_cur.execute("SELECT id, username FROM usuarios")
+        pg_users = {r["username"]: r["id"] for r in pg_cur.fetchall()}
+        aprobado_por_map = {
+            my_id: pg_users[uname]
+            for my_id, uname in aprobado_map_raw.items()
+            if uname in pg_users
+        }
+
+        pg_cur.execute("SELECT DISTINCT fecha FROM registro_horas")
+        pg_horas_fechas = {r["fecha"] for r in pg_cur.fetchall()}
+        pg_cur.execute("SELECT DISTINCT fecha FROM registro_labores")
+        pg_labores_fechas = {r["fecha"] for r in pg_cur.fetchall()}
+
+        inserted_h = skipped_h = inserted_l = skipped_l = 0
+        sin_orden_h = sin_orden_l = 0
+
+        for batch in batched(horas, BATCH):
+            for r in batch:
+                if r["fecha"] in pg_horas_fechas:
+                    skipped_h += 1
+                    continue
+                pg_orden_id = orden_map.get(r["numero_orden"]) if r["numero_orden"] else None
+                if r["orden_id"] and not pg_orden_id:
+                    sin_orden_h += 1
+                pg_aprobado_por = aprobado_por_map.get(r["aprobado_por"]) if r["aprobado_por"] else None
+                pg_cur.execute("""
+                    INSERT INTO registro_horas
+                        (personal_id, orden_id, fecha, horas_trabajadas, tarifa_hora,
+                         tipo_trabajo, aprobado, aprobado_por, fecha_aprobacion,
+                         liquidado, liquidacion_id, observaciones, fecha_creacion)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    r["personal_id"], pg_orden_id,
+                    r["fecha"], r["horas_trabajadas"], r["tarifa_hora"],
+                    r["tipo_trabajo"],
+                    bool(r.get("aprobado", False)),
+                    pg_aprobado_por,
+                    r.get("fecha_aprobacion"),
+                    bool(r.get("liquidado", False)),
+                    r.get("liquidacion_id"),
+                    r.get("observaciones"),
+                    r.get("fecha_creacion"),
+                ))
+                inserted_h += 1
+            conn.commit()
+
+        for batch in batched(labores, BATCH):
+            for r in batch:
+                if r["fecha"] in pg_labores_fechas:
+                    skipped_l += 1
+                    continue
+                pg_orden_id = orden_map.get(r["numero_orden"]) if r["numero_orden"] else None
+                if r["orden_id"] and not pg_orden_id:
+                    sin_orden_l += 1
+                pg_aprobado_por = aprobado_por_map.get(r["aprobado_por"]) if r["aprobado_por"] else None
+                pg_cur.execute("""
+                    INSERT INTO registro_labores
+                        (personal_id, orden_id, fecha, tipo_labor, cantidad,
+                         tarifa_unitaria, aprobado, aprobado_por, fecha_aprobacion,
+                         liquidado, liquidacion_id, observaciones, fecha_creacion)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    r["personal_id"], pg_orden_id,
+                    r["fecha"], r["tipo_labor"], r["cantidad"],
+                    r["tarifa_unitaria"],
+                    bool(r.get("aprobado", False)),
+                    pg_aprobado_por,
+                    r.get("fecha_aprobacion"),
+                    bool(r.get("liquidado", False)),
+                    r.get("liquidacion_id"),
+                    r.get("observaciones"),
+                    r.get("fecha_creacion"),
+                ))
+                inserted_l += 1
+            conn.commit()
+
+    log.info(f"  registro_horas:   {inserted_h} insertados, {skipped_h} fechas ya en PG, {sin_orden_h} sin orden en PG")
+    log.info(f"  registro_labores: {inserted_l} insertados, {skipped_l} fechas ya en PG, {sin_orden_l} sin orden en PG")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 TABLAS = {
@@ -923,6 +1068,7 @@ TABLAS = {
     "tipo_gestion":      corregir_tipo_gestion_histo,
     "precios":           activar_precios_historicos,
     "imile":             migrate_imile,
+    "labores":           migrate_labores,
 }
 
 def main():
@@ -930,7 +1076,7 @@ def main():
     parser.add_argument(
         "--tabla",
         default="clientes,personal,histo,mensajeros",
-        help="Tablas a migrar (coma-separadas): clientes, personal, seriales, histo, histo-incremental, mensajeros, tipo_gestion, precios, imile",
+        help="Tablas a migrar (coma-separadas): clientes, personal, seriales, histo, histo-incremental, mensajeros, tipo_gestion, precios, imile, labores",
     )
     parser.add_argument("--dry-run", action="store_true", help="Cuenta filas sin insertar")
     args = parser.parse_args()
