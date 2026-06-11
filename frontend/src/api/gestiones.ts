@@ -36,6 +36,17 @@ export interface MarcarRevisadaResult {
   revisada: boolean;
 }
 
+export interface BulkPatchItem {
+  id: number;
+  precio_mensajero?: number;
+  cod_men?: string;
+  mensajero_id?: number;
+}
+
+export interface BulkPatchResult {
+  actualizados: number;
+}
+
 export const gestionesApi = {
   list: (params?: {
     planilla?: string;
@@ -97,4 +108,7 @@ export const gestionesApi = {
 
   recalcular: (data: RecalcularRequest) =>
     api.post<RecalcularResult>("/gestiones/recalcular", data),
+
+  bulkPatch: (items: BulkPatchItem[]) =>
+    api.patch<BulkPatchResult>("/gestiones/bulk", { items }),
 };

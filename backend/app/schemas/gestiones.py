@@ -117,3 +117,18 @@ class BloquearRangoResult(BaseModel):
 class MarcarRevisadaResult(BaseModel):
     planilla: str
     revisada: bool
+
+
+class BulkPatchItem(BaseModel):
+    id: int
+    precio_mensajero: float | None = None
+    cod_men: str | None = None
+    mensajero_id: int | None = None
+
+
+class BulkPatchRequest(BaseModel):
+    items: list[BulkPatchItem]
+
+
+class BulkPatchResult(BaseModel):
+    actualizados: int

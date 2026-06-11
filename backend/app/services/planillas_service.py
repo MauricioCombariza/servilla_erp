@@ -11,6 +11,8 @@ from app.models.planillas_revisadas import PlanillaRevisada
 from app.schemas.gestiones import (
     BloquearRangoRequest,
     BloquearRangoResult,
+    BulkPatchRequest,
+    BulkPatchResult,
     CambiarMensajeroRequest,
     MarcarRevisadaResult,
     PlanillaActionResult,
@@ -315,3 +317,26 @@ async def desmarcar_revisada(planilla: str, db: AsyncSession) -> MarcarRevisadaR
     )
     await db.commit()
     return MarcarRevisadaResult(planilla=planilla, revisada=False)
+
+
+async def bulk_patch_seriales(req: BulkPatchRequest, db: AsyncSession) -> BulkPatchResult:
+    ids = [item.id for item in req.items]
+    rows = (await db.execute(
+        select(SerialGestion).where(SerialGestion.id.in_(ids))
+    )).scalars().all()
+    seriales = {sg.id: sg for sg in rows}
+
+    for item in req.items:
+        sg = seriales.get(item.id)
+        if sg is None:
+            continue
+        if item.precio_mensajero is not None:
+            sg.precio_mensajero = item.precio_mensajero
+        if item.cod_men is not None:
+            sg.cod_men = item.cod_men
+        if item.mensajero_id is not None:
+            sg.mensajero_id = item.mensajero_id
+        sg.editado_manualmente = True
+
+    await db.commit()
+    return BulkPatchResult(actualizados=len(ids))

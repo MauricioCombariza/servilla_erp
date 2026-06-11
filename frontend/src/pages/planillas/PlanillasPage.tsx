@@ -14,8 +14,9 @@ import {
   ShieldCheck,
   ChevronDown,
   ChevronUp,
+  Rows3,
 } from "lucide-react";
-import { gestionesApi, type RecalcularResult, type BloquearRangoResult } from "@/api/gestiones";
+import { gestionesApi, type RecalcularResult, type BloquearRangoResult, type BulkPatchItem } from "@/api/gestiones";
 import { personalApi } from "@/api/personal";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
 import type { PlanillaResumen } from "@/types/domain";
@@ -360,13 +361,392 @@ function BloqueoRangoPanel({ filtros, onDone }: BloqueoRangoPanelProps) {
   );
 }
 
-// ── Buscador de planilla individual ──────────────────────────────────────────
-function BuscarPlanillaSection() {
+// ── Tarjeta de planilla con detalle expandible ────────────────────────────────
+interface PlanillaCardProps {
+  p: PlanillaResumen;
+  busqueda: string;
+}
+
+function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const [editando, setEditando] = useState(false);
+  const [expandido, setExpandido] = useState(false);
+  const [seleccion, setSeleccion] = useState<Set<number>>(new Set());
+  const [editPrecio, setEditPrecio] = useState<number>(0);
+  const [editCodMen, setEditCodMen] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  const [errorGuardar, setErrorGuardar] = useState("");
+
+  const invalidar = () => {
+    qc.invalidateQueries({ queryKey: ["planilla-busqueda", busqueda] });
+    qc.invalidateQueries({ queryKey: ["planilla-detalle", p.planilla] });
+  };
+
+  const { data: seriales = [], isFetching: cargandoDetalle } = useQuery({
+    queryKey: ["planilla-detalle", p.planilla],
+    queryFn: () => gestionesApi.list({ planilla: p.planilla, limit: 500 }).then((r) => r.data),
+    enabled: expandido,
+  });
+
+  const { data: personal = [] } = useQuery({
+    queryKey: ["personal", true],
+    queryFn: () => personalApi.list({ activo: true }).then((r) => r.data),
+    enabled: expandido,
+  });
+
+  const bloquear = useMutation({
+    mutationFn: (id: string) => gestionesApi.bloquear(id),
+    onSuccess: invalidar,
+  });
+  const desbloquear = useMutation({
+    mutationFn: (id: string) => gestionesApi.desbloquear(id),
+    onSuccess: invalidar,
+  });
+  const toggleRevisada = useMutation({
+    mutationFn: ({ planilla, revisada }: { planilla: string; revisada: boolean }) =>
+      revisada ? gestionesApi.desmarcarRevisada(planilla) : gestionesApi.marcarRevisada(planilla),
+    onSuccess: invalidar,
+  });
+  const toggleLockSerial = useMutation({
+    mutationFn: ({ id, val }: { id: number; val: boolean }) =>
+      gestionesApi.patch(id, { editado_manualmente: val }),
+    onSuccess: invalidar,
+  });
+
+  // Agrupar seriales por (cod_men, precio_mensajero)
+  type Grupo = {
+    key: string;
+    cod_men: string;
+    mensajero_nombre: string;
+    precio: number;
+    ids: number[];
+    bloqueados: number;
+  };
+  const grupos: Grupo[] = Object.values(
+    seriales.reduce<Record<string, Grupo>>((acc, s) => {
+      const key = `${s.cod_men}||${s.precio_mensajero}`;
+      if (!acc[key]) {
+        acc[key] = {
+          key,
+          cod_men: s.cod_men,
+          mensajero_nombre: s.mensajero?.nombre_completo ?? s.cod_men,
+          precio: s.precio_mensajero,
+          ids: [],
+          bloqueados: 0,
+        };
+      }
+      acc[key].ids.push(s.id);
+      if (s.editado_manualmente) acc[key].bloqueados++;
+      return acc;
+    }, {})
+  );
+
+  const preciosUnicos = [...new Set(seriales.map((s) => s.precio_mensajero))];
+  const preciosMixtos = preciosUnicos.length > 1;
+
+  const selIds = [...seleccion];
+  const selSeriales = seriales.filter((s) => seleccion.has(s.id));
+  const totalSelVal = selSeriales.reduce((a, s) => a + s.precio_mensajero, 0);
+  const nuevoTotal = editPrecio > 0 ? selIds.length * editPrecio : totalSelVal;
+  const diff = nuevoTotal - totalSelVal;
+
+  function toggleGrupo(g: Grupo) {
+    setSeleccion((prev) => {
+      const next = new Set(prev);
+      const todosEnSel = g.ids.every((id) => next.has(id));
+      if (todosEnSel) g.ids.forEach((id) => next.delete(id));
+      else g.ids.forEach((id) => next.add(id));
+      return next;
+    });
+  }
+
+  async function guardarSeleccion() {
+    if (selIds.length === 0) return;
+    setGuardando(true);
+    setErrorGuardar("");
+    try {
+      const items: BulkPatchItem[] = selIds.map((id) => ({
+        id,
+        ...(editPrecio > 0 ? { precio_mensajero: editPrecio } : {}),
+        ...(editCodMen ? { cod_men: editCodMen } : {}),
+      }));
+      await gestionesApi.bulkPatch(items);
+      setSeleccion(new Set());
+      setEditPrecio(0);
+      setEditCodMen("");
+      invalidar();
+    } catch {
+      setErrorGuardar("Error al guardar. Intente de nuevo.");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <>
+      {editando && (
+        <EditModal
+          planilla={p}
+          onClose={() => setEditando(false)}
+          onSaved={() => { invalidar(); setEditando(false); }}
+        />
+      )}
+
+      <div className={`border rounded-lg ${p.revisada ? "border-green-300 bg-green-50/30" : "border-gray-200"}`}>
+        {/* Cabecera */}
+        <div className="p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <span className="font-mono text-sm font-semibold text-gray-900">{p.planilla}</span>
+              <span className="ml-2 text-xs text-gray-500">
+                {p.cod_men}{p.mensajero_nombre ? ` · ${p.mensajero_nombre}` : ""}
+              </span>
+              {p.fecha_escaner && (
+                <span className="ml-2 text-xs text-gray-400">{p.fecha_escaner}</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button onClick={() => setEditando(true)} className="text-gray-400 hover:text-primary transition-colors" title="Editar mensajero / precio">
+                <Pencil size={15} />
+              </button>
+              <button
+                onClick={() => toggleRevisada.mutate({ planilla: p.planilla, revisada: p.revisada })}
+                title={p.revisada ? "Quitar revisión" : "Marcar revisada"}
+                className={`transition-colors ${p.revisada ? "text-green-600 hover:text-green-800" : "text-gray-300 hover:text-green-500"}`}
+              >
+                {p.revisada ? <CheckCircle size={16} /> : <Circle size={16} />}
+              </button>
+              {p.bloqueada ? (
+                <button onClick={() => desbloquear.mutate(p.planilla)} className="text-gray-400 hover:text-amber-500 transition-colors" title="Desbloquear">
+                  <Unlock size={15} />
+                </button>
+              ) : (
+                <button onClick={() => bloquear.mutate(p.planilla)} className="text-gray-400 hover:text-green-600 transition-colors" title="Bloquear">
+                  <Lock size={15} />
+                </button>
+              )}
+              <button onClick={() => navigate(`/gestiones?planilla=${encodeURIComponent(p.planilla)}`)} className="text-gray-400 hover:text-primary transition-colors" title="Ver seriales">
+                <List size={15} />
+              </button>
+              <button
+                onClick={() => setExpandido((v) => !v)}
+                className={`flex items-center gap-1 text-xs px-2 py-1 rounded border transition-colors ${expandido ? "border-primary text-primary bg-blue-50" : "border-gray-300 text-gray-500 hover:bg-gray-50"}`}
+                title="Ver registros detallados"
+              >
+                <Rows3 size={13} />
+                {expandido ? "Ocultar" : "Registros"}
+              </button>
+            </div>
+          </div>
+
+          {/* Métricas */}
+          <div className="mt-3 grid grid-cols-5 gap-3 text-xs">
+            {[
+              { label: "Entregas", val: p.entregas },
+              { label: "Devoluciones", val: p.devoluciones },
+              { label: "Total seriales", val: p.total_seriales, warn: p.con_precio_cero > 0, warnTxt: `${p.con_precio_cero} sin precio` },
+              { label: "Val. mensajero", val: `$${p.total_mensajero.toLocaleString("es-CO")}` },
+              { label: "Val. cliente", val: `$${p.total_cliente.toLocaleString("es-CO")}` },
+            ].map(({ label, val, warn, warnTxt }) => (
+              <div key={label}>
+                <p className="text-gray-400 uppercase tracking-wide">{label}</p>
+                <p className="font-semibold text-gray-800 flex items-center gap-1">
+                  {val}
+                  {warn && <span title={warnTxt} className="text-amber-500"><AlertTriangle size={11} /></span>}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          {/* Badges */}
+          <div className="mt-2 flex items-center gap-2 flex-wrap">
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${p.bloqueada ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"}`}>
+              {p.bloqueada ? "Bloqueada" : "Abierta"}
+            </span>
+            {p.revisada && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                <CheckCircle size={10} /> Revisada
+              </span>
+            )}
+            {preciosMixtos && expandido && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+                <AlertTriangle size={10} /> Precios mixtos ({preciosUnicos.length} tarifas)
+              </span>
+            )}
+            {p.con_precio_cero > 0 && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+                <AlertTriangle size={10} /> {p.con_precio_cero} sin precio
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Tabla de detalle expandible */}
+        {expandido && (
+          <div className="border-t border-gray-100">
+            {cargandoDetalle ? (
+              <p className="text-sm text-gray-400 px-4 py-3">Cargando registros…</p>
+            ) : grupos.length === 0 ? (
+              <p className="text-sm text-gray-400 px-4 py-3">Sin registros.</p>
+            ) : (
+              <>
+                <div className="px-4 pt-3 pb-1 flex items-center gap-3">
+                  <span className="text-xs font-medium text-gray-600">
+                    {grupos.length} grupo{grupos.length !== 1 ? "s" : ""} · {seriales.length} seriales
+                  </span>
+                  {seleccion.size > 0 && (
+                    <button onClick={() => setSeleccion(new Set())} className="text-xs text-gray-400 hover:text-gray-600 underline">
+                      Limpiar selección
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      if (seleccion.size === seriales.length) setSeleccion(new Set());
+                      else setSeleccion(new Set(seriales.map((s) => s.id)));
+                    }}
+                    className="text-xs text-gray-400 hover:text-gray-600 underline"
+                  >
+                    {seleccion.size === seriales.length ? "Deseleccionar todos" : "Seleccionar todos"}
+                  </button>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs min-w-[600px]">
+                    <thead className="bg-gray-50 border-y border-gray-100">
+                      <tr>
+                        <th className="px-3 py-2 w-8"></th>
+                        <th className="px-3 py-2 text-left text-gray-500 font-medium">Mensajero</th>
+                        <th className="px-3 py-2 text-left text-gray-500 font-medium">Precio</th>
+                        <th className="px-3 py-2 text-right text-gray-500 font-medium">Seriales</th>
+                        <th className="px-3 py-2 text-right text-gray-500 font-medium">Valor</th>
+                        <th className="px-3 py-2 text-center text-gray-500 font-medium">🔒</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {grupos.map((g) => {
+                        const todosEnSel = g.ids.every((id) => seleccion.has(id));
+                        const algunEnSel = g.ids.some((id) => seleccion.has(id));
+                        const todosBloq = g.bloqueados === g.ids.length;
+                        return (
+                          <tr
+                            key={g.key}
+                            className={`cursor-pointer ${todosEnSel ? "bg-blue-50" : algunEnSel ? "bg-blue-50/40" : "hover:bg-gray-50"}`}
+                            onClick={() => toggleGrupo(g)}
+                          >
+                            <td className="px-3 py-2">
+                              <input
+                                type="checkbox"
+                                checked={todosEnSel}
+                                readOnly
+                                className="rounded"
+                              />
+                            </td>
+                            <td className="px-3 py-2 font-medium text-gray-800">
+                              {g.cod_men}
+                              <span className="ml-1 text-gray-400 font-normal">{g.mensajero_nombre !== g.cod_men ? `· ${g.mensajero_nombre}` : ""}</span>
+                            </td>
+                            <td className="px-3 py-2 text-gray-700">
+                              ${g.precio.toLocaleString("es-CO")}
+                            </td>
+                            <td className="px-3 py-2 text-right text-gray-700">{g.ids.length}</td>
+                            <td className="px-3 py-2 text-right text-gray-700">
+                              ${(g.precio * g.ids.length).toLocaleString("es-CO")}
+                            </td>
+                            <td className="px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                onClick={() => {
+                                  g.ids.forEach((id) => {
+                                    const s = seriales.find((s) => s.id === id);
+                                    if (s) toggleLockSerial.mutate({ id, val: !s.editado_manualmente });
+                                  });
+                                }}
+                                title={todosBloq ? "Desbloquear grupo" : "Bloquear grupo"}
+                                className={`transition-colors ${todosBloq ? "text-green-600 hover:text-green-800" : "text-gray-300 hover:text-green-500"}`}
+                              >
+                                {todosBloq ? <Lock size={13} /> : <Unlock size={13} />}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Panel de edición de seleccionados */}
+                {seleccion.size > 0 && (
+                  <div className="border-t border-blue-100 bg-blue-50/60 px-4 py-3 space-y-3">
+                    <p className="text-xs font-semibold text-blue-800">
+                      {seleccion.size} serial{seleccion.size !== 1 ? "es" : ""} seleccionado{seleccion.size !== 1 ? "s" : ""} · Valor actual: ${totalSelVal.toLocaleString("es-CO")}
+                    </p>
+                    <div className="flex flex-wrap gap-3 items-end">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Mensajero (opcional)</label>
+                        <select
+                          value={editCodMen}
+                          onChange={(e) => setEditCodMen(e.target.value)}
+                          className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs bg-white"
+                        >
+                          <option value="">— sin cambio —</option>
+                          {personal.map((per) => (
+                            <option key={per.id} value={per.codigo}>
+                              {per.codigo} · {per.nombre_completo}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Precio/serial (0 = sin cambio)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          step={50}
+                          value={editPrecio}
+                          onChange={(e) => setEditPrecio(Number(e.target.value))}
+                          className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs w-32"
+                        />
+                      </div>
+                      {editPrecio > 0 && (
+                        <div className="text-xs text-gray-600">
+                          Nuevo total: <span className="font-semibold">${nuevoTotal.toLocaleString("es-CO")}</span>
+                          <span className={`ml-1 ${diff >= 0 ? "text-green-700" : "text-red-600"}`}>
+                            ({diff >= 0 ? "+" : ""}{diff.toLocaleString("es-CO")})
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    {errorGuardar && <p className="text-xs text-red-600">{errorGuardar}</p>}
+                    <div className="flex gap-2">
+                      <button
+                        onClick={guardarSeleccion}
+                        disabled={guardando || (editPrecio === 0 && !editCodMen)}
+                        className="px-3 py-1.5 text-xs bg-primary hover:bg-primary-hover text-white rounded-lg font-medium disabled:opacity-50"
+                      >
+                        {guardando ? "Guardando…" : "Guardar cambios"}
+                      </button>
+                      <button
+                        onClick={() => { setSeleccion(new Set()); setEditPrecio(0); setEditCodMen(""); }}
+                        className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg hover:bg-gray-50"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ── Buscador de planilla individual ──────────────────────────────────────────
+function BuscarPlanillaSection() {
   const [input, setInput] = useState("");
   const [busqueda, setBusqueda] = useState("");
-  const [editando, setEditando] = useState<PlanillaResumen | null>(null);
 
   const { data, isFetching, isError } = useQuery({
     queryKey: ["planilla-busqueda", busqueda],
@@ -375,22 +755,6 @@ function BuscarPlanillaSection() {
         ? gestionesApi.planillasResumen({ planilla: busqueda }).then((r) => r.data)
         : Promise.resolve([]),
     enabled: !!busqueda,
-  });
-
-  const bloquear = useMutation({
-    mutationFn: (planilla: string) => gestionesApi.bloquear(planilla),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["planilla-busqueda", busqueda] }),
-  });
-  const desbloquear = useMutation({
-    mutationFn: (planilla: string) => gestionesApi.desbloquear(planilla),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["planilla-busqueda", busqueda] }),
-  });
-  const toggleRevisada = useMutation({
-    mutationFn: ({ planilla, revisada }: { planilla: string; revisada: boolean }) =>
-      revisada
-        ? gestionesApi.desmarcarRevisada(planilla)
-        : gestionesApi.marcarRevisada(planilla),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["planilla-busqueda", busqueda] }),
   });
 
   function handleSearch(e: React.FormEvent) {
@@ -429,145 +793,17 @@ function BuscarPlanillaSection() {
         )}
       </form>
 
-      {isFetching && (
-        <p className="text-sm text-gray-400">Buscando…</p>
-      )}
-
-      {!isFetching && isError && (
-        <p className="text-sm text-red-600">Error al buscar la planilla.</p>
-      )}
-
+      {isFetching && <p className="text-sm text-gray-400">Buscando…</p>}
+      {!isFetching && isError && <p className="text-sm text-red-600">Error al buscar la planilla.</p>}
       {!isFetching && busqueda && resultados.length === 0 && (
         <p className="text-sm text-gray-400">No se encontró la planilla <span className="font-mono">{busqueda}</span>.</p>
       )}
 
-      {editando && (
-        <EditModal
-          planilla={editando}
-          onClose={() => setEditando(null)}
-          onSaved={() => {
-            qc.invalidateQueries({ queryKey: ["planilla-busqueda", busqueda] });
-            setEditando(null);
-          }}
-        />
-      )}
-
       {resultados.length > 0 && (
         <div className="space-y-2">
-          {resultados.map((p) => {
-            const totalCli = p.total_cliente;
-            const totalMen = p.total_mensajero;
-            return (
-              <div
-                key={`${p.planilla}-${p.cod_men}`}
-                className={`border rounded-lg p-4 ${p.revisada ? "border-green-300 bg-green-50/40" : "border-gray-200"}`}
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <span className="font-mono text-sm font-semibold text-gray-900">{p.planilla}</span>
-                    <span className="ml-2 text-xs text-gray-500">
-                      {p.cod_men}{p.mensajero_nombre ? ` · ${p.mensajero_nombre}` : ""}
-                    </span>
-                    {p.fecha_escaner && (
-                      <span className="ml-2 text-xs text-gray-400">{p.fecha_escaner}</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {/* Editar mensajero / precio */}
-                    <button
-                      onClick={() => setEditando(p)}
-                      className="text-gray-400 hover:text-primary transition-colors"
-                      title="Editar mensajero / precio"
-                    >
-                      <Pencil size={15} />
-                    </button>
-                    {/* Revisada */}
-                    <button
-                      onClick={() => toggleRevisada.mutate({ planilla: p.planilla, revisada: p.revisada })}
-                      title={p.revisada ? "Quitar revisión" : "Marcar revisada"}
-                      className={`transition-colors ${p.revisada ? "text-green-600 hover:text-green-800" : "text-gray-300 hover:text-green-500"}`}
-                    >
-                      {p.revisada ? <CheckCircle size={16} /> : <Circle size={16} />}
-                    </button>
-                    {/* Bloquear / desbloquear */}
-                    {p.bloqueada ? (
-                      <button
-                        onClick={() => desbloquear.mutate(p.planilla)}
-                        className="text-gray-400 hover:text-amber-500 transition-colors"
-                        title="Desbloquear"
-                      >
-                        <Unlock size={15} />
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => bloquear.mutate(p.planilla)}
-                        className="text-gray-400 hover:text-green-600 transition-colors"
-                        title="Bloquear"
-                      >
-                        <Lock size={15} />
-                      </button>
-                    )}
-                    {/* Ver seriales */}
-                    <button
-                      onClick={() => navigate(`/gestiones?planilla=${encodeURIComponent(p.planilla)}`)}
-                      className="text-gray-400 hover:text-primary transition-colors"
-                      title="Ver seriales"
-                    >
-                      <List size={15} />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="mt-3 grid grid-cols-5 gap-3 text-xs">
-                  <div>
-                    <p className="text-gray-400 uppercase tracking-wide">Entregas</p>
-                    <p className="font-semibold text-gray-800">{p.entregas}</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-400 uppercase tracking-wide">Devoluciones</p>
-                    <p className="font-semibold text-gray-800">{p.devoluciones}</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-400 uppercase tracking-wide">Total seriales</p>
-                    <p className="font-semibold text-gray-800 flex items-center gap-1">
-                      {p.total_seriales}
-                      {p.con_precio_cero > 0 && (
-                        <span title={`${p.con_precio_cero} sin precio`} className="text-amber-500">
-                          <AlertTriangle size={11} className="inline" />
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-gray-400 uppercase tracking-wide">Val. mensajero</p>
-                    <p className="font-semibold text-gray-800">${totalMen.toLocaleString("es-CO")}</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-400 uppercase tracking-wide">Val. cliente</p>
-                    <p className="font-semibold text-gray-800">${totalCli.toLocaleString("es-CO")}</p>
-                  </div>
-                </div>
-
-                <div className="mt-2 flex items-center gap-2">
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                    p.bloqueada ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"
-                  }`}>
-                    {p.bloqueada ? "Bloqueada" : "Abierta"}
-                  </span>
-                  {p.revisada && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                      <CheckCircle size={10} /> Revisada
-                    </span>
-                  )}
-                  {p.con_precio_cero > 0 && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
-                      <AlertTriangle size={10} /> {p.con_precio_cero} sin precio
-                    </span>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+          {resultados.map((p) => (
+            <PlanillaCard key={`${p.planilla}-${p.cod_men}`} p={p} busqueda={busqueda} />
+          ))}
         </div>
       )}
     </div>

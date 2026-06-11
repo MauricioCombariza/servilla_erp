@@ -10,6 +10,8 @@ from app.models.gestiones import SerialGestion
 from app.schemas.gestiones import (
     BloquearRangoRequest,
     BloquearRangoResult,
+    BulkPatchRequest,
+    BulkPatchResult,
     CambiarMensajeroRequest,
     CambiarPrecioRequest,
     MarcarRevisadaResult,
@@ -23,6 +25,7 @@ from app.schemas.gestiones import (
 from app.services.planillas_service import (
     bloquear_planilla,
     bloquear_por_rango,
+    bulk_patch_seriales,
     cambiar_mensajero_planilla,
     cambiar_precio_planilla,
     desbloquear_planilla,
@@ -132,6 +135,15 @@ async def post_recalcular(
 
 
 # ── Seriales individuales ─────────────────────────────────────────────────────
+
+@router.patch("/bulk", response_model=BulkPatchResult)
+async def patch_bulk(
+    body: BulkPatchRequest,
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    return await bulk_patch_seriales(body, db)
+
 
 @router.get("/", response_model=list[SerialGestionRead])
 async def list_seriales(
