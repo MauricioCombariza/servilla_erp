@@ -482,7 +482,8 @@ function DetallePanel({
           ))}
         </select>
         <input type="number" min={1} value={addSobres} onChange={(e) => setAddSobres(+e.target.value)}
-          className="border border-gray-300 rounded px-2 py-1 text-xs w-20" placeholder="Sobres" />
+          className="border border-gray-300 rounded px-2 py-1 text-xs w-20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+          placeholder="Sobres" />
         <button onClick={handleAdd} disabled={!addOrdenId || saving}
           className="bg-blue-600 text-white rounded px-3 py-1 text-xs hover:bg-blue-700 disabled:opacity-40">
           {saving ? "..." : "Agregar"}
@@ -618,7 +619,7 @@ function FacturaTransporteForm({ onClose, onSaved }: { onClose: () => void; onSa
               </select>
               <input type="number" min={1} value={selSobres}
                 onChange={(e) => setSelSobres(Math.max(1, +e.target.value))}
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-24"
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-24 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 placeholder="Sobres" />
               <button type="button" onClick={agregarLinea} disabled={!selOrdenId}
                 className="bg-gray-800 text-white rounded-lg px-4 py-2 text-sm hover:bg-gray-700 disabled:opacity-40 whitespace-nowrap">
