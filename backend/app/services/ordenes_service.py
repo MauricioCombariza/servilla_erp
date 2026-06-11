@@ -91,12 +91,18 @@ async def _cargar_maestros(
 
     rows_per = (
         await db.execute(
-            select(Personal.id, Personal.codigo, Personal.nombre_completo).where(
+            select(Personal.id, Personal.codigo, Personal.nombre_completo, Personal.tipo_personal).where(
                 Personal.activo == True  # noqa: E712
             )
         )
     ).all()
-    personal_by_code = {r.codigo.strip().upper(): r.id for r in rows_per if r.codigo}
+    personal_by_code = {
+        r.codigo.strip().upper(): {
+            'id':            r.id,
+            'tipo_personal': r.tipo_personal or 'mensajero',
+        }
+        for r in rows_per if r.codigo
+    }
     personal_by_name = {
         r.nombre_completo.strip().lower(): r.id for r in rows_per if r.nombre_completo
     }
@@ -202,7 +208,8 @@ async def procesar_csv(
     df["_orden"]         = df["orden"].str.strip().str.replace(r"\.0$", "", regex=True)
     df["_tipo_servicio"] = df["tipo_servicio"].str.lower().str.strip()
     df["_es_local"]      = df["ambito"].str.lower().str.strip().str.contains("bog", na=False)
-    df["_planilla"]      = df["planilla"].str.strip() if "planilla" in df.columns else ""
+    df["_planilla_col"]  = df["planilla"].str.strip() if "planilla" in df.columns else ""
+    df["_lot_esc_col"]   = df["lot_esc"].str.strip()  if "lot_esc"  in df.columns else ""
     df["_cod_men"]       = df["cod_men"].str.strip().str.upper() if "cod_men" in df.columns else ""
 
     _PENDIENTE = {"0", "lleva mensajero", "lleva ciudad", "pendiente"}
@@ -243,8 +250,8 @@ async def procesar_csv(
                 return ""
             pid = personal_by_name.get(nombre.lower())
             if pid:
-                for cod, eid in personal_by_code.items():
-                    if eid == pid:
+                for cod, info in personal_by_code.items():
+                    if info['id'] == pid:
                         return cod
             return ""  # DA no encontrado → sin código asignado
 
@@ -265,14 +272,20 @@ async def procesar_csv(
         fecha_parsed: date = fila["_fecha_parsed"]
         tipo_ser         = str(fila["_tipo_servicio"])
         ambito_val       = "bogota" if fila["_es_local"] else "nacional"
-        planilla_val     = str(fila["_planilla"]) if fila["_planilla"] else ""
         cod_men_val      = (str(fila["_cod_men"]) if fila["_cod_men"] else "")[:4]
         tipo_gestion_val = str(fila["_tipo_gestion"])
         db_estado_val    = str(fila["_db_estado"])
 
         precio_cli   = precios_cli.get((id_cliente, tipo_ser, ambito_val), 0.0)
         precio_men   = precios_men.get((id_cliente, tipo_ser, ambito_val), 0.0)
-        mensajero_id = personal_by_code.get(cod_men_val) if cod_men_val else None
+        men_info     = personal_by_code.get(cod_men_val) if cod_men_val else None
+        mensajero_id = men_info['id'] if men_info else None
+        tipo_men     = men_info['tipo_personal'] if men_info else 'mensajero'
+        if tipo_men == 'courier_externo':
+            planilla_val = str(fila["_planilla_col"]) if fila["_planilla_col"] else ""
+        else:
+            planilla_val = (str(fila["_lot_esc_col"]) if fila["_lot_esc_col"] else "") or \
+                           (str(fila["_planilla_col"]) if fila["_planilla_col"] else "")
 
         all_serial_params.append({
             "serial": serial, "orden": num_orden, "planilla": planilla_val,
