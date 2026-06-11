@@ -378,6 +378,7 @@ export function FacturasTransportePage() {
       {editando && (
         <EditFacturaModal
           factura={editando}
+          ordenes={ordenes}
           onClose={() => setEditando(null)}
           onSaved={(updated) => {
             qc.setQueryData<FacturaTransporte[]>(
@@ -385,6 +386,13 @@ export function FacturasTransportePage() {
               (prev) => prev?.map((x) => x.id === updated.id ? updated : x) ?? prev
             );
             setEditando(null);
+          }}
+          onDetalleChanged={(updated) => {
+            qc.setQueryData<FacturaTransporte[]>(
+              ["facturas-transporte", desde, hasta, search],
+              (prev) => prev?.map((x) => x.id === updated.id ? updated : x) ?? prev
+            );
+            setEditando(updated);
           }}
         />
       )}
@@ -521,6 +529,7 @@ function FacturaTransporteForm({ onClose, onSaved }: { onClose: () => void; onSa
   const [selOrdenId, setSelOrdenId] = useState<number | "">("");
   const [selSobres, setSelSobres] = useState(1);
   const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const totalSobres = lineas.reduce((s, l) => s + l.cantidad_sobres, 0);
   const asignadasIds = new Set(lineas.map((l) => l.orden.id));
@@ -541,6 +550,7 @@ function FacturaTransporteForm({ onClose, onSaved }: { onClose: () => void; onSa
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setFormError(null);
     setSaving(true);
     try {
       const res = await transpApi.create({
@@ -550,13 +560,21 @@ function FacturaTransporteForm({ onClose, onSaved }: { onClose: () => void; onSa
         observaciones: form.observaciones || null,
       });
       const facturaId = (res.data as FacturaTransporte).id;
+      const errores: string[] = [];
       for (const linea of lineas) {
-        await transpApi.addDetalle(facturaId, {
-          orden_id: linea.orden.id,
-          cantidad_sobres: linea.cantidad_sobres,
-        });
+        try {
+          await transpApi.addDetalle(facturaId, {
+            orden_id: linea.orden.id,
+            cantidad_sobres: linea.cantidad_sobres,
+          });
+        } catch (err: any) {
+          errores.push(`${linea.orden.numero_orden}: ${err?.response?.data?.detail ?? "error"}`);
+        }
       }
       onSaved();
+      if (errores.length) setFormError(`Factura guardada. Errores en órdenes: ${errores.join("; ")}`);
+    } catch (err: any) {
+      setFormError(err?.response?.data?.detail ?? "Error al guardar la factura");
     } finally { setSaving(false); }
   }
 
@@ -687,6 +705,10 @@ function FacturaTransporteForm({ onClose, onSaved }: { onClose: () => void; onSa
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none" />
           </div>
 
+          {formError && (
+            <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{formError}</p>
+          )}
+
           <div className="flex justify-end gap-3 pt-2 border-t">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg">Cancelar</button>
             <button type="submit" disabled={saving}
@@ -703,11 +725,13 @@ function FacturaTransporteForm({ onClose, onSaved }: { onClose: () => void; onSa
 // ── Modal editar factura ──────────────────────────────────────────────────────
 
 function EditFacturaModal({
-  factura, onClose, onSaved,
+  factura, ordenes, onClose, onSaved, onDetalleChanged,
 }: {
   factura: FacturaTransporte;
+  ordenes: Orden[];
   onClose: () => void;
   onSaved: (updated: FacturaTransporte) => void;
+  onDetalleChanged: (updated: FacturaTransporte) => void;
 }) {
   const { data: personal = [] } = useQuery({
     queryKey: ["personal-courier"],
@@ -743,78 +767,91 @@ function EditFacturaModal({
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-        <div className="px-6 py-4 border-b flex items-center justify-between sticky top-0 bg-white">
-          <h2 className="text-base font-semibold">Editar factura</h2>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+        <div className="px-6 py-4 border-b flex items-center justify-between shrink-0">
+          <h2 className="text-base font-semibold">Editar factura — {factura.numero_factura}</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
         </div>
-        <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">N° Factura *</label>
-              <input required value={form.numero_factura} onChange={(e) => setForm({ ...form, numero_factura: e.target.value })}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+        <div className="overflow-y-auto flex-1">
+          <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">N° Factura *</label>
+                <input required value={form.numero_factura} onChange={(e) => setForm({ ...form, numero_factura: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Fecha factura *</label>
+                <input type="date" required value={form.fecha_factura} onChange={(e) => setForm({ ...form, fecha_factura: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Fecha factura *</label>
-              <input type="date" required value={form.fecha_factura} onChange={(e) => setForm({ ...form, fecha_factura: e.target.value })}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Courier *</label>
-            <select required value={form.courrier_id} onChange={(e) => setForm({ ...form, courrier_id: +e.target.value })}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-              {personal.map((p) => <option key={p.id} value={p.id}>{p.codigo} — {p.nombre_completo}</option>)}
-            </select>
-          </div>
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Monto total *</label>
-              <input type="number" required min={0} value={form.monto_total}
-                onChange={(e) => setForm({ ...form, monto_total: +e.target.value })}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Total sobres</label>
-              <input type="number" min={0} value={form.total_sobres}
-                onChange={(e) => setForm({ ...form, total_sobres: +e.target.value })}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Monto pagado</label>
-              <input type="number" min={0} value={form.monto_pagado}
-                onChange={(e) => setForm({ ...form, monto_pagado: +e.target.value })}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Fecha vencimiento</label>
-              <input type="date" value={form.fecha_vencimiento} onChange={(e) => setForm({ ...form, fecha_vencimiento: e.target.value })}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Estado</label>
-              <select value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value })}
+              <label className="block text-xs font-medium text-gray-700 mb-1">Courier *</label>
+              <select required value={form.courrier_id} onChange={(e) => setForm({ ...form, courrier_id: +e.target.value })}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-                {["pendiente","pagada","anulada"].map((s) => <option key={s} value={s}>{s}</option>)}
+                {personal.map((p) => <option key={p.id} value={p.id}>{p.codigo} — {p.nombre_completo}</option>)}
               </select>
             </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Monto total *</label>
+                <input type="number" required min={0} value={form.monto_total}
+                  onChange={(e) => setForm({ ...form, monto_total: +e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Total sobres</label>
+                <input type="number" min={0} value={form.total_sobres}
+                  onChange={(e) => setForm({ ...form, total_sobres: +e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Monto pagado</label>
+                <input type="number" min={0} value={form.monto_pagado}
+                  onChange={(e) => setForm({ ...form, monto_pagado: +e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Fecha vencimiento</label>
+                <input type="date" value={form.fecha_vencimiento} onChange={(e) => setForm({ ...form, fecha_vencimiento: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Estado</label>
+                <select value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                  {["pendiente","pagada","anulada"].map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Observaciones</label>
+              <textarea rows={2} value={form.observaciones} onChange={(e) => setForm({ ...form, observaciones: e.target.value })}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none" />
+            </div>
+            <div className="flex justify-end gap-3 pt-2 border-t">
+              <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg">Cancelar</button>
+              <button type="submit" disabled={saving}
+                className="px-4 py-2 text-sm bg-primary hover:bg-primary-hover text-white rounded-lg disabled:opacity-60">
+                {saving ? "Guardando..." : "Guardar cambios"}
+              </button>
+            </div>
+          </form>
+
+          {/* Órdenes asignadas */}
+          <div className="px-6 pb-6 border-t pt-4">
+            <DetallePanel
+              factura={factura}
+              ordenes={ordenes}
+              onUpdated={(updated) => {
+                onDetalleChanged(updated);
+              }}
+            />
           </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Observaciones</label>
-            <textarea rows={2} value={form.observaciones} onChange={(e) => setForm({ ...form, observaciones: e.target.value })}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none" />
-          </div>
-          <div className="flex justify-end gap-3 pt-2">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg">Cancelar</button>
-            <button type="submit" disabled={saving}
-              className="px-4 py-2 text-sm bg-primary hover:bg-primary-hover text-white rounded-lg disabled:opacity-60">
-              {saving ? "Guardando..." : "Guardar cambios"}
-            </button>
-          </div>
-        </form>
+        </div>
       </div>
     </div>
   );
