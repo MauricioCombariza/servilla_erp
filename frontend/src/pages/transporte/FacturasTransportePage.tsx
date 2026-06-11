@@ -137,12 +137,10 @@ export function FacturasTransportePage() {
                 className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-20" />
             </>
           )}
-          {tab === "facturas" && (
-            <button onClick={() => setShowForm(true)}
-              className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-white px-4 py-2 rounded-lg text-sm font-medium">
-              <Plus size={16} /> Registrar factura
-            </button>
-          )}
+          <button onClick={() => { setTab("facturas"); setShowForm(true); }}
+            className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-white px-4 py-2 rounded-lg text-sm font-medium">
+            <Plus size={16} /> Registrar factura
+          </button>
         </div>
       </div>
 
