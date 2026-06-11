@@ -8,6 +8,9 @@ class PersonalMin(BaseModel):
     id: int
     codigo: str
     nombre_completo: str
+    tipo_personal: str | None = None
+    precio_local: float | None = None
+    precio_nacional: float | None = None
 
 
 class ClienteMin(BaseModel):
@@ -62,6 +65,7 @@ class PlanillaResumen(BaseModel):
     cod_men: str
     mensajero_nombre: str | None
     mensajero_id: int | None
+    tipo_personal: str | None = None
     fecha_escaner: date | None
     entregas: int
     devoluciones: int
@@ -132,3 +136,15 @@ class BulkPatchRequest(BaseModel):
 
 class BulkPatchResult(BaseModel):
     actualizados: int
+
+
+class PrecioCourierRequest(BaseModel):
+    precio_local: float
+    precio_nacional: float
+
+
+class PrecioCourierResult(BaseModel):
+    planilla: str
+    seriales_actualizados: int
+    bogota: int
+    nacional: int

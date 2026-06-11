@@ -110,12 +110,20 @@ export interface Ciudad {
 export interface SerialGestion {
   id: number;
   serial: string;
+  orden: string | null;
   f_emi: string | null;
   f_esc: string;
   planilla: string;
   cod_men: string;
   mensajero_id: number | null;
-  mensajero: { id: number; codigo: string; nombre_completo: string } | null;
+  mensajero: {
+    id: number;
+    codigo: string;
+    nombre_completo: string;
+    tipo_personal: string | null;
+    precio_local: number | null;
+    precio_nacional: number | null;
+  } | null;
   cliente_id: number | null;
   cliente: { id: number; nombre_empresa: string } | null;
   tipo_gestion: "Entrega" | "Devolucion";
@@ -297,6 +305,7 @@ export interface PlanillaResumen {
   cod_men: string;
   mensajero_nombre: string | null;
   mensajero_id: number | null;
+  tipo_personal: string | null;
   fecha_escaner: string | null;
   entregas: number;
   devoluciones: number;

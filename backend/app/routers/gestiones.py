@@ -17,6 +17,8 @@ from app.schemas.gestiones import (
     MarcarRevisadaResult,
     PlanillaActionResult,
     PlanillaResumen,
+    PrecioCourierRequest,
+    PrecioCourierResult,
     RecalcularRequest,
     RecalcularResult,
     SerialGestionRead,
@@ -27,6 +29,7 @@ from app.services.planillas_service import (
     bloquear_por_rango,
     bulk_patch_seriales,
     cambiar_mensajero_planilla,
+    cambiar_precio_courier,
     cambiar_precio_planilla,
     desbloquear_planilla,
     desmarcar_revisada,
@@ -89,6 +92,16 @@ async def delete_bloquear_planilla(
     _=_auth,
 ):
     return await desbloquear_planilla(planilla, db)
+
+
+@router.post("/planillas/{planilla}/precio-courier", response_model=PrecioCourierResult)
+async def post_precio_courier(
+    planilla: str = Path(...),
+    body: PrecioCourierRequest = ...,
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    return await cambiar_precio_courier(planilla, body, db)
 
 
 # ── Bloqueo masivo por rango ──────────────────────────────────────────────────

@@ -15,8 +15,9 @@ import {
   ChevronDown,
   ChevronUp,
   Rows3,
+  LayoutList,
 } from "lucide-react";
-import { gestionesApi, type RecalcularResult, type BloquearRangoResult, type BulkPatchItem } from "@/api/gestiones";
+import { gestionesApi, type RecalcularResult, type BloquearRangoResult, type BulkPatchItem, type PrecioCourierResult } from "@/api/gestiones";
 import { personalApi } from "@/api/personal";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
 import type { PlanillaResumen } from "@/types/domain";
@@ -361,6 +362,122 @@ function BloqueoRangoPanel({ filtros, onDone }: BloqueoRangoPanelProps) {
   );
 }
 
+// ── Panel de ajuste de precio para courier externo ────────────────────────────
+interface CourierPrecioPanelProps {
+  planilla: string;
+  serialesBogota: number;
+  serialesNacional: number;
+  precioLocalDefault: number;
+  precioNacionalDefault: number;
+  onSaved: () => void;
+}
+
+function CourierPrecioPanel({
+  planilla,
+  serialesBogota,
+  serialesNacional,
+  precioLocalDefault,
+  precioNacionalDefault,
+  onSaved,
+}: CourierPrecioPanelProps) {
+  const [precioLocal, setPrecioLocal] = useState(precioLocalDefault);
+  const [precioNacional, setPrecioNacional] = useState(precioNacionalDefault);
+  const [guardando, setGuardando] = useState(false);
+  const [resultado, setResultado] = useState<PrecioCourierResult | null>(null);
+  const [error, setError] = useState("");
+
+  const totalEstimado =
+    serialesBogota * precioLocal + serialesNacional * precioNacional;
+
+  async function aplicar() {
+    setGuardando(true);
+    setError("");
+    setResultado(null);
+    try {
+      const res = await gestionesApi.precioCourier(planilla, {
+        precio_local: precioLocal,
+        precio_nacional: precioNacional,
+      });
+      setResultado(res.data);
+      onSaved();
+    } catch {
+      setError("Error al aplicar precios");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <div className="mx-4 my-3 bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-3">
+      <h4 className="text-xs font-semibold text-blue-800 uppercase tracking-wide">
+        Ajuste de precio por ámbito — Courier Externo
+      </h4>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">
+            Tarifa Local (Bogotá) $/serial
+          </label>
+          <input
+            type="number"
+            min={0}
+            step={50}
+            value={precioLocal}
+            onChange={(e) => { setPrecioLocal(Number(e.target.value)); setResultado(null); }}
+            className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs w-full focus:ring-1 focus:ring-blue-400 outline-none"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">
+            Tarifa Nacional $/serial
+          </label>
+          <input
+            type="number"
+            min={0}
+            step={50}
+            value={precioNacional}
+            onChange={(e) => { setPrecioNacional(Number(e.target.value)); setResultado(null); }}
+            className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs w-full focus:ring-1 focus:ring-blue-400 outline-none"
+          />
+        </div>
+      </div>
+      <div className="text-xs text-gray-700 bg-white border border-gray-100 rounded-lg px-3 py-2 space-y-1">
+        <div className="flex justify-between">
+          <span className="text-gray-500">Bogotá (local):</span>
+          <span>
+            {serialesBogota.toLocaleString()} × ${precioLocal.toLocaleString("es-CO")} ={" "}
+            <span className="font-medium">${(serialesBogota * precioLocal).toLocaleString("es-CO")}</span>
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-gray-500">Nacional:</span>
+          <span>
+            {serialesNacional.toLocaleString()} × ${precioNacional.toLocaleString("es-CO")} ={" "}
+            <span className="font-medium">${(serialesNacional * precioNacional).toLocaleString("es-CO")}</span>
+          </span>
+        </div>
+        <div className="flex justify-between border-t border-gray-100 pt-1 font-semibold text-gray-800">
+          <span>Total planilla:</span>
+          <span>${totalEstimado.toLocaleString("es-CO")}</span>
+        </div>
+      </div>
+      {resultado && (
+        <p className="text-xs text-green-700 bg-green-50 border border-green-200 rounded px-2 py-1">
+          {resultado.seriales_actualizados} seriales actualizados — Bogotá: {resultado.bogota} · Nacional: {resultado.nacional}
+        </p>
+      )}
+      {error && <p className="text-xs text-red-600">{error}</p>}
+      <button
+        onClick={aplicar}
+        disabled={guardando}
+        className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium disabled:opacity-50 flex items-center gap-1.5"
+      >
+        {guardando && <RefreshCw size={11} className="animate-spin" />}
+        {guardando ? "Aplicando…" : "Aplicar precios por ámbito"}
+      </button>
+    </div>
+  );
+}
+
 // ── Tarjeta de planilla con detalle expandible ────────────────────────────────
 interface PlanillaCardProps {
   p: PlanillaResumen;
@@ -372,6 +489,7 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
   const navigate = useNavigate();
   const [editando, setEditando] = useState(false);
   const [expandido, setExpandido] = useState(false);
+  const [vistaOrden, setVistaOrden] = useState(false);
   const [seleccion, setSeleccion] = useState<Set<number>>(new Set());
   const [editPrecio, setEditPrecio] = useState<number>(0);
   const [editCodMen, setEditCodMen] = useState("");
@@ -442,6 +560,46 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
     }, {})
   );
 
+  // Agrupar por orden (para vista "por orden")
+  type GrupoOrden = {
+    key: string;
+    orden: string | null;
+    cliente_nombre: string;
+    ids: number[];
+    bloqueados: number;
+    valor_total: number;
+  };
+  const gruposOrden: GrupoOrden[] = Object.values(
+    seriales.reduce<Record<string, GrupoOrden>>((acc, s) => {
+      const key = s.orden ?? "__sin_orden__";
+      if (!acc[key]) {
+        acc[key] = {
+          key,
+          orden: s.orden,
+          cliente_nombre: s.cliente?.nombre_empresa ?? "—",
+          ids: [],
+          bloqueados: 0,
+          valor_total: 0,
+        };
+      }
+      acc[key].ids.push(s.id);
+      if (s.editado_manualmente) acc[key].bloqueados++;
+      acc[key].valor_total += Number(s.precio_mensajero);
+      return acc;
+    }, {})
+  );
+
+  // Courier externo
+  const isCourierExterno =
+    p.tipo_personal === "courier_externo" ||
+    (seriales.length > 0 && seriales[0].mensajero?.tipo_personal === "courier_externo");
+  const serialesBogota = seriales.filter((s) => s.ambito === "bogota").length;
+  const serialesNacional = seriales.length - serialesBogota;
+  const precioLocalDefecto =
+    seriales[0]?.mensajero?.precio_local ?? p.precio_promedio_mensajero;
+  const precioNacionalDefecto =
+    seriales[0]?.mensajero?.precio_nacional ?? p.precio_promedio_mensajero;
+
   const preciosUnicos = [...new Set(seriales.map((s) => s.precio_mensajero))];
   const preciosMixtos = preciosUnicos.length > 1;
 
@@ -451,14 +609,18 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
   const nuevoTotal = editPrecio > 0 ? selIds.length * editPrecio : totalSelVal;
   const diff = nuevoTotal - totalSelVal;
 
-  function toggleGrupo(g: Grupo) {
+  function toggleIds(ids: number[]) {
     setSeleccion((prev) => {
       const next = new Set(prev);
-      const todosEnSel = g.ids.every((id) => next.has(id));
-      if (todosEnSel) g.ids.forEach((id) => next.delete(id));
-      else g.ids.forEach((id) => next.add(id));
+      const todosEnSel = ids.every((id) => next.has(id));
+      if (todosEnSel) ids.forEach((id) => next.delete(id));
+      else ids.forEach((id) => next.add(id));
       return next;
     });
+  }
+
+  function toggleGrupo(g: Grupo) {
+    toggleIds(g.ids);
   }
 
   async function guardarSeleccion() {
@@ -587,17 +749,52 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
           <div className="border-t border-gray-100">
             {cargandoDetalle ? (
               <p className="text-sm text-gray-400 px-4 py-3">Cargando registros…</p>
-            ) : grupos.length === 0 ? (
+            ) : seriales.length === 0 ? (
               <p className="text-sm text-gray-400 px-4 py-3">Sin registros.</p>
             ) : (
               <>
-                <div className="px-4 pt-3 pb-1 flex items-center gap-3">
+                {/* Panel courier externo */}
+                {isCourierExterno && (
+                  <CourierPrecioPanel
+                    planilla={p.planilla}
+                    serialesBogota={serialesBogota}
+                    serialesNacional={serialesNacional}
+                    precioLocalDefault={precioLocalDefecto}
+                    precioNacionalDefault={precioNacionalDefecto}
+                    onSaved={invalidar}
+                  />
+                )}
+
+                {/* Barra de control */}
+                <div className="px-4 pt-3 pb-1 flex items-center gap-3 flex-wrap">
                   <span className="text-xs font-medium text-gray-600">
-                    {grupos.length} grupo{grupos.length !== 1 ? "s" : ""} · {seriales.length} seriales
+                    {vistaOrden
+                      ? `${gruposOrden.length} orden${gruposOrden.length !== 1 ? "es" : ""}`
+                      : `${grupos.length} grupo${grupos.length !== 1 ? "s" : ""}`
+                    }{" "}· {seriales.length} seriales
                   </span>
+
+                  {/* Toggle de vista */}
+                  <div className="flex border border-gray-200 rounded-lg overflow-hidden text-xs">
+                    <button
+                      onClick={() => setVistaOrden(false)}
+                      className={`flex items-center gap-1 px-2 py-1 ${!vistaOrden ? "bg-primary text-white" : "text-gray-500 hover:bg-gray-50"}`}
+                      title="Agrupar por tarifa"
+                    >
+                      <Rows3 size={11} /> Por tarifa
+                    </button>
+                    <button
+                      onClick={() => setVistaOrden(true)}
+                      className={`flex items-center gap-1 px-2 py-1 ${vistaOrden ? "bg-primary text-white" : "text-gray-500 hover:bg-gray-50"}`}
+                      title="Agrupar por orden"
+                    >
+                      <LayoutList size={11} /> Por orden
+                    </button>
+                  </div>
+
                   {seleccion.size > 0 && (
                     <button onClick={() => setSeleccion(new Set())} className="text-xs text-gray-400 hover:text-gray-600 underline">
-                      Limpiar selección
+                      Limpiar selección ({seleccion.size})
                     </button>
                   )}
                   <button
@@ -612,66 +809,121 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
                 </div>
 
                 <div className="overflow-x-auto">
-                  <table className="w-full text-xs min-w-[600px]">
-                    <thead className="bg-gray-50 border-y border-gray-100">
-                      <tr>
-                        <th className="px-3 py-2 w-8"></th>
-                        <th className="px-3 py-2 text-left text-gray-500 font-medium">Mensajero</th>
-                        <th className="px-3 py-2 text-left text-gray-500 font-medium">Precio</th>
-                        <th className="px-3 py-2 text-right text-gray-500 font-medium">Seriales</th>
-                        <th className="px-3 py-2 text-right text-gray-500 font-medium">Valor</th>
-                        <th className="px-3 py-2 text-center text-gray-500 font-medium">🔒</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                      {grupos.map((g) => {
-                        const todosEnSel = g.ids.every((id) => seleccion.has(id));
-                        const algunEnSel = g.ids.some((id) => seleccion.has(id));
-                        const todosBloq = g.bloqueados === g.ids.length;
-                        return (
-                          <tr
-                            key={g.key}
-                            className={`cursor-pointer ${todosEnSel ? "bg-blue-50" : algunEnSel ? "bg-blue-50/40" : "hover:bg-gray-50"}`}
-                            onClick={() => toggleGrupo(g)}
-                          >
-                            <td className="px-3 py-2">
-                              <input
-                                type="checkbox"
-                                checked={todosEnSel}
-                                readOnly
-                                className="rounded"
-                              />
-                            </td>
-                            <td className="px-3 py-2 font-medium text-gray-800">
-                              {g.cod_men}
-                              <span className="ml-1 text-gray-400 font-normal">{g.mensajero_nombre !== g.cod_men ? `· ${g.mensajero_nombre}` : ""}</span>
-                            </td>
-                            <td className="px-3 py-2 text-gray-700">
-                              ${g.precio.toLocaleString("es-CO")}
-                            </td>
-                            <td className="px-3 py-2 text-right text-gray-700">{g.ids.length}</td>
-                            <td className="px-3 py-2 text-right text-gray-700">
-                              ${(g.precio * g.ids.length).toLocaleString("es-CO")}
-                            </td>
-                            <td className="px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
-                              <button
-                                onClick={() => {
-                                  g.ids.forEach((id) => {
-                                    const s = seriales.find((s) => s.id === id);
-                                    if (s) toggleLockSerial.mutate({ id, val: !s.editado_manualmente });
-                                  });
-                                }}
-                                title={todosBloq ? "Desbloquear grupo" : "Bloquear grupo"}
-                                className={`transition-colors ${todosBloq ? "text-green-600 hover:text-green-800" : "text-gray-300 hover:text-green-500"}`}
-                              >
-                                {todosBloq ? <Lock size={13} /> : <Unlock size={13} />}
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                  {!vistaOrden ? (
+                    // ── Vista por tarifa (grupos) ──────────────────────────
+                    <table className="w-full text-xs min-w-[600px]">
+                      <thead className="bg-gray-50 border-y border-gray-100">
+                        <tr>
+                          <th className="px-3 py-2 w-8"></th>
+                          <th className="px-3 py-2 text-left text-gray-500 font-medium">Mensajero</th>
+                          <th className="px-3 py-2 text-left text-gray-500 font-medium">Precio</th>
+                          <th className="px-3 py-2 text-right text-gray-500 font-medium">Seriales</th>
+                          <th className="px-3 py-2 text-right text-gray-500 font-medium">Valor</th>
+                          <th className="px-3 py-2 text-center text-gray-500 font-medium">🔒</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {grupos.map((g) => {
+                          const todosEnSel = g.ids.every((id) => seleccion.has(id));
+                          const algunEnSel = g.ids.some((id) => seleccion.has(id));
+                          const todosBloq = g.bloqueados === g.ids.length;
+                          return (
+                            <tr
+                              key={g.key}
+                              className={`cursor-pointer ${todosEnSel ? "bg-blue-50" : algunEnSel ? "bg-blue-50/40" : "hover:bg-gray-50"}`}
+                              onClick={() => toggleGrupo(g)}
+                            >
+                              <td className="px-3 py-2">
+                                <input type="checkbox" checked={todosEnSel} readOnly className="rounded" />
+                              </td>
+                              <td className="px-3 py-2 font-medium text-gray-800">
+                                {g.cod_men}
+                                <span className="ml-1 text-gray-400 font-normal">
+                                  {g.mensajero_nombre !== g.cod_men ? `· ${g.mensajero_nombre}` : ""}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-gray-700">${g.precio.toLocaleString("es-CO")}</td>
+                              <td className="px-3 py-2 text-right text-gray-700">{g.ids.length}</td>
+                              <td className="px-3 py-2 text-right text-gray-700">
+                                ${(g.precio * g.ids.length).toLocaleString("es-CO")}
+                              </td>
+                              <td className="px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  onClick={() => {
+                                    g.ids.forEach((id) => {
+                                      const s = seriales.find((s) => s.id === id);
+                                      if (s) toggleLockSerial.mutate({ id, val: !s.editado_manualmente });
+                                    });
+                                  }}
+                                  title={todosBloq ? "Desbloquear grupo" : "Bloquear grupo"}
+                                  className={`transition-colors ${todosBloq ? "text-green-600 hover:text-green-800" : "text-gray-300 hover:text-green-500"}`}
+                                >
+                                  {todosBloq ? <Lock size={13} /> : <Unlock size={13} />}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  ) : (
+                    // ── Vista por orden ────────────────────────────────────
+                    <table className="w-full text-xs min-w-[640px]">
+                      <thead className="bg-gray-50 border-y border-gray-100">
+                        <tr>
+                          <th className="px-3 py-2 w-8"></th>
+                          <th className="px-3 py-2 text-left text-gray-500 font-medium">Orden</th>
+                          <th className="px-3 py-2 text-left text-gray-500 font-medium">Cliente</th>
+                          <th className="px-3 py-2 text-right text-gray-500 font-medium">Seriales</th>
+                          <th className="px-3 py-2 text-right text-gray-500 font-medium">Precio prom.</th>
+                          <th className="px-3 py-2 text-right text-gray-500 font-medium">Valor</th>
+                          <th className="px-3 py-2 text-center text-gray-500 font-medium">🔒</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {gruposOrden.map((g) => {
+                          const todosEnSel = g.ids.every((id) => seleccion.has(id));
+                          const algunEnSel = g.ids.some((id) => seleccion.has(id));
+                          const todosBloq = g.bloqueados === g.ids.length;
+                          const precioProm = g.ids.length > 0 ? g.valor_total / g.ids.length : 0;
+                          return (
+                            <tr
+                              key={g.key}
+                              className={`cursor-pointer ${todosEnSel ? "bg-blue-50" : algunEnSel ? "bg-blue-50/40" : "hover:bg-gray-50"}`}
+                              onClick={() => toggleIds(g.ids)}
+                            >
+                              <td className="px-3 py-2">
+                                <input type="checkbox" checked={todosEnSel} readOnly className="rounded" />
+                              </td>
+                              <td className="px-3 py-2 font-mono text-gray-700">{g.orden ?? "—"}</td>
+                              <td className="px-3 py-2 text-gray-600 truncate max-w-[160px]">{g.cliente_nombre}</td>
+                              <td className="px-3 py-2 text-right text-gray-700">{g.ids.length}</td>
+                              <td className="px-3 py-2 text-right text-gray-700">
+                                ${precioProm.toLocaleString("es-CO", { maximumFractionDigits: 0 })}
+                              </td>
+                              <td className="px-3 py-2 text-right text-gray-700">
+                                ${g.valor_total.toLocaleString("es-CO", { maximumFractionDigits: 0 })}
+                              </td>
+                              <td className="px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  onClick={() => {
+                                    g.ids.forEach((id) => {
+                                      const s = seriales.find((s) => s.id === id);
+                                      if (s) toggleLockSerial.mutate({ id, val: !s.editado_manualmente });
+                                    });
+                                  }}
+                                  title={todosBloq ? "Desbloquear orden" : "Bloquear orden"}
+                                  className={`transition-colors ${todosBloq ? "text-green-600 hover:text-green-800" : "text-gray-300 hover:text-green-500"}`}
+                                >
+                                  {todosBloq ? <Lock size={13} /> : <Unlock size={13} />}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
 
                 {/* Panel de edición de seleccionados */}

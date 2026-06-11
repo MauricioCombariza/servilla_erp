@@ -47,6 +47,18 @@ export interface BulkPatchResult {
   actualizados: number;
 }
 
+export interface PrecioCourierRequest {
+  precio_local: number;
+  precio_nacional: number;
+}
+
+export interface PrecioCourierResult {
+  planilla: string;
+  seriales_actualizados: number;
+  bogota: number;
+  nacional: number;
+}
+
 export const gestionesApi = {
   list: (params?: {
     planilla?: string;
@@ -111,4 +123,10 @@ export const gestionesApi = {
 
   bulkPatch: (items: BulkPatchItem[]) =>
     api.patch<BulkPatchResult>("/gestiones/bulk", { items }),
+
+  precioCourier: (planilla: string, data: PrecioCourierRequest) =>
+    api.post<PrecioCourierResult>(
+      `/gestiones/planillas/${encodeURIComponent(planilla)}/precio-courier`,
+      data
+    ),
 };

@@ -17,6 +17,8 @@ from app.schemas.gestiones import (
     MarcarRevisadaResult,
     PlanillaActionResult,
     PlanillaResumen,
+    PrecioCourierRequest,
+    PrecioCourierResult,
     RecalcularRequest,
     RecalcularResult,
 )
@@ -70,6 +72,7 @@ async def resumen_planillas(
 
         first = items[0]
         mensajero_nombre = first.mensajero.nombre_completo if first.mensajero else None
+        mensajero_tipo = first.mensajero.tipo_personal if first.mensajero else None
 
         result.append(
             PlanillaResumen(
@@ -77,6 +80,7 @@ async def resumen_planillas(
                 cod_men=cmn,
                 mensajero_nombre=mensajero_nombre,
                 mensajero_id=first.mensajero_id,
+                tipo_personal=mensajero_tipo,
                 fecha_escaner=fecha_esc,
                 entregas=entregas,
                 devoluciones=devoluciones,
@@ -317,6 +321,39 @@ async def desmarcar_revisada(planilla: str, db: AsyncSession) -> MarcarRevisadaR
     )
     await db.commit()
     return MarcarRevisadaResult(planilla=planilla, revisada=False)
+
+
+async def cambiar_precio_courier(
+    planilla: str,
+    req: PrecioCourierRequest,
+    db: AsyncSession,
+) -> PrecioCourierResult:
+    result = (
+        await db.execute(
+            text("""
+                WITH updated AS (
+                    UPDATE seriales_gestion
+                    SET precio_mensajero = CASE ambito WHEN 'bogota' THEN :pl ELSE :pn END,
+                        editado_manualmente = TRUE
+                    WHERE planilla = :planilla
+                    RETURNING ambito
+                )
+                SELECT
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN ambito = 'bogota' THEN 1 ELSE 0 END) AS bogota,
+                    SUM(CASE WHEN ambito != 'bogota' THEN 1 ELSE 0 END) AS nacional
+                FROM updated
+            """),
+            {"pl": req.precio_local, "pn": req.precio_nacional, "planilla": planilla},
+        )
+    ).mappings().one()
+    await db.commit()
+    return PrecioCourierResult(
+        planilla=planilla,
+        seriales_actualizados=int(result["total"]),
+        bogota=int(result["bogota"] or 0),
+        nacional=int(result["nacional"] or 0),
+    )
 
 
 async def bulk_patch_seriales(req: BulkPatchRequest, db: AsyncSession) -> BulkPatchResult:
