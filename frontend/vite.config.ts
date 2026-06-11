@@ -7,6 +7,11 @@ export default defineConfig({
   resolve: {
     alias: { "@": resolve(__dirname, "src") },
   },
+  build: {
+    rollupOptions: {
+      external: ["canvg", "html2canvas", "dompurify"],
+    },
+  },
   server: {
     port: 5173,
     proxy: {
