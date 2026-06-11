@@ -8,3 +8,4 @@ from app.models.facturacion import (  # noqa: F401
     FacturaRecibida, DetalleFacturaRecibida, PagoRealizado,
 )
 from app.models.gestiones import SerialGestion  # noqa: F401
+from app.models.planillas_revisadas import PlanillaRevisada  # noqa: F401

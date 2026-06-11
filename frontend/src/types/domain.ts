@@ -307,4 +307,5 @@ export interface PlanillaResumen {
   estados: Record<string, number>;
   bloqueada: boolean;
   con_precio_cero: number;
+  revisada: boolean;
 }

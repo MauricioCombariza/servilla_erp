@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, datetime, timezone
 
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gestiones import SerialGestion
+from app.models.planillas_revisadas import PlanillaRevisada
 from app.schemas.gestiones import (
+    BloquearRangoRequest,
+    BloquearRangoResult,
     CambiarMensajeroRequest,
+    MarcarRevisadaResult,
     PlanillaActionResult,
     PlanillaResumen,
     RecalcularRequest,
@@ -23,6 +27,7 @@ async def resumen_planillas(
     fecha_desde: date | None = None,
     fecha_hasta: date | None = None,
     cod_men: str | None = None,
+    planilla: str | None = None,
 ) -> list[PlanillaResumen]:
     q = select(SerialGestion)
     if fecha_desde:
@@ -31,15 +36,21 @@ async def resumen_planillas(
         q = q.where(SerialGestion.f_esc <= fecha_hasta)
     if cod_men:
         q = q.where(SerialGestion.cod_men == cod_men)
+    if planilla:
+        q = q.where(SerialGestion.planilla == planilla)
 
     seriales = list((await db.execute(q)).scalars().all())
+
+    # Cargar planillas revisadas para lookup O(1)
+    revisadas_rows = (await db.execute(select(PlanillaRevisada.planilla))).scalars().all()
+    revisadas: set[str] = set(revisadas_rows)
 
     groups: dict[tuple[str, str], list[SerialGestion]] = {}
     for sg in seriales:
         groups.setdefault((sg.planilla, sg.cod_men), []).append(sg)
 
     result: list[PlanillaResumen] = []
-    for (planilla, cmn), items in groups.items():
+    for (plan, cmn), items in groups.items():
         total = len(items)
         entregas = sum(1 for s in items if s.tipo_gestion == "Entrega")
         devoluciones = sum(1 for s in items if s.tipo_gestion == "Devolucion")
@@ -60,7 +71,7 @@ async def resumen_planillas(
 
         result.append(
             PlanillaResumen(
-                planilla=planilla,
+                planilla=plan,
                 cod_men=cmn,
                 mensajero_nombre=mensajero_nombre,
                 mensajero_id=first.mensajero_id,
@@ -74,6 +85,7 @@ async def resumen_planillas(
                 estados=estados,
                 bloqueada=bloqueada,
                 con_precio_cero=con_precio_cero,
+                revisada=(plan in revisadas),
             )
         )
 
@@ -249,3 +261,57 @@ async def recalcular_precios(req: RecalcularRequest, db: AsyncSession) -> Recalc
         seriales_sin_precio=sin_precio,
         errores=[],
     )
+
+
+async def bloquear_por_rango(req: BloquearRangoRequest, db: AsyncSession) -> BloquearRangoResult:
+    params: dict = {"fd": req.fecha_desde, "fh": req.fecha_hasta}
+    cod_filter = "AND sg.cod_men = :cod_men" if req.cod_men else ""
+    if req.cod_men:
+        params["cod_men"] = req.cod_men
+
+    result = (
+        await db.execute(
+            text(f"""
+                WITH updated AS (
+                    UPDATE seriales_gestion sg
+                    SET editado_manualmente = TRUE
+                    WHERE sg.f_esc BETWEEN :fd AND :fh
+                      {cod_filter}
+                    RETURNING sg.planilla
+                )
+                SELECT COUNT(*) AS seriales, COUNT(DISTINCT planilla) AS planillas
+                FROM updated
+            """),
+            params,
+        )
+    ).mappings().one()
+
+    await db.commit()
+    return BloquearRangoResult(
+        seriales_actualizados=int(result["seriales"]),
+        planillas_afectadas=int(result["planillas"]),
+    )
+
+
+async def marcar_revisada(planilla: str, revisado_por: str | None, db: AsyncSession) -> MarcarRevisadaResult:
+    existing = (
+        await db.execute(select(PlanillaRevisada).where(PlanillaRevisada.planilla == planilla))
+    ).scalar_one_or_none()
+
+    if existing is None:
+        db.add(PlanillaRevisada(
+            planilla=planilla,
+            fecha_revision=datetime.now(timezone.utc),
+            revisado_por=revisado_por,
+        ))
+        await db.commit()
+
+    return MarcarRevisadaResult(planilla=planilla, revisada=True)
+
+
+async def desmarcar_revisada(planilla: str, db: AsyncSession) -> MarcarRevisadaResult:
+    await db.execute(
+        delete(PlanillaRevisada).where(PlanillaRevisada.planilla == planilla)
+    )
+    await db.commit()
+    return MarcarRevisadaResult(planilla=planilla, revisada=False)

@@ -72,6 +72,7 @@ class PlanillaResumen(BaseModel):
     estados: dict[str, int]
     bloqueada: bool          # todos los seriales tienen editado_manualmente = True
     con_precio_cero: int
+    revisada: bool = False
 
 
 class CambiarMensajeroRequest(BaseModel):
@@ -100,3 +101,19 @@ class RecalcularResult(BaseModel):
     seriales_actualizados: int
     seriales_sin_precio: int
     errores: list[str]
+
+
+class BloquearRangoRequest(BaseModel):
+    fecha_desde: date
+    fecha_hasta: date
+    cod_men: str | None = None
+
+
+class BloquearRangoResult(BaseModel):
+    seriales_actualizados: int
+    planillas_afectadas: int
+
+
+class MarcarRevisadaResult(BaseModel):
+    planilla: str
+    revisada: bool

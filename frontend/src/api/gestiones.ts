@@ -20,6 +20,22 @@ export interface PlanillaActionResult {
   seriales_actualizados: number;
 }
 
+export interface BloquearRangoRequest {
+  fecha_desde: string;
+  fecha_hasta: string;
+  cod_men?: string;
+}
+
+export interface BloquearRangoResult {
+  seriales_actualizados: number;
+  planillas_afectadas: number;
+}
+
+export interface MarcarRevisadaResult {
+  planilla: string;
+  revisada: boolean;
+}
+
 export const gestionesApi = {
   list: (params?: {
     planilla?: string;
@@ -41,6 +57,7 @@ export const gestionesApi = {
     fecha_desde?: string;
     fecha_hasta?: string;
     cod_men?: string;
+    planilla?: string;
   }) => api.get<PlanillaResumen[]>("/gestiones/planillas/resumen", { params }),
 
   cambiarMensajero: (planilla: string, cod_men: string, mensajero_id?: number) =>
@@ -63,6 +80,19 @@ export const gestionesApi = {
   desbloquear: (planilla: string) =>
     api.delete<PlanillaActionResult>(
       `/gestiones/planillas/${encodeURIComponent(planilla)}/bloquear`
+    ),
+
+  bloquearRango: (data: BloquearRangoRequest) =>
+    api.post<BloquearRangoResult>("/gestiones/planillas/bloquear-rango", data),
+
+  marcarRevisada: (planilla: string) =>
+    api.post<MarcarRevisadaResult>(
+      `/gestiones/planillas/${encodeURIComponent(planilla)}/revisar`
+    ),
+
+  desmarcarRevisada: (planilla: string) =>
+    api.delete<MarcarRevisadaResult>(
+      `/gestiones/planillas/${encodeURIComponent(planilla)}/revisar`
     ),
 
   recalcular: (data: RecalcularRequest) =>
