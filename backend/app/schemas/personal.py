@@ -55,6 +55,7 @@ class PersonalCreate(PersonalBase):
 
 class PersonalUpdate(BaseModel):
     nombre_completo: str | None = None
+    tipo_personal: str | None = None
     telefono: str | None = None
     email: str | None = None
     banco: str | None = None
