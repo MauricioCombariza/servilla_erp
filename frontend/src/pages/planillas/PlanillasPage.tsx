@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Lock,
@@ -995,6 +995,85 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
   );
 }
 
+// ── Combobox de mensajero con búsqueda ───────────────────────────────────────
+function MensajeroCombobox({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (cod: string) => void;
+}) {
+  const { data: personal = [] } = useQuery({
+    queryKey: ["personal-activos"],
+    queryFn: () => personalApi.list({ activo: true }).then((r) => r.data),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const [texto, setTexto] = useState(value);
+  const [abierto, setAbierto] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Sincronizar cuando el valor externo cambia (ej. reset)
+  useEffect(() => {
+    if (!value) setTexto("");
+  }, [value]);
+
+  // Cerrar al hacer click fuera
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setAbierto(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const q = texto.toLowerCase();
+  const opciones = personal.filter(
+    (p) =>
+      p.codigo.toLowerCase().includes(q) ||
+      p.nombre_completo.toLowerCase().includes(q)
+  );
+
+  function seleccionar(p: (typeof personal)[0]) {
+    setTexto(`${p.codigo} · ${p.nombre_completo}`);
+    onChange(p.codigo);
+    setAbierto(false);
+  }
+
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    setTexto(e.target.value);
+    setAbierto(true);
+    if (!e.target.value) onChange("");
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      <input
+        type="text"
+        placeholder="Código o nombre"
+        value={texto}
+        onChange={handleChange}
+        onFocus={() => setAbierto(true)}
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+      />
+      {abierto && opciones.length > 0 && (
+        <ul className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-52 overflow-y-auto text-sm">
+          {opciones.map((p) => (
+            <li
+              key={p.codigo}
+              onMouseDown={() => seleccionar(p)}
+              className="px-3 py-2 cursor-pointer hover:bg-primary/10 flex gap-2"
+            >
+              <span className="font-mono text-xs text-gray-500 shrink-0 pt-0.5">{p.codigo}</span>
+              <span className="text-gray-800">{p.nombre_completo}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // ── Buscador de planilla individual ──────────────────────────────────────────
 function BuscarPlanillaSection() {
   const [input, setInput] = useState("");
@@ -1211,12 +1290,9 @@ export function PlanillasPage() {
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Mensajero</label>
-          <input
-            type="text"
-            placeholder="Código ej. MN01"
+          <MensajeroCombobox
             value={filtros.cod_men}
-            onChange={(e) => setFiltros((f) => ({ ...f, cod_men: e.target.value }))}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+            onChange={(cod) => setFiltros((f) => ({ ...f, cod_men: cod }))}
           />
         </div>
         <div>
