@@ -31,6 +31,16 @@ class Cliente(Base):
     )
 
 
+class MapeoCliente(Base):
+    __tablename__ = "mapeo_clientes"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    nombre_csv: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    nombre_bd: Mapped[str] = mapped_column(String(200), nullable=False)
+    cliente_id: Mapped[int | None] = mapped_column(ForeignKey("clientes.id"))
+    created_at: Mapped[datetime | None] = mapped_column(_ts)
+
+
 class PrecioCliente(Base):
     __tablename__ = "precios_cliente"
 

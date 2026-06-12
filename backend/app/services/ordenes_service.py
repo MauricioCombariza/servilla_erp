@@ -35,7 +35,7 @@ import pandas as pd
 from sqlalchemy import ARRAY, String, bindparam, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.clientes import Cliente, PrecioCliente
+from app.models.clientes import Cliente, MapeoCliente, PrecioCliente
 from app.models.personal import Personal
 from app.schemas.ordenes import CargaMasivaResult
 
@@ -69,6 +69,12 @@ async def _cargar_maestros(
     """Devuelve (clientes_by_name, precios_cli, precios_men, personal_by_code, personal_by_name)."""
     rows_c = (await db.execute(select(Cliente.id, Cliente.nombre_empresa))).all()
     clientes_by_name = {r.nombre_empresa.strip().lower(): r.id for r in rows_c}
+
+    rows_m = (await db.execute(select(MapeoCliente.nombre_csv, MapeoCliente.cliente_id))).all()
+    for r in rows_m:
+        alias = r.nombre_csv.strip().lower()
+        if alias not in clientes_by_name and r.cliente_id:
+            clientes_by_name[alias] = r.cliente_id
 
     rows_p = (
         await db.execute(
