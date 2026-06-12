@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, CheckCircle, Trash2, X, FileDown } from "lucide-react";
+import { Plus, CheckCircle, Trash2, X, FileDown, Pencil, ChevronDown, ChevronUp } from "lucide-react";
 import { laboresApi } from "@/api/labores";
 import { ordenesApi } from "@/api/ordenes";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
@@ -86,6 +86,7 @@ export function LaboresPage() {
   const [tipoLaborActivo, setTipoLaborActivo] = useState<TipoLabor>("pegado_guia");
   const [showPdfMenu, setShowPdfMenu] = useState(false);
   const [vistaDiaria, setVistaDiaria] = useState(false);
+  const [expandidoDiario, setExpandidoDiario] = useState<string | null>(null);
   const pdfMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -434,23 +435,51 @@ export function LaboresPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
-                      {["Fecha", "Personal", "Horas", "Monto horas", "Labores", "Monto labores", "Total"].map(h => (
+                      {["Fecha", "Personal", "Horas", "Monto horas", "Labores", "Monto labores", "Total", ""].map(h => (
                         <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {resumenDiario.map((r, i) => (
-                      <tr key={`${r.personal_id}-${r.fecha}-${i}`} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 font-mono text-xs text-gray-500">{r.fecha}</td>
-                        <td className="px-4 py-3 font-medium text-gray-900">{r.nombre_completo}</td>
-                        <td className="px-4 py-3 text-gray-600">{decimalToHhmm(r.total_horas)}</td>
-                        <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_horas_monto} /></td>
-                        <td className="px-4 py-3 text-gray-600">{r.total_labores}</td>
-                        <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_labores_monto} /></td>
-                        <td className="px-4 py-3 font-semibold text-gray-900"><CurrencyCell value={r.total_general} /></td>
-                      </tr>
-                    ))}
+                  <tbody>
+                    {resumenDiario.map((r, i) => {
+                      const key = `${r.personal_id}-${r.fecha}`;
+                      const expandido = expandidoDiario === key;
+                      return (
+                        <>
+                          <tr key={`${key}-${i}`} className={`border-b border-gray-100 hover:bg-gray-50 ${expandido ? "bg-blue-50/40" : ""}`}>
+                            <td className="px-4 py-3 font-mono text-xs text-gray-500">{r.fecha}</td>
+                            <td className="px-4 py-3 font-medium text-gray-900">{r.nombre_completo}</td>
+                            <td className="px-4 py-3 text-gray-600">{decimalToHhmm(r.total_horas)}</td>
+                            <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_horas_monto} /></td>
+                            <td className="px-4 py-3 text-gray-600">{r.total_labores}</td>
+                            <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_labores_monto} /></td>
+                            <td className="px-4 py-3 font-semibold text-gray-900"><CurrencyCell value={r.total_general} /></td>
+                            <td className="px-4 py-3">
+                              <button
+                                onClick={() => setExpandidoDiario(expandido ? null : key)}
+                                className="text-gray-400 hover:text-primary transition-colors"
+                                title="Ver y editar registros"
+                              >
+                                {expandido ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                              </button>
+                            </td>
+                          </tr>
+                          {expandido && (
+                            <tr key={`${key}-detalle`}>
+                              <td colSpan={8} className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+                                <DetalleFilaDiaria
+                                  personalId={r.personal_id}
+                                  fecha={r.fecha}
+                                  mes={mes}
+                                  anio={anio}
+                                  onSaved={() => qc.invalidateQueries({ queryKey: ["labores-resumen-diario"] })}
+                                />
+                              </td>
+                            </tr>
+                          )}
+                        </>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -474,6 +503,354 @@ export function LaboresPage() {
           onSaved={() => { qc.invalidateQueries({ queryKey: ["labores-labores"] }); setShowLaborForm(false); }}
         />
       )}
+    </div>
+  );
+}
+
+// ── Detalle expandible fila diaria ───────────────────────────────────────────
+
+function DetalleFilaDiaria({
+  personalId, fecha, mes, anio, onSaved,
+}: {
+  personalId: number; fecha: string; mes: number; anio: number; onSaved: () => void;
+}) {
+  const qc = useQueryClient();
+  const [editHora, setEditHora] = useState<RegistroHoras | null>(null);
+  const [editLabor, setEditLabor] = useState<RegistroLabores | null>(null);
+
+  const { data: todasHoras = [], isLoading: lH } = useQuery({
+    queryKey: ["labores-horas", mes, anio, personalId],
+    queryFn: () => laboresApi.listHoras({ personal_id: personalId, mes, anio }).then(r => r.data),
+    staleTime: 30_000,
+  });
+
+  const { data: todasLabores = [], isLoading: lL } = useQuery({
+    queryKey: ["labores-labores", mes, anio, personalId],
+    queryFn: () => laboresApi.listLabores({ personal_id: personalId, mes, anio }).then(r => r.data),
+    staleTime: 30_000,
+  });
+
+  const horas = todasHoras.filter(h => h.fecha === fecha);
+  const labores = todasLabores.filter(l => l.fecha === fecha);
+
+  const deleteHora = useMutation({
+    mutationFn: (id: number) => laboresApi.deleteHora(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["labores-horas", mes, anio, personalId] });
+      onSaved();
+    },
+  });
+  const deleteLabor = useMutation({
+    mutationFn: (id: number) => laboresApi.deleteLabor(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["labores-labores", mes, anio, personalId] });
+      onSaved();
+    },
+  });
+
+  if (lH || lL) return <p className="text-xs text-gray-400 py-2">Cargando…</p>;
+  if (!horas.length && !labores.length) return <p className="text-xs text-gray-400 py-2">Sin registros para esta fecha.</p>;
+
+  return (
+    <div className="space-y-4">
+      {horas.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Horas trabajadas</p>
+          <table className="w-full text-xs border border-gray-200 rounded-lg overflow-hidden">
+            <thead className="bg-gray-100">
+              <tr>
+                {["Horas", "Tarifa", "Total", "Tipo", "Estado", ""].map(h => (
+                  <th key={h} className="px-3 py-2 text-left font-medium text-gray-600">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {horas.map(h => (
+                <tr key={h.id} className="border-t border-gray-100 hover:bg-gray-50">
+                  <td className="px-3 py-2">{decimalToHhmm(h.horas_trabajadas)}</td>
+                  <td className="px-3 py-2"><CurrencyCell value={h.tarifa_hora} /></td>
+                  <td className="px-3 py-2 font-medium"><CurrencyCell value={h.total ?? h.horas_trabajadas * h.tarifa_hora} /></td>
+                  <td className="px-3 py-2 text-gray-500">{h.tipo_trabajo}</td>
+                  <td className="px-3 py-2">
+                    {h.liquidado
+                      ? <span className="text-purple-600 font-medium">Liquidado</span>
+                      : h.aprobado
+                        ? <span className="text-green-600 font-medium">Aprobado</span>
+                        : <span className="text-yellow-600">Pendiente</span>
+                    }
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setEditHora(h)}
+                        disabled={h.aprobado || h.liquidado}
+                        className="text-blue-500 hover:text-blue-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Editar"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        onClick={() => { if (confirm("¿Eliminar este registro de horas?")) deleteHora.mutate(h.id); }}
+                        disabled={h.aprobado || h.liquidado}
+                        className="text-red-400 hover:text-red-600 disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Eliminar"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {labores.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Labores</p>
+          <table className="w-full text-xs border border-gray-200 rounded-lg overflow-hidden">
+            <thead className="bg-gray-100">
+              <tr>
+                {["Tipo", "Cantidad", "Tarifa", "Total", "Estado", ""].map(h => (
+                  <th key={h} className="px-3 py-2 text-left font-medium text-gray-600">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {labores.map(l => (
+                <tr key={l.id} className="border-t border-gray-100 hover:bg-gray-50">
+                  <td className="px-3 py-2 text-gray-500">{l.tipo_labor}</td>
+                  <td className="px-3 py-2">{l.cantidad}</td>
+                  <td className="px-3 py-2"><CurrencyCell value={l.tarifa_unitaria} /></td>
+                  <td className="px-3 py-2 font-medium"><CurrencyCell value={l.total ?? l.cantidad * l.tarifa_unitaria} /></td>
+                  <td className="px-3 py-2">
+                    {l.liquidado
+                      ? <span className="text-purple-600 font-medium">Liquidado</span>
+                      : l.aprobado
+                        ? <span className="text-green-600 font-medium">Aprobado</span>
+                        : <span className="text-yellow-600">Pendiente</span>
+                    }
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setEditLabor(l)}
+                        disabled={l.aprobado || l.liquidado}
+                        className="text-blue-500 hover:text-blue-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Editar"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        onClick={() => { if (confirm("¿Eliminar este registro de labor?")) deleteLabor.mutate(l.id); }}
+                        disabled={l.aprobado || l.liquidado}
+                        className="text-red-400 hover:text-red-600 disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Eliminar"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {editHora && (
+        <EditHoraModal
+          hora={editHora}
+          onClose={() => setEditHora(null)}
+          onSaved={() => {
+            setEditHora(null);
+            qc.invalidateQueries({ queryKey: ["labores-horas", mes, anio, personalId] });
+            onSaved();
+          }}
+        />
+      )}
+      {editLabor && (
+        <EditLaborModal
+          labor={editLabor}
+          onClose={() => setEditLabor(null)}
+          onSaved={() => {
+            setEditLabor(null);
+            qc.invalidateQueries({ queryKey: ["labores-labores", mes, anio, personalId] });
+            onSaved();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Modal edición Hora ────────────────────────────────────────────────────────
+
+function EditHoraModal({ hora, onClose, onSaved }: { hora: RegistroHoras; onClose: () => void; onSaved: () => void }) {
+  const [horasInput, setHorasInput] = useState(() => {
+    const h = Math.floor(hora.horas_trabajadas);
+    const m = Math.round((hora.horas_trabajadas - h) * 60);
+    return `${h}:${String(m).padStart(2, "0")}`;
+  });
+  const [tarifa, setTarifa] = useState(String(hora.tarifa_hora));
+  const [tipoTrabajo, setTipoTrabajo] = useState(hora.tipo_trabajo);
+  const [obs, setObs] = useState(hora.observaciones ?? "");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const disabled = hora.aprobado || hora.liquidado;
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const decimal = hhmmToDecimal(horasInput);
+    if (!decimal) { setErr("Formato horas inválido (use HH:MM)"); return; }
+    setSaving(true);
+    try {
+      await laboresApi.updateHora(hora.id, {
+        horas_trabajadas: decimal,
+        tarifa_hora: parseFloat(tarifa),
+        tipo_trabajo: tipoTrabajo,
+        observaciones: obs || null,
+      });
+      onSaved();
+    } catch {
+      setErr("Error al guardar");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+      <div className="bg-white rounded-xl shadow-lg w-full max-w-md p-6 space-y-4">
+        <div className="flex justify-between items-center">
+          <h2 className="font-semibold text-gray-900">Editar horas</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+        {disabled && (
+          <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+            Registro {hora.liquidado ? "liquidado" : "aprobado"} — no se puede editar.
+          </div>
+        )}
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Horas (HH:MM)</label>
+              <input value={horasInput} onChange={e => setHorasInput(e.target.value)} disabled={disabled}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm disabled:bg-gray-50" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Tarifa / hora</label>
+              <input type="number" value={tarifa} onChange={e => setTarifa(e.target.value)} disabled={disabled}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm disabled:bg-gray-50" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Tipo de trabajo</label>
+            <input value={tipoTrabajo} onChange={e => setTipoTrabajo(e.target.value)} disabled={disabled}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm disabled:bg-gray-50" />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Observaciones</label>
+            <textarea value={obs} onChange={e => setObs(e.target.value)} disabled={disabled} rows={2}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none disabled:bg-gray-50" />
+          </div>
+          {err && <p className="text-xs text-red-600">{err}</p>}
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={onClose}
+              className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">
+              Cancelar
+            </button>
+            <button type="submit" disabled={disabled || saving}
+              className="px-4 py-2 text-sm bg-primary hover:bg-primary-hover text-white rounded-lg disabled:opacity-60">
+              {saving ? "Guardando…" : "Guardar"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Modal edición Labor ───────────────────────────────────────────────────────
+
+function EditLaborModal({ labor, onClose, onSaved }: { labor: RegistroLabores; onClose: () => void; onSaved: () => void }) {
+  const [cantidad, setCantidad] = useState(String(labor.cantidad));
+  const [tarifa, setTarifa] = useState(String(labor.tarifa_unitaria));
+  const [tipoLabor, setTipoLabor] = useState(labor.tipo_labor);
+  const [obs, setObs] = useState(labor.observaciones ?? "");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const disabled = labor.aprobado || labor.liquidado;
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await laboresApi.updateLabor(labor.id, {
+        cantidad: parseFloat(cantidad),
+        tarifa_unitaria: parseFloat(tarifa),
+        tipo_labor: tipoLabor,
+        observaciones: obs || null,
+      });
+      onSaved();
+    } catch {
+      setErr("Error al guardar");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+      <div className="bg-white rounded-xl shadow-lg w-full max-w-md p-6 space-y-4">
+        <div className="flex justify-between items-center">
+          <h2 className="font-semibold text-gray-900">Editar labor</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+        {disabled && (
+          <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+            Registro {labor.liquidado ? "liquidado" : "aprobado"} — no se puede editar.
+          </div>
+        )}
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Cantidad</label>
+              <input type="number" value={cantidad} onChange={e => setCantidad(e.target.value)} disabled={disabled}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm disabled:bg-gray-50" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Tarifa unitaria</label>
+              <input type="number" value={tarifa} onChange={e => setTarifa(e.target.value)} disabled={disabled}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm disabled:bg-gray-50" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Tipo de labor</label>
+            <input value={tipoLabor} onChange={e => setTipoLabor(e.target.value)} disabled={disabled}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm disabled:bg-gray-50" />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Observaciones</label>
+            <textarea value={obs} onChange={e => setObs(e.target.value)} disabled={disabled} rows={2}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none disabled:bg-gray-50" />
+          </div>
+          {err && <p className="text-xs text-red-600">{err}</p>}
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={onClose}
+              className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">
+              Cancelar
+            </button>
+            <button type="submit" disabled={disabled || saving}
+              className="px-4 py-2 text-sm bg-primary hover:bg-primary-hover text-white rounded-lg disabled:opacity-60">
+              {saving ? "Guardando…" : "Guardar"}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
