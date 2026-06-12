@@ -688,6 +688,7 @@ function DetalleFilaDiaria({
 // ── Modal edición Hora ────────────────────────────────────────────────────────
 
 function EditHoraModal({ hora, onClose, onSaved }: { hora: RegistroHoras; onClose: () => void; onSaved: () => void }) {
+  const [fecha, setFecha] = useState(hora.fecha);
   const [horasInput, setHorasInput] = useState(() => {
     const h = Math.floor(hora.horas_trabajadas);
     const m = Math.round((hora.horas_trabajadas - h) * 60);
@@ -708,6 +709,7 @@ function EditHoraModal({ hora, onClose, onSaved }: { hora: RegistroHoras; onClos
     setSaving(true);
     try {
       await laboresApi.updateHora(hora.id, {
+        fecha,
         horas_trabajadas: decimal,
         tarifa_hora: parseFloat(tarifa),
         tipo_trabajo: tipoTrabajo,
@@ -734,6 +736,11 @@ function EditHoraModal({ hora, onClose, onSaved }: { hora: RegistroHoras; onClos
           </div>
         )}
         <form onSubmit={handleSubmit} className="space-y-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Fecha</label>
+            <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} disabled={disabled}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm disabled:bg-gray-50" />
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-gray-500 mb-1">Horas (HH:MM)</label>
@@ -776,6 +783,7 @@ function EditHoraModal({ hora, onClose, onSaved }: { hora: RegistroHoras; onClos
 // ── Modal edición Labor ───────────────────────────────────────────────────────
 
 function EditLaborModal({ labor, onClose, onSaved }: { labor: RegistroLabores; onClose: () => void; onSaved: () => void }) {
+  const [fecha, setFecha] = useState(labor.fecha);
   const [cantidad, setCantidad] = useState(String(labor.cantidad));
   const [tarifa, setTarifa] = useState(String(labor.tarifa_unitaria));
   const [tipoLabor, setTipoLabor] = useState(labor.tipo_labor);
@@ -790,6 +798,7 @@ function EditLaborModal({ labor, onClose, onSaved }: { labor: RegistroLabores; o
     setSaving(true);
     try {
       await laboresApi.updateLabor(labor.id, {
+        fecha,
         cantidad: parseFloat(cantidad),
         tarifa_unitaria: parseFloat(tarifa),
         tipo_labor: tipoLabor,
@@ -816,6 +825,11 @@ function EditLaborModal({ labor, onClose, onSaved }: { labor: RegistroLabores; o
           </div>
         )}
         <form onSubmit={handleSubmit} className="space-y-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Fecha</label>
+            <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} disabled={disabled}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm disabled:bg-gray-50" />
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-gray-500 mb-1">Cantidad</label>
