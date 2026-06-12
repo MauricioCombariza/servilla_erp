@@ -113,7 +113,6 @@ async def cambiar_mensajero_planilla(
                 mensajero_id = :men_id,
                 editado_manualmente = TRUE
             WHERE planilla = :planilla
-              AND editado_manualmente = FALSE
         """),
         {"cod_men": req.cod_men, "men_id": req.mensajero_id, "planilla": planilla},
     )
