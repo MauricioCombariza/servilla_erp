@@ -127,6 +127,7 @@ class MarcarRevisadaResult(BaseModel):
 class BulkPatchItem(BaseModel):
     id: int
     precio_mensajero: float | None = None
+    precio_cliente: float | None = None
     cod_men: str | None = None
     mensajero_id: int | None = None
 

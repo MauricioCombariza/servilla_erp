@@ -492,6 +492,7 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
   const [vistaOrden, setVistaOrden] = useState(false);
   const [seleccion, setSeleccion] = useState<Set<number>>(new Set());
   const [editPrecio, setEditPrecio] = useState<number>(0);
+  const [editPrecioCliente, setEditPrecioCliente] = useState<number>(0);
   const [editCodMen, setEditCodMen] = useState("");
   const [guardando, setGuardando] = useState(false);
   const [errorGuardar, setErrorGuardar] = useState("");
@@ -568,6 +569,7 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
     ids: number[];
     bloqueados: number;
     valor_total: number;
+    valor_cliente: number;
   };
   const gruposOrden: GrupoOrden[] = Object.values(
     seriales.reduce<Record<string, GrupoOrden>>((acc, s) => {
@@ -580,11 +582,13 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
           ids: [],
           bloqueados: 0,
           valor_total: 0,
+          valor_cliente: 0,
         };
       }
       acc[key].ids.push(s.id);
       if (s.editado_manualmente) acc[key].bloqueados++;
       acc[key].valor_total += Number(s.precio_mensajero);
+      acc[key].valor_cliente += Number(s.precio_cliente);
       return acc;
     }, {})
   );
@@ -605,9 +609,12 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
 
   const selIds = [...seleccion];
   const selSeriales = seriales.filter((s) => seleccion.has(s.id));
-  const totalSelVal = selSeriales.reduce((a, s) => a + s.precio_mensajero, 0);
-  const nuevoTotal = editPrecio > 0 ? selIds.length * editPrecio : totalSelVal;
-  const diff = nuevoTotal - totalSelVal;
+  const totalSelValMen = selSeriales.reduce((a, s) => a + s.precio_mensajero, 0);
+  const totalSelValCli = selSeriales.reduce((a, s) => a + s.precio_cliente, 0);
+  const nuevoTotalMen = editPrecio > 0 ? selIds.length * editPrecio : totalSelValMen;
+  const nuevoTotalCli = editPrecioCliente > 0 ? selIds.length * editPrecioCliente : totalSelValCli;
+  const diffMen = nuevoTotalMen - totalSelValMen;
+  const diffCli = nuevoTotalCli - totalSelValCli;
 
   function toggleIds(ids: number[]) {
     setSeleccion((prev) => {
@@ -631,11 +638,13 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
       const items: BulkPatchItem[] = selIds.map((id) => ({
         id,
         ...(editPrecio > 0 ? { precio_mensajero: editPrecio } : {}),
+        ...(editPrecioCliente > 0 ? { precio_cliente: editPrecioCliente } : {}),
         ...(editCodMen ? { cod_men: editCodMen } : {}),
       }));
       await gestionesApi.bulkPatch(items);
       setSeleccion(new Set());
       setEditPrecio(0);
+      setEditPrecioCliente(0);
       setEditCodMen("");
       invalidar();
     } catch {
@@ -868,15 +877,17 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
                     </table>
                   ) : (
                     // ── Vista por orden ────────────────────────────────────
-                    <table className="w-full text-xs min-w-[640px]">
+                    <table className="w-full text-xs min-w-[720px]">
                       <thead className="bg-gray-50 border-y border-gray-100">
                         <tr>
                           <th className="px-3 py-2 w-8"></th>
                           <th className="px-3 py-2 text-left text-gray-500 font-medium">Orden</th>
                           <th className="px-3 py-2 text-left text-gray-500 font-medium">Cliente</th>
                           <th className="px-3 py-2 text-right text-gray-500 font-medium">Seriales</th>
-                          <th className="px-3 py-2 text-right text-gray-500 font-medium">Precio prom.</th>
-                          <th className="px-3 py-2 text-right text-gray-500 font-medium">Valor</th>
+                          <th className="px-3 py-2 text-right text-gray-500 font-medium">$/Men.</th>
+                          <th className="px-3 py-2 text-right text-gray-500 font-medium">Val. Men.</th>
+                          <th className="px-3 py-2 text-right text-gray-500 font-medium">$/Cli.</th>
+                          <th className="px-3 py-2 text-right text-gray-500 font-medium">Val. Cliente</th>
                           <th className="px-3 py-2 text-center text-gray-500 font-medium">🔒</th>
                         </tr>
                       </thead>
@@ -885,7 +896,8 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
                           const todosEnSel = g.ids.every((id) => seleccion.has(id));
                           const algunEnSel = g.ids.some((id) => seleccion.has(id));
                           const todosBloq = g.bloqueados === g.ids.length;
-                          const precioProm = g.ids.length > 0 ? g.valor_total / g.ids.length : 0;
+                          const precioMenProm = g.ids.length > 0 ? g.valor_total / g.ids.length : 0;
+                          const precioCliProm = g.ids.length > 0 ? g.valor_cliente / g.ids.length : 0;
                           return (
                             <tr
                               key={g.key}
@@ -896,13 +908,19 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
                                 <input type="checkbox" checked={todosEnSel} readOnly className="rounded" />
                               </td>
                               <td className="px-3 py-2 font-mono text-gray-700">{g.orden ?? "—"}</td>
-                              <td className="px-3 py-2 text-gray-600 truncate max-w-[160px]">{g.cliente_nombre}</td>
+                              <td className="px-3 py-2 text-gray-600 truncate max-w-[140px]">{g.cliente_nombre}</td>
                               <td className="px-3 py-2 text-right text-gray-700">{g.ids.length}</td>
-                              <td className="px-3 py-2 text-right text-gray-700">
-                                ${precioProm.toLocaleString("es-CO", { maximumFractionDigits: 0 })}
+                              <td className="px-3 py-2 text-right text-gray-500">
+                                ${precioMenProm.toLocaleString("es-CO", { maximumFractionDigits: 0 })}
                               </td>
                               <td className="px-3 py-2 text-right text-gray-700">
                                 ${g.valor_total.toLocaleString("es-CO", { maximumFractionDigits: 0 })}
+                              </td>
+                              <td className="px-3 py-2 text-right text-gray-500">
+                                ${precioCliProm.toLocaleString("es-CO", { maximumFractionDigits: 0 })}
+                              </td>
+                              <td className="px-3 py-2 text-right font-medium text-gray-700">
+                                ${g.valor_cliente.toLocaleString("es-CO", { maximumFractionDigits: 0 })}
                               </td>
                               <td className="px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
                                 <button
@@ -930,7 +948,9 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
                 {seleccion.size > 0 && (
                   <div className="border-t border-blue-100 bg-blue-50/60 px-4 py-3 space-y-3">
                     <p className="text-xs font-semibold text-blue-800">
-                      {seleccion.size} serial{seleccion.size !== 1 ? "es" : ""} seleccionado{seleccion.size !== 1 ? "s" : ""} · Valor actual: ${totalSelVal.toLocaleString("es-CO")}
+                      {seleccion.size} serial{seleccion.size !== 1 ? "es" : ""} seleccionado{seleccion.size !== 1 ? "s" : ""}
+                      {" · "}Mensajero actual: ${totalSelValMen.toLocaleString("es-CO")}
+                      {" · "}Cliente actual: ${totalSelValCli.toLocaleString("es-CO")}
                     </p>
                     <div className="flex flex-wrap gap-3 items-end">
                       <div>
@@ -949,7 +969,7 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
                         </select>
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-gray-700 mb-1">Precio/serial (0 = sin cambio)</label>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Precio mensajero/serial (0 = sin cambio)</label>
                         <input
                           type="number"
                           min={0}
@@ -959,12 +979,35 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
                           className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs w-32"
                         />
                       </div>
-                      {editPrecio > 0 && (
-                        <div className="text-xs text-gray-600">
-                          Nuevo total: <span className="font-semibold">${nuevoTotal.toLocaleString("es-CO")}</span>
-                          <span className={`ml-1 ${diff >= 0 ? "text-green-700" : "text-red-600"}`}>
-                            ({diff >= 0 ? "+" : ""}{diff.toLocaleString("es-CO")})
-                          </span>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Precio cliente/serial (0 = sin cambio)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          step={50}
+                          value={editPrecioCliente}
+                          onChange={(e) => setEditPrecioCliente(Number(e.target.value))}
+                          className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs w-32"
+                        />
+                      </div>
+                      {(editPrecio > 0 || editPrecioCliente > 0) && (
+                        <div className="text-xs text-gray-600 space-y-0.5">
+                          {editPrecio > 0 && (
+                            <div>
+                              Mensajero nuevo: <span className="font-semibold">${nuevoTotalMen.toLocaleString("es-CO")}</span>
+                              <span className={`ml-1 ${diffMen >= 0 ? "text-green-700" : "text-red-600"}`}>
+                                ({diffMen >= 0 ? "+" : ""}{diffMen.toLocaleString("es-CO")})
+                              </span>
+                            </div>
+                          )}
+                          {editPrecioCliente > 0 && (
+                            <div>
+                              Cliente nuevo: <span className="font-semibold">${nuevoTotalCli.toLocaleString("es-CO")}</span>
+                              <span className={`ml-1 ${diffCli >= 0 ? "text-green-700" : "text-red-600"}`}>
+                                ({diffCli >= 0 ? "+" : ""}{diffCli.toLocaleString("es-CO")})
+                              </span>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -972,13 +1015,13 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
                     <div className="flex gap-2">
                       <button
                         onClick={guardarSeleccion}
-                        disabled={guardando || (editPrecio === 0 && !editCodMen)}
+                        disabled={guardando || (editPrecio === 0 && editPrecioCliente === 0 && !editCodMen)}
                         className="px-3 py-1.5 text-xs bg-primary hover:bg-primary-hover text-white rounded-lg font-medium disabled:opacity-50"
                       >
                         {guardando ? "Guardando…" : "Guardar cambios"}
                       </button>
                       <button
-                        onClick={() => { setSeleccion(new Set()); setEditPrecio(0); setEditCodMen(""); }}
+                        onClick={() => { setSeleccion(new Set()); setEditPrecio(0); setEditPrecioCliente(0); setEditCodMen(""); }}
                         className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg hover:bg-gray-50"
                       >
                         Cancelar

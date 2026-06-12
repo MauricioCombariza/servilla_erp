@@ -39,6 +39,7 @@ export interface MarcarRevisadaResult {
 export interface BulkPatchItem {
   id: number;
   precio_mensajero?: number;
+  precio_cliente?: number;
   cod_men?: string;
   mensajero_id?: number;
 }

@@ -371,6 +371,8 @@ async def bulk_patch_seriales(req: BulkPatchRequest, db: AsyncSession) -> BulkPa
             continue
         if item.precio_mensajero is not None:
             sg.precio_mensajero = item.precio_mensajero
+        if item.precio_cliente is not None:
+            sg.precio_cliente = item.precio_cliente
         if item.cod_men is not None:
             sg.cod_men = item.cod_men
         if item.mensajero_id is not None:
