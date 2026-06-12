@@ -131,7 +131,6 @@ async def cambiar_precio_planilla(
             SET precio_mensajero = :precio,
                 editado_manualmente = TRUE
             WHERE planilla = :planilla
-              AND editado_manualmente = FALSE
         """),
         {"precio": precio_mensajero, "planilla": planilla},
     )
