@@ -313,6 +313,7 @@ export interface PlanillaResumen {
   total_cliente: number;
   total_mensajero: number;
   precio_promedio_mensajero: number;
+  precio_promedio_cliente: number;
   estados: Record<string, number>;
   bloqueada: boolean;
   con_precio_cero: number;

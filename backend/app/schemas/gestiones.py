@@ -73,6 +73,7 @@ class PlanillaResumen(BaseModel):
     total_cliente: float
     total_mensajero: float
     precio_promedio_mensajero: float
+    precio_promedio_cliente: float
     estados: dict[str, int]
     bloqueada: bool          # todos los seriales tienen editado_manualmente = True
     con_precio_cero: int

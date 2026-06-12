@@ -61,6 +61,7 @@ async def resumen_planillas(
         total_cli = sum(float(s.precio_cliente) for s in items)
         total_men = sum(float(s.precio_mensajero) for s in items)
         avg_men = total_men / total if total else 0.0
+        avg_cli = total_cli / total if total else 0.0
 
         estados: dict[str, int] = {}
         for s in items:
@@ -88,6 +89,7 @@ async def resumen_planillas(
                 total_cliente=round(total_cli, 2),
                 total_mensajero=round(total_men, 2),
                 precio_promedio_mensajero=round(avg_men, 2),
+                precio_promedio_cliente=round(avg_cli, 2),
                 estados=estados,
                 bloqueada=bloqueada,
                 con_precio_cero=con_precio_cero,

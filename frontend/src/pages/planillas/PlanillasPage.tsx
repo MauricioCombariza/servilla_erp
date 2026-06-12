@@ -1279,6 +1279,7 @@ export function PlanillasPage() {
                   "Total",
                   "Val. Mensajero",
                   "Val. Cliente",
+                  "$/Envío",
                   "Estado",
                   "Revisada",
                   "",
@@ -1328,6 +1329,9 @@ export function PlanillasPage() {
                   </td>
                   <td className="px-4 py-3">
                     <CurrencyCell value={p.total_cliente} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <CurrencyCell value={p.precio_promedio_cliente} />
                   </td>
                   <td className="px-4 py-3">
                     <span
