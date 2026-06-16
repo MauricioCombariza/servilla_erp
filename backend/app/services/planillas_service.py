@@ -74,6 +74,8 @@ async def resumen_planillas(
         first = items[0]
         mensajero_nombre = first.mensajero.nombre_completo if first.mensajero else None
         mensajero_tipo = first.mensajero.tipo_personal if first.mensajero else None
+        precio_local_men = float(first.mensajero.precio_local) if first.mensajero and first.mensajero.precio_local else None
+        precio_nac_men = float(first.mensajero.precio_nacional) if first.mensajero and first.mensajero.precio_nacional else None
 
         result.append(
             PlanillaResumen(
@@ -94,6 +96,8 @@ async def resumen_planillas(
                 bloqueada=bloqueada,
                 con_precio_cero=con_precio_cero,
                 revisada=(plan in revisadas),
+                precio_local_mensajero=precio_local_men,
+                precio_nacional_mensajero=precio_nac_men,
             )
         )
 

@@ -318,4 +318,6 @@ export interface PlanillaResumen {
   bloqueada: boolean;
   con_precio_cero: number;
   revisada: boolean;
+  precio_local_mensajero?: number | null;
+  precio_nacional_mensajero?: number | null;
 }

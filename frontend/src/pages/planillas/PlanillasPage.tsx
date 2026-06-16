@@ -31,11 +31,19 @@ interface EditModalProps {
 }
 
 function EditModal({ planilla, onClose, onSaved }: EditModalProps) {
+  const esCourierExterno = planilla.tipo_personal === "courier_externo";
+
   const [codMen, setCodMen] = useState(planilla.cod_men);
   const [mensajeroId, setMensajeroId] = useState<number | undefined>(
     planilla.mensajero_id ?? undefined
   );
   const [precio, setPrecio] = useState(planilla.precio_promedio_mensajero);
+  const [precioLocal, setPrecioLocal] = useState(
+    planilla.precio_local_mensajero ?? planilla.precio_promedio_mensajero
+  );
+  const [precioNacional, setPrecioNacional] = useState(
+    planilla.precio_nacional_mensajero ?? planilla.precio_promedio_mensajero
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -51,8 +59,19 @@ function EditModal({ planilla, onClose, onSaved }: EditModalProps) {
       if (codMen !== planilla.cod_men) {
         await gestionesApi.cambiarMensajero(planilla.planilla, codMen, mensajeroId);
       }
-      if (precio !== planilla.precio_promedio_mensajero) {
-        await gestionesApi.cambiarPrecio(planilla.planilla, precio);
+      if (esCourierExterno) {
+        const precioLocalOrig = planilla.precio_local_mensajero ?? planilla.precio_promedio_mensajero;
+        const precioNacOrig = planilla.precio_nacional_mensajero ?? planilla.precio_promedio_mensajero;
+        if (precioLocal !== precioLocalOrig || precioNacional !== precioNacOrig) {
+          await gestionesApi.precioCourier(planilla.planilla, {
+            precio_local: precioLocal,
+            precio_nacional: precioNacional,
+          });
+        }
+      } else {
+        if (precio !== planilla.precio_promedio_mensajero) {
+          await gestionesApi.cambiarPrecio(planilla.planilla, precio);
+        }
       }
       onSaved();
     } catch {
@@ -67,7 +86,14 @@ function EditModal({ planilla, onClose, onSaved }: EditModalProps) {
       <div className="bg-white rounded-xl shadow-lg w-full max-w-md">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
           <div>
-            <h2 className="font-semibold text-gray-900">Editar planilla</h2>
+            <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+              Editar planilla
+              {esCourierExterno && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                  Courier Ext.
+                </span>
+              )}
+            </h2>
             <p className="text-xs text-gray-500 font-mono mt-0.5">{planilla.planilla}</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
@@ -99,25 +125,61 @@ function EditModal({ planilla, onClose, onSaved }: EditModalProps) {
             </p>
           </div>
 
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">
-              Precio mensajero ($/serial)
-            </label>
-            <input
-              type="number"
-              min={0}
-              step={50}
-              value={precio}
-              onChange={(e) => setPrecio(Number(e.target.value))}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
-            />
-            <p className="text-xs text-gray-400 mt-1">
-              Nuevo total ≈{" "}
-              <span className="font-medium text-gray-700">
-                ${(precio * planilla.total_seriales).toLocaleString("es-CO")}
-              </span>
-            </p>
-          </div>
+          {esCourierExterno ? (
+            <div className="space-y-3">
+              <p className="text-xs font-medium text-purple-800 bg-purple-50 rounded-lg px-3 py-2">
+                Tarifa por ámbito — los precios se aplican según Bogotá / Nacional
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Tarifa Local (Bogotá) $/serial
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={50}
+                    value={precioLocal}
+                    onChange={(e) => setPrecioLocal(Number(e.target.value))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Tarifa Nacional $/serial
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={50}
+                    value={precioNacional}
+                    onChange={(e) => setPrecioNacional(Number(e.target.value))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Precio mensajero ($/serial)
+              </label>
+              <input
+                type="number"
+                min={0}
+                step={50}
+                value={precio}
+                onChange={(e) => setPrecio(Number(e.target.value))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                Nuevo total ≈{" "}
+                <span className="font-medium text-gray-700">
+                  ${(precio * planilla.total_seriales).toLocaleString("es-CO")}
+                </span>
+              </p>
+            </div>
+          )}
 
           {error && (
             <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>
@@ -600,9 +662,13 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
   const serialesBogota = seriales.filter((s) => s.ambito === "bogota").length;
   const serialesNacional = seriales.length - serialesBogota;
   const precioLocalDefecto =
-    seriales[0]?.mensajero?.precio_local ?? p.precio_promedio_mensajero;
+    seriales[0]?.mensajero?.precio_local
+    ?? p.precio_local_mensajero
+    ?? p.precio_promedio_mensajero;
   const precioNacionalDefecto =
-    seriales[0]?.mensajero?.precio_nacional ?? p.precio_promedio_mensajero;
+    seriales[0]?.mensajero?.precio_nacional
+    ?? p.precio_nacional_mensajero
+    ?? p.precio_promedio_mensajero;
 
   const preciosUnicos = [...new Set(seriales.map((s) => s.precio_mensajero))];
   const preciosMixtos = preciosUnicos.length > 1;
@@ -735,6 +801,11 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${p.bloqueada ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"}`}>
               {p.bloqueada ? "Bloqueada" : "Abierta"}
             </span>
+            {p.tipo_personal === "courier_externo" && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                Courier Ext.
+              </span>
+            )}
             {p.revisada && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                 <CheckCircle size={10} /> Revisada
@@ -1425,6 +1496,9 @@ export function PlanillasPage() {
                     <span className="font-medium text-gray-900">{p.cod_men}</span>
                     {p.mensajero_nombre && (
                       <span className="text-gray-400 text-xs ml-1">· {p.mensajero_nombre}</span>
+                    )}
+                    {p.tipo_personal === "courier_externo" && (
+                      <span className="ml-1.5 text-xs font-medium text-purple-600">[EXT]</span>
                     )}
                   </td>
                   <td className="px-4 py-3 text-gray-600 whitespace-nowrap">

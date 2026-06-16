@@ -78,6 +78,8 @@ class PlanillaResumen(BaseModel):
     bloqueada: bool          # todos los seriales tienen editado_manualmente = True
     con_precio_cero: int
     revisada: bool = False
+    precio_local_mensajero: float | None = None
+    precio_nacional_mensajero: float | None = None
 
 
 class CambiarMensajeroRequest(BaseModel):
