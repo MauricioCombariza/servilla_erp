@@ -60,6 +60,27 @@ export interface PrecioCourierResult {
   nacional: number;
 }
 
+export interface CiudadGrupo {
+  ciudad: string;
+  ambito: string;  // 'bogota' | 'nacional'
+  seriales: number;
+}
+
+export interface PrecioCiudadesRequest {
+  precio_local: number;
+  precio_nacional: number;
+  ciudades_local: string[];
+  ciudades_nacional: string[];
+}
+
+export interface PrecioCiudadesResult {
+  planilla: string;
+  seriales_actualizados: number;
+  local: number;
+  nacional: number;
+  sin_ciudad: number;
+}
+
 export const gestionesApi = {
   list: (params?: {
     planilla?: string;
@@ -128,6 +149,17 @@ export const gestionesApi = {
   precioCourier: (planilla: string, data: PrecioCourierRequest) =>
     api.post<PrecioCourierResult>(
       `/gestiones/planillas/${encodeURIComponent(planilla)}/precio-courier`,
+      data
+    ),
+
+  ciudadesPlanilla: (planilla: string) =>
+    api.get<CiudadGrupo[]>(
+      `/gestiones/planillas/${encodeURIComponent(planilla)}/ciudades`
+    ),
+
+  precioCiudades: (planilla: string, data: PrecioCiudadesRequest) =>
+    api.post<PrecioCiudadesResult>(
+      `/gestiones/planillas/${encodeURIComponent(planilla)}/precio-ciudades`,
       data
     ),
 };

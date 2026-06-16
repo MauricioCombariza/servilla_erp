@@ -152,3 +152,24 @@ class PrecioCourierResult(BaseModel):
     seriales_actualizados: int
     bogota: int
     nacional: int
+
+
+class CiudadGrupo(BaseModel):
+    ciudad: str
+    ambito: str  # 'bogota' | 'nacional'
+    seriales: int
+
+
+class PrecioCiudadesRequest(BaseModel):
+    precio_local: float
+    precio_nacional: float
+    ciudades_local: list[str]
+    ciudades_nacional: list[str]
+
+
+class PrecioCiudadesResult(BaseModel):
+    planilla: str
+    seriales_actualizados: int
+    local: int
+    nacional: int
+    sin_ciudad: int

@@ -14,9 +14,12 @@ from app.schemas.gestiones import (
     BulkPatchResult,
     CambiarMensajeroRequest,
     CambiarPrecioRequest,
+    CiudadGrupo,
     MarcarRevisadaResult,
     PlanillaActionResult,
     PlanillaResumen,
+    PrecioCiudadesRequest,
+    PrecioCiudadesResult,
     PrecioCourierRequest,
     PrecioCourierResult,
     RecalcularRequest,
@@ -31,9 +34,11 @@ from app.services.planillas_service import (
     cambiar_mensajero_planilla,
     cambiar_precio_courier,
     cambiar_precio_planilla,
+    ciudades_planilla,
     desbloquear_planilla,
     desmarcar_revisada,
     marcar_revisada,
+    precio_por_ciudades,
     recalcular_precios,
     resumen_planillas,
 )
@@ -102,6 +107,25 @@ async def post_precio_courier(
     _=_auth,
 ):
     return await cambiar_precio_courier(planilla, body, db)
+
+
+@router.get("/planillas/{planilla}/ciudades", response_model=list[CiudadGrupo])
+async def get_ciudades_planilla(
+    planilla: str = Path(...),
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    return await ciudades_planilla(planilla, db)
+
+
+@router.post("/planillas/{planilla}/precio-ciudades", response_model=PrecioCiudadesResult)
+async def post_precio_ciudades(
+    planilla: str = Path(...),
+    body: PrecioCiudadesRequest = ...,
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    return await precio_por_ciudades(planilla, body, db)
 
 
 # ── Bloqueo masivo por rango ──────────────────────────────────────────────────

@@ -14,9 +14,12 @@ from app.schemas.gestiones import (
     BulkPatchRequest,
     BulkPatchResult,
     CambiarMensajeroRequest,
+    CiudadGrupo,
     MarcarRevisadaResult,
     PlanillaActionResult,
     PlanillaResumen,
+    PrecioCiudadesRequest,
+    PrecioCiudadesResult,
     PrecioCourierRequest,
     PrecioCourierResult,
     RecalcularRequest,
@@ -383,3 +386,100 @@ async def bulk_patch_seriales(req: BulkPatchRequest, db: AsyncSession) -> BulkPa
 
     await db.commit()
     return BulkPatchResult(actualizados=len(ids))
+
+
+async def ciudades_planilla(planilla: str, db: AsyncSession) -> list[CiudadGrupo]:
+    rows = (
+        await db.execute(
+            text("""
+                SELECT
+                    COALESCE(c.nombre, '(Sin ciudad)') AS ciudad,
+                    COALESCE(c.ambito, sg.ambito)      AS ambito,
+                    COUNT(*)::int                       AS seriales
+                FROM seriales_gestion sg
+                LEFT JOIN ordenes o  ON sg.orden = o.numero_orden
+                LEFT JOIN ciudades c ON o.ciudad_destino_id = c.id
+                WHERE sg.planilla = :planilla
+                GROUP BY COALESCE(c.nombre, '(Sin ciudad)'),
+                         COALESCE(c.ambito, sg.ambito)
+                ORDER BY COUNT(*) DESC
+            """),
+            {"planilla": planilla},
+        )
+    ).mappings().all()
+    return [CiudadGrupo(ciudad=r["ciudad"], ambito=r["ambito"], seriales=r["seriales"]) for r in rows]
+
+
+async def precio_por_ciudades(
+    planilla: str,
+    req: PrecioCiudadesRequest,
+    db: AsyncSession,
+) -> PrecioCiudadesResult:
+    params: dict = {
+        "planilla": planilla,
+        "pl": req.precio_local,
+        "pn": req.precio_nacional,
+        "ciudades_local": req.ciudades_local,
+        "ciudades_nacional": req.ciudades_nacional,
+    }
+
+    result = (
+        await db.execute(
+            text("""
+                WITH clasificacion AS (
+                    SELECT unnest(:ciudades_local::text[])    AS ciudad, 'local'    AS tipo
+                    UNION ALL
+                    SELECT unnest(:ciudades_nacional::text[]) AS ciudad, 'nacional' AS tipo
+                ),
+                updated AS (
+                    UPDATE seriales_gestion sg
+                    SET precio_mensajero    = CASE cl.tipo WHEN 'local' THEN :pl ELSE :pn END,
+                        editado_manualmente = TRUE
+                    FROM ordenes o
+                    JOIN ciudades c  ON o.ciudad_destino_id = c.id
+                    JOIN clasificacion cl ON c.nombre = cl.ciudad
+                    WHERE sg.planilla = :planilla
+                      AND sg.orden    = o.numero_orden
+                    RETURNING CASE cl.tipo WHEN 'local' THEN 1 ELSE 0 END AS es_local
+                )
+                SELECT
+                    COUNT(*)                        AS total,
+                    SUM(es_local)                   AS local,
+                    COUNT(*) - SUM(es_local)        AS nacional
+                FROM updated
+            """),
+            params,
+        )
+    ).mappings().one()
+
+    # Seriales sin orden o sin ciudad: aplicar por ambito existente
+    sin_ciudad_result = (
+        await db.execute(
+            text("""
+                WITH sin_ciudad AS (
+                    SELECT sg.id, sg.ambito
+                    FROM seriales_gestion sg
+                    LEFT JOIN ordenes o  ON sg.orden = o.numero_orden
+                    LEFT JOIN ciudades c ON o.ciudad_destino_id = c.id
+                    WHERE sg.planilla = :planilla
+                      AND c.id IS NULL
+                )
+                UPDATE seriales_gestion sg
+                SET precio_mensajero    = CASE sc.ambito WHEN 'bogota' THEN :pl ELSE :pn END,
+                    editado_manualmente = TRUE
+                FROM sin_ciudad sc
+                WHERE sg.id = sc.id
+                RETURNING sg.id
+            """),
+            {"planilla": planilla, "pl": req.precio_local, "pn": req.precio_nacional},
+        )
+    ).rowcount
+
+    await db.commit()
+    return PrecioCiudadesResult(
+        planilla=planilla,
+        seriales_actualizados=int(result["total"] or 0) + sin_ciudad_result,
+        local=int(result["local"] or 0),
+        nacional=int(result["nacional"] or 0),
+        sin_ciudad=sin_ciudad_result,
+    )

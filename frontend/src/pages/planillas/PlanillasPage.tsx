@@ -17,7 +17,7 @@ import {
   Rows3,
   LayoutList,
 } from "lucide-react";
-import { gestionesApi, type RecalcularResult, type BloquearRangoResult, type BulkPatchItem, type PrecioCourierResult } from "@/api/gestiones";
+import { gestionesApi, type RecalcularResult, type BloquearRangoResult, type BulkPatchItem, type PrecioCourierResult, type CiudadGrupo, type PrecioCiudadesResult } from "@/api/gestiones";
 import { personalApi } from "@/api/personal";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
 import type { PlanillaResumen } from "@/types/domain";
@@ -133,7 +133,7 @@ function EditModal({ planilla, onClose, onSaved }: EditModalProps) {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Tarifa Local (Bogotá) $/serial
+                    Tarifa Local $/serial
                   </label>
                   <input
                     type="number"
@@ -424,11 +424,9 @@ function BloqueoRangoPanel({ filtros, onDone }: BloqueoRangoPanelProps) {
   );
 }
 
-// ── Panel de ajuste de precio para courier externo ────────────────────────────
+// ── Panel de ajuste de precio para courier externo (por ciudad) ───────────────
 interface CourierPrecioPanelProps {
   planilla: string;
-  serialesBogota: number;
-  serialesNacional: number;
   precioLocalDefault: number;
   precioNacionalDefault: number;
   onSaved: () => void;
@@ -436,8 +434,6 @@ interface CourierPrecioPanelProps {
 
 function CourierPrecioPanel({
   planilla,
-  serialesBogota,
-  serialesNacional,
   precioLocalDefault,
   precioNacionalDefault,
   onSaved,
@@ -445,20 +441,46 @@ function CourierPrecioPanel({
   const [precioLocal, setPrecioLocal] = useState(precioLocalDefault);
   const [precioNacional, setPrecioNacional] = useState(precioNacionalDefault);
   const [guardando, setGuardando] = useState(false);
-  const [resultado, setResultado] = useState<PrecioCourierResult | null>(null);
+  const [resultado, setResultado] = useState<PrecioCiudadesResult | null>(null);
   const [error, setError] = useState("");
+  // mapa ciudad → 'local' | 'nacional' (overrides sobre el ambito de la DB)
+  const [clasificacion, setClasificacion] = useState<Record<string, string>>({});
 
-  const totalEstimado =
-    serialesBogota * precioLocal + serialesNacional * precioNacional;
+  const { data: ciudades = [], isFetching: cargandoCiudades } = useQuery({
+    queryKey: ["planilla-ciudades", planilla],
+    queryFn: () => gestionesApi.ciudadesPlanilla(planilla).then((r) => r.data),
+  });
+
+  // Inicializar clasificación con el ambito de la DB cuando llegan las ciudades
+  const clasificacionEfectiva: Record<string, string> = {};
+  for (const g of ciudades) {
+    clasificacionEfectiva[g.ciudad] = clasificacion[g.ciudad] ?? (g.ambito === "bogota" ? "local" : "nacional");
+  }
+
+  const locales = ciudades.filter((g) => clasificacionEfectiva[g.ciudad] === "local");
+  const nacionales = ciudades.filter((g) => clasificacionEfectiva[g.ciudad] === "nacional");
+  const totalLocSeriales = locales.reduce((s, g) => s + g.seriales, 0);
+  const totalNacSeriales = nacionales.reduce((s, g) => s + g.seriales, 0);
+  const totalEstimado = totalLocSeriales * precioLocal + totalNacSeriales * precioNacional;
+
+  function toggleCiudad(ciudad: string) {
+    setClasificacion((prev) => {
+      const actual = clasificacionEfectiva[ciudad];
+      return { ...prev, [ciudad]: actual === "local" ? "nacional" : "local" };
+    });
+    setResultado(null);
+  }
 
   async function aplicar() {
     setGuardando(true);
     setError("");
     setResultado(null);
     try {
-      const res = await gestionesApi.precioCourier(planilla, {
+      const res = await gestionesApi.precioCiudades(planilla, {
         precio_local: precioLocal,
         precio_nacional: precioNacional,
+        ciudades_local: locales.map((g) => g.ciudad),
+        ciudades_nacional: nacionales.map((g) => g.ciudad),
       });
       setResultado(res.data);
       onSaved();
@@ -472,12 +494,14 @@ function CourierPrecioPanel({
   return (
     <div className="mx-4 my-3 bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-3">
       <h4 className="text-xs font-semibold text-blue-800 uppercase tracking-wide">
-        Ajuste de precio por ámbito — Courier Externo
+        Ajuste de precio por ciudad — Courier Externo
       </h4>
+
+      {/* Tarifas */}
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1">
-            Tarifa Local (Bogotá) $/serial
+            Tarifa Local $/serial
           </label>
           <input
             type="number"
@@ -502,39 +526,86 @@ function CourierPrecioPanel({
           />
         </div>
       </div>
-      <div className="text-xs text-gray-700 bg-white border border-gray-100 rounded-lg px-3 py-2 space-y-1">
-        <div className="flex justify-between">
-          <span className="text-gray-500">Bogotá (local):</span>
-          <span>
-            {serialesBogota.toLocaleString()} × ${precioLocal.toLocaleString("es-CO")} ={" "}
-            <span className="font-medium">${(serialesBogota * precioLocal).toLocaleString("es-CO")}</span>
-          </span>
+
+      {/* Tabla de ciudades */}
+      {cargandoCiudades ? (
+        <p className="text-xs text-gray-400">Cargando ciudades…</p>
+      ) : ciudades.length === 0 ? (
+        <p className="text-xs text-gray-400">Sin datos de ciudad para esta planilla.</p>
+      ) : (
+        <div className="bg-white border border-gray-100 rounded-lg overflow-hidden">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 border-b border-gray-100">
+              <tr>
+                <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Ciudad</th>
+                <th className="px-3 py-1.5 text-center text-gray-500 font-medium">Tipo</th>
+                <th className="px-3 py-1.5 text-right text-gray-500 font-medium">Seriales</th>
+                <th className="px-3 py-1.5 text-right text-gray-500 font-medium">Valor est.</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {ciudades.map((g) => {
+                const tipo = clasificacionEfectiva[g.ciudad];
+                const precio = tipo === "local" ? precioLocal : precioNacional;
+                return (
+                  <tr key={g.ciudad} className="hover:bg-gray-50">
+                    <td className="px-3 py-1.5 text-gray-700">{g.ciudad}</td>
+                    <td className="px-3 py-1.5 text-center">
+                      <button
+                        onClick={() => toggleCiudad(g.ciudad)}
+                        className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
+                          tipo === "local"
+                            ? "bg-blue-100 text-blue-800 hover:bg-blue-200"
+                            : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                        }`}
+                      >
+                        {tipo === "local" ? "Local" : "Nacional"}
+                      </button>
+                    </td>
+                    <td className="px-3 py-1.5 text-right text-gray-700">{g.seriales.toLocaleString()}</td>
+                    <td className="px-3 py-1.5 text-right text-gray-700">
+                      ${(g.seriales * precio).toLocaleString("es-CO")}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
-        <div className="flex justify-between">
-          <span className="text-gray-500">Nacional:</span>
-          <span>
-            {serialesNacional.toLocaleString()} × ${precioNacional.toLocaleString("es-CO")} ={" "}
-            <span className="font-medium">${(serialesNacional * precioNacional).toLocaleString("es-CO")}</span>
-          </span>
+      )}
+
+      {/* Resumen */}
+      {ciudades.length > 0 && (
+        <div className="text-xs text-gray-700 bg-white border border-gray-100 rounded-lg px-3 py-2 space-y-1">
+          <div className="flex justify-between">
+            <span className="text-gray-500">Local ({totalLocSeriales.toLocaleString()} seriales):</span>
+            <span className="font-medium">${(totalLocSeriales * precioLocal).toLocaleString("es-CO")}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-500">Nacional ({totalNacSeriales.toLocaleString()} seriales):</span>
+            <span className="font-medium">${(totalNacSeriales * precioNacional).toLocaleString("es-CO")}</span>
+          </div>
+          <div className="flex justify-between border-t border-gray-100 pt-1 font-semibold text-gray-800">
+            <span>Total planilla:</span>
+            <span>${totalEstimado.toLocaleString("es-CO")}</span>
+          </div>
         </div>
-        <div className="flex justify-between border-t border-gray-100 pt-1 font-semibold text-gray-800">
-          <span>Total planilla:</span>
-          <span>${totalEstimado.toLocaleString("es-CO")}</span>
-        </div>
-      </div>
+      )}
+
       {resultado && (
         <p className="text-xs text-green-700 bg-green-50 border border-green-200 rounded px-2 py-1">
-          {resultado.seriales_actualizados} seriales actualizados — Bogotá: {resultado.bogota} · Nacional: {resultado.nacional}
+          {resultado.seriales_actualizados} seriales actualizados — Local: {resultado.local} · Nacional: {resultado.nacional}
+          {resultado.sin_ciudad > 0 && ` · Sin ciudad (por ámbito): ${resultado.sin_ciudad}`}
         </p>
       )}
       {error && <p className="text-xs text-red-600">{error}</p>}
       <button
         onClick={aplicar}
-        disabled={guardando}
+        disabled={guardando || ciudades.length === 0}
         className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium disabled:opacity-50 flex items-center gap-1.5"
       >
         {guardando && <RefreshCw size={11} className="animate-spin" />}
-        {guardando ? "Aplicando…" : "Aplicar precios por ámbito"}
+        {guardando ? "Aplicando…" : "Aplicar precios por ciudad"}
       </button>
     </div>
   );
@@ -837,8 +908,6 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
                 {isCourierExterno && (
                   <CourierPrecioPanel
                     planilla={p.planilla}
-                    serialesBogota={serialesBogota}
-                    serialesNacional={serialesNacional}
                     precioLocalDefault={precioLocalDefecto}
                     precioNacionalDefault={precioNacionalDefecto}
                     onSaved={invalidar}
