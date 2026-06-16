@@ -173,6 +173,28 @@ async def test_carga_masiva_columnas_faltantes(client, headers):
 
 
 @pytest.mark.asyncio
+async def test_carga_masiva_excluye_couriers_lecta_prindel(client, headers, setup_maestros):
+    """Filas con courrier Lecta/Prindel deben excluirse y reportarse en errores."""
+    csv_content = (
+        "orden,serial,fecha_recepcion,nombre_cliente,tipo_servicio,ambito,courrier\n"
+        "ORD-LP-001,SER-LP-001,2026-06-01,Cliente Ordenes Test,sobre,bogota,Lecta\n"
+        "ORD-LP-001,SER-LP-002,2026-06-01,Cliente Ordenes Test,sobre,bogota,PRINDEL\n"
+        "ORD-LP-001,SER-LP-003,2026-06-01,Cliente Ordenes Test,sobre,bogota,OtroCourier\n"
+    )
+    r = await client.post(
+        "/api/ordenes/carga-masiva",
+        files={"file": ("ordenes_lp.csv", io.BytesIO(csv_content.encode()), "text/csv")},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["seriales_nuevos"] <= 1, "Solo la fila OtroCourier puede insertarse"
+    assert any("excluidas" in e and "courier" in e.lower() for e in data["errores"]), (
+        f"Se esperaba mensaje de exclusión por courier, errores: {data['errores']}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_carga_masiva_no_csv(client, headers):
     r = await client.post(
         "/api/ordenes/carga-masiva",

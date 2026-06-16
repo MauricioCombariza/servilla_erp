@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 
 DATE_CORTE = date(2026, 1, 1)
 _CLIENTE_IMILE = "imile sas"
+_COURIERS_EXCLUIDOS = {"LECTA", "PRINDEL"}
 
 
 def _es_flujo_imile(df: pd.DataFrame) -> bool:
@@ -177,6 +178,17 @@ async def procesar_csv(
             ordenes_nuevas=0, ordenes_actualizadas=0, errores=[f"Error leyendo archivo: {e}"]
         )
 
+    # ── Excluir couriers no permitidos (Lecta/Prindel) ───────────────────────
+    errores: list[str] = []
+    for col_name in df.columns:
+        if col_name.strip().lower() in ("courrier", "courier"):
+            mask = df[col_name].str.strip().str.upper().isin(_COURIERS_EXCLUIDOS)
+            n_excluidos = int(mask.sum())
+            if n_excluidos:
+                errores.append(f"{n_excluidos} filas excluidas: courier no permitido (Lecta/Prindel)")
+                df = df[~mask].copy()
+            break
+
     # ── Detectar flujo y normalizar columnas ──────────────────────────────────
     es_imile = _es_flujo_imile(df)
     if es_imile:
@@ -243,7 +255,6 @@ async def procesar_csv(
     df = df[df["_fecha_parsed"].apply(lambda d: d is not None and d >= DATE_CORTE)].copy()
     filas_ignoradas = total_filas - len(df)
 
-    errores: list[str] = []
     clientes_by_name, precios_cli, precios_men, personal_by_code, personal_by_name = (
         await _cargar_maestros(db)
     )
@@ -278,7 +289,7 @@ async def procesar_csv(
         fecha_parsed: date = fila["_fecha_parsed"]
         tipo_ser         = str(fila["_tipo_servicio"])
         ambito_val       = "bogota" if fila["_es_local"] else "nacional"
-        cod_men_val      = (str(fila["_cod_men"]) if fila["_cod_men"] else "")[:4]
+        cod_men_val      = (str(fila["_cod_men"]) if fila["_cod_men"] else "").zfill(4)[:4]
         tipo_gestion_val = str(fila["_tipo_gestion"])
         db_estado_val    = str(fila["_db_estado"])
 

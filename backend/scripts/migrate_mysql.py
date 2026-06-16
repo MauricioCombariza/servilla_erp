@@ -380,7 +380,7 @@ def migrate_histo(dry_run: bool):
                 "SELECT COUNT(*) AS n FROM histo WHERE serial IS NOT NULL "
                 "AND f_esc IS NOT NULL AND f_esc BETWEEN %s AND %s "
                 "AND f_esc NOT LIKE '%%Entr%%' AND f_esc NOT LIKE '%%Devo%%' "
-                "AND cod_men NOT IN (SELECT cod_men FROM mensajeros WHERE nombre IN ('Lecta', 'Prindel'))",
+                "AND UPPER(courrier) NOT IN ('LECTA', 'PRINDEL')",
                 (desde_histo, hasta_histo)
             )
             total = my.fetchone()["n"]
@@ -416,10 +416,7 @@ def migrate_histo(dry_run: bool):
               AND f_esc BETWEEN %s AND %s
               AND f_esc NOT LIKE '%%Entr%%'
               AND f_esc NOT LIKE '%%Devo%%'
-              AND cod_men NOT IN (
-                  SELECT cod_men FROM mensajeros
-                  WHERE nombre IN ('Lecta', 'Prindel')
-              )
+              AND UPPER(courrier) NOT IN ('LECTA', 'PRINDEL')
         """, (desde_histo, hasta_histo))
 
         ESTADOS = {"pendiente", "liquidado", "facturado", "anulado", "en_revision"}
@@ -625,7 +622,7 @@ def migrate_histo_incremental(dry_run: bool):
                 "SELECT COUNT(*) AS n FROM histo WHERE serial IS NOT NULL "
                 "AND f_esc IS NOT NULL AND f_esc > %s AND f_esc <= %s "
                 "AND f_esc NOT LIKE '%%Entr%%' AND f_esc NOT LIKE '%%Devo%%' "
-                "AND cod_men NOT IN (SELECT cod_men FROM mensajeros WHERE nombre IN ('Lecta', 'Prindel'))",
+                "AND UPPER(courrier) NOT IN ('LECTA', 'PRINDEL')",
                 (desde_histo, hasta_histo)
             )
             total = my.fetchone()["n"]
@@ -660,10 +657,7 @@ def migrate_histo_incremental(dry_run: bool):
               AND f_esc > %s AND f_esc <= %s
               AND f_esc NOT LIKE '%%Entr%%'
               AND f_esc NOT LIKE '%%Devo%%'
-              AND cod_men NOT IN (
-                  SELECT cod_men FROM mensajeros
-                  WHERE nombre IN ('Lecta', 'Prindel')
-              )
+              AND UPPER(courrier) NOT IN ('LECTA', 'PRINDEL')
         """, (desde_histo, hasta_histo))
 
         ESTADOS = {"pendiente", "liquidado", "facturado", "anulado", "en_revision"}

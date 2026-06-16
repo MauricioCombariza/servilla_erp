@@ -365,7 +365,13 @@ export function FacturasTransportePage() {
       {showForm && (
         <FacturaTransporteForm
           onClose={() => setShowForm(false)}
-          onSaved={() => { qc.invalidateQueries({ queryKey: ["facturas-transporte"] }); setShowForm(false); }}
+          onSaved={(nueva) => {
+            qc.setQueryData<FacturaTransporte[]>(
+              ["facturas-transporte", desde, hasta, search],
+              (prev) => [nueva, ...(prev ?? [])],
+            );
+            setShowForm(false);
+          }}
         />
       )}
       {pagando && (
@@ -509,7 +515,7 @@ function DetallePanel({
 
 interface LineaOrden { orden: Orden; cantidad_sobres: number }
 
-function FacturaTransporteForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+function FacturaTransporteForm({ onClose, onSaved }: { onClose: () => void; onSaved: (f: FacturaTransporte) => void }) {
   const { data: personal = [] } = useQuery({
     queryKey: ["personal-courier"],
     queryFn: () => personalApi.list({ activo: true }).then((r) =>
@@ -555,24 +561,30 @@ function FacturaTransporteForm({ onClose, onSaved }: { onClose: () => void; onSa
     try {
       const res = await transpApi.create({
         ...form,
-        total_sobres: 0,
+        total_sobres: totalSobres,
         fecha_vencimiento: form.fecha_vencimiento || null,
         observaciones: form.observaciones || null,
       });
-      const facturaId = (res.data as FacturaTransporte).id;
+      let facturaFinal: FacturaTransporte = res.data;
+      const facturaId = facturaFinal.id;
       const errores: string[] = [];
       for (const linea of lineas) {
         try {
-          await transpApi.addDetalle(facturaId, {
+          const det = await transpApi.addDetalle(facturaId, {
             orden_id: linea.orden.id,
             cantidad_sobres: linea.cantidad_sobres,
           });
+          facturaFinal = det.data;
         } catch (err: any) {
           errores.push(`${linea.orden.numero_orden}: ${err?.response?.data?.detail ?? "error"}`);
         }
       }
-      onSaved();
-      if (errores.length) setFormError(`Factura guardada. Errores en órdenes: ${errores.join("; ")}`);
+      if (errores.length) {
+        onSaved(facturaFinal);
+        setFormError(`Factura guardada. Errores en órdenes: ${errores.join("; ")}`);
+      } else {
+        onSaved(facturaFinal);
+      }
     } catch (err: any) {
       setFormError(err?.response?.data?.detail ?? "Error al guardar la factura");
     } finally { setSaving(false); }
