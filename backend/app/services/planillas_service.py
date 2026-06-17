@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import date
 
-from sqlalchemy import delete, select, text
+from sqlalchemy import ARRAY, String, bindparam, delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gestiones import SerialGestion
@@ -423,32 +423,31 @@ async def precio_por_ciudades(
         "ciudades_nacional": req.ciudades_nacional,
     }
 
-    result = (
-        await db.execute(
-            text("""
-                WITH clasificacion AS (
-                    SELECT unnest(:ciudades_local::text[])    AS ciudad, 'local'    AS tipo
-                    UNION ALL
-                    SELECT unnest(:ciudades_nacional::text[]) AS ciudad, 'nacional' AS tipo
-                ),
-                updated AS (
-                    UPDATE seriales_gestion sg
-                    SET precio_mensajero    = CASE cl.tipo WHEN 'local' THEN :pl ELSE :pn END,
-                        editado_manualmente = TRUE
-                    FROM clasificacion cl
-                    WHERE sg.planilla = :planilla
-                      AND COALESCE(sg.ciudad, '(Sin ciudad)') = cl.ciudad
-                    RETURNING CASE cl.tipo WHEN 'local' THEN 1 ELSE 0 END AS es_local
-                )
-                SELECT
-                    COUNT(*)                 AS total,
-                    SUM(es_local)            AS local,
-                    COUNT(*) - SUM(es_local) AS nacional
-                FROM updated
-            """),
-            params,
+    sql = text("""
+        WITH clasificacion AS (
+            SELECT unnest(:ciudades_local)    AS ciudad, 'local'    AS tipo
+            UNION ALL
+            SELECT unnest(:ciudades_nacional) AS ciudad, 'nacional' AS tipo
+        ),
+        updated AS (
+            UPDATE seriales_gestion sg
+            SET precio_mensajero    = CASE cl.tipo WHEN 'local' THEN :pl ELSE :pn END,
+                editado_manualmente = TRUE
+            FROM clasificacion cl
+            WHERE sg.planilla = :planilla
+              AND COALESCE(sg.ciudad, '(Sin ciudad)') = cl.ciudad
+            RETURNING CASE cl.tipo WHEN 'local' THEN 1 ELSE 0 END AS es_local
         )
-    ).mappings().one()
+        SELECT
+            COUNT(*)                 AS total,
+            SUM(es_local)            AS local,
+            COUNT(*) - SUM(es_local) AS nacional
+        FROM updated
+    """).bindparams(
+        bindparam("ciudades_local",    type_=ARRAY(String)),
+        bindparam("ciudades_nacional", type_=ARRAY(String)),
+    )
+    result = (await db.execute(sql, params)).mappings().one()
 
     await db.commit()
     total = int(result["total"] or 0)

@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 import pymysql
 import pymysql.cursors
-from sqlalchemy import text
+from sqlalchemy import ARRAY, String, bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -85,24 +85,20 @@ async def sync_ciudades_planilla(planilla: str, db: AsyncSession) -> int:
     if not rows:
         return 0
 
-    # Bulk UPDATE por serial — PostgreSQL no tiene UPDATE ... VALUES (...) estándar,
-    # así que usamos una CTE con unnest para hacerlo en una sola query.
     serials = [r[0] for r in rows]
     ciudades = [r[1] for r in rows]
 
-    result = await db.execute(
-        text("""
-            UPDATE seriales_gestion sg
-            SET ciudad = data.ciudad
-            FROM (
-                SELECT unnest(:serials::text[])  AS serial,
-                       unnest(:ciudades::text[]) AS ciudad
-            ) AS data
-            WHERE sg.serial   = data.serial
-              AND sg.planilla = :planilla
-              AND (sg.ciudad IS DISTINCT FROM data.ciudad)
-        """),
-        {"serials": serials, "ciudades": ciudades, "planilla": planilla},
+    sql = text("""
+        UPDATE seriales_gestion sg
+        SET ciudad = data.ciudad
+        FROM unnest(:serials, :ciudades) AS data(serial, ciudad)
+        WHERE sg.serial   = data.serial
+          AND sg.planilla = :planilla
+          AND sg.ciudad IS DISTINCT FROM data.ciudad
+    """).bindparams(
+        bindparam("serials",  type_=ARRAY(String)),
+        bindparam("ciudades", type_=ARRAY(String)),
     )
+    result = await db.execute(sql, {"serials": serials, "ciudades": ciudades, "planilla": planilla})
     await db.commit()
     return result.rowcount
