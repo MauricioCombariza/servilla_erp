@@ -39,7 +39,9 @@ async def get_operacional(
     rows = (await db.execute(
         text("""
             WITH flete_cliente AS (
-                SELECT cliente_id, COALESCE(SUM(costo_flete_total), 0) AS costo_flete
+                SELECT cliente_id,
+                       COALESCE(SUM(costo_flete_total),     0)
+                     + COALESCE(SUM(costo_transporte_total), 0) AS costo_flete
                 FROM ordenes
                 WHERE fecha_recepcion BETWEEN :desde AND :hasta
                 GROUP BY cliente_id
