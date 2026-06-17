@@ -432,6 +432,7 @@ async def precio_por_ciudades(
         updated AS (
             UPDATE seriales_gestion sg
             SET precio_mensajero    = CASE cl.tipo WHEN 'local' THEN :pl ELSE :pn END,
+                ambito              = CASE cl.tipo WHEN 'local' THEN 'bogota' ELSE 'nacional' END,
                 editado_manualmente = TRUE
             FROM clasificacion cl
             WHERE sg.planilla = :planilla

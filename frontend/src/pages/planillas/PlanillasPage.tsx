@@ -438,6 +438,7 @@ function CourierPrecioPanel({
   precioNacionalDefault,
   onSaved,
 }: CourierPrecioPanelProps) {
+  const qc = useQueryClient();
   const [precioLocal, setPrecioLocal] = useState(precioLocalDefault);
   const [precioNacional, setPrecioNacional] = useState(precioNacionalDefault);
   const [guardando, setGuardando] = useState(false);
@@ -454,7 +455,7 @@ function CourierPrecioPanel({
   // Inicializar clasificación con el ambito de la DB cuando llegan las ciudades
   const clasificacionEfectiva: Record<string, string> = {};
   for (const g of ciudades) {
-    clasificacionEfectiva[g.ciudad] = clasificacion[g.ciudad] ?? (g.ambito === "bogota" ? "local" : "nacional");
+    clasificacionEfectiva[g.ciudad] = clasificacion[g.ciudad] ?? "nacional";
   }
 
   const locales = ciudades.filter((g) => clasificacionEfectiva[g.ciudad] === "local");
@@ -484,6 +485,7 @@ function CourierPrecioPanel({
       });
       setResultado(res.data);
       onSaved();
+      qc.invalidateQueries({ queryKey: ["planilla-ciudades", planilla] });
     } catch {
       setError("Error al aplicar precios");
     } finally {
@@ -635,7 +637,7 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
     qc.invalidateQueries({ queryKey: ["planilla-detalle", p.planilla] });
   };
 
-  const { data: seriales = [], isFetching: cargandoDetalle } = useQuery({
+  const { data: seriales = [], isLoading: cargandoDetalle } = useQuery({
     queryKey: ["planilla-detalle", p.planilla],
     queryFn: () => gestionesApi.list({ planilla: p.planilla, limit: 500 }).then((r) => r.data),
     enabled: expandido,
