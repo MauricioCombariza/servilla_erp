@@ -90,7 +90,7 @@ def _buscar_histo_serial_sync(termino: str) -> list[dict]:
         with conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT serial, nombred, dirdes1, ciudad1, f_emi, cod_men, estado "
+                    "SELECT serial, nombred, dirdes1, ciudad1, f_emi, cod_men "
                     "FROM histo WHERE serial LIKE %s ORDER BY f_emi DESC LIMIT 100",
                     (f"%{termino}%",),
                 )
@@ -119,7 +119,7 @@ def _buscar_histo_nombre_sync(termino: str) -> list[dict]:
                 cond = " AND ".join(["LOWER(nombred) LIKE %s"] * len(palabras))
                 params = tuple(f"%{p.lower()}%" for p in palabras)
                 cur.execute(
-                    f"SELECT serial, nombred, dirdes1, ciudad1, f_emi, cod_men, estado "
+                    f"SELECT serial, nombred, dirdes1, ciudad1, f_emi, cod_men "
                     f"FROM histo WHERE {cond} ORDER BY f_emi DESC LIMIT 200",
                     params,
                 )
