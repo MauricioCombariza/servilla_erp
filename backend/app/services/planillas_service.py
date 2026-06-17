@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import date
 
-from sqlalchemy import ARRAY, String, bindparam, delete, select, text
+from sqlalchemy import ARRAY, Numeric, String, bindparam, delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gestiones import SerialGestion
@@ -446,6 +446,8 @@ async def precio_por_ciudades(
     """).bindparams(
         bindparam("ciudades_local",    type_=ARRAY(String)),
         bindparam("ciudades_nacional", type_=ARRAY(String)),
+        bindparam("pl",                type_=Numeric),
+        bindparam("pn",                type_=Numeric),
     )
     result = (await db.execute(sql, params)).mappings().one()
 
