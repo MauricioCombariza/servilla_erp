@@ -33,7 +33,7 @@ def _histo_row_to_item(row: dict) -> PaqueteItem:
         ciudad=str(row.get("ciudad1") or "").strip().title() or None,
         fecha=fecha,
         cod_men=str(row.get("cod_men") or "").strip() or None,
-        estado=str(row.get("estado") or "").strip() or None,
+        estado=str(row.get("cod_esc") or "").strip() or None,
     )
 
 
