@@ -2,7 +2,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   Users, UserCheck, ShoppingCart, FileText, BarChart2,
   Clock, DollarSign, Truck, Receipt, Wallet, Calculator, List, ClipboardCheck,
-  LogOut, Menu, X, ArrowDownCircle, ArrowUpCircle,
+  LogOut, Menu, X, ArrowDownCircle, ArrowUpCircle, Search,
 } from "lucide-react";
 import { useState } from "react";
 import { useAuthStore } from "@/store/authStore";
@@ -25,6 +25,7 @@ const navItems = [
   { to: "/nomina", label: "Nómina", icon: Calculator },
   { to: "/gestiones", label: "Detalle Gestiones", icon: List },
   { to: "/planillas", label: "Planillas", icon: ClipboardCheck },
+  { to: "/buscar", label: "Buscar Paquete", icon: Search },
 ];
 
 export function AppShell() {

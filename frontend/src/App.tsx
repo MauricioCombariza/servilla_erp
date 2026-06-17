@@ -21,6 +21,7 @@ import { CuentasCobrarPage } from "@/pages/facturacion/CuentasCobrarPage";
 import { CuentasPagarPage } from "@/pages/facturacion/CuentasPagarPage";
 import { LiquidacionesPage } from "@/pages/pagos/LiquidacionesPage";
 import { FacturasTransportePage } from "@/pages/transporte/FacturasTransportePage";
+import { BuscarPaquetePage } from "@/pages/buscar/BuscarPaquetePage";
 import { Placeholder } from "@/pages/Placeholder";
 
 const qc = new QueryClient({
@@ -64,6 +65,7 @@ export default function App() {
             <Route path="/nomina" element={<NominaPage />} />
             <Route path="/gestiones" element={<DetalleGestionesPage />} />
             <Route path="/planillas" element={<PlanillasPage />} />
+            <Route path="/buscar" element={<BuscarPaquetePage />} />
           </Route>
         </Routes>
       </BrowserRouter>
