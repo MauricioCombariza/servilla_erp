@@ -389,19 +389,19 @@ async def bulk_patch_seriales(req: BulkPatchRequest, db: AsyncSession) -> BulkPa
 
 
 async def ciudades_planilla(planilla: str, db: AsyncSession) -> list[CiudadGrupo]:
+    from app.services.bases_web import sync_ciudades_planilla
+    await sync_ciudades_planilla(planilla, db)
+
     rows = (
         await db.execute(
             text("""
                 SELECT
-                    COALESCE(c.nombre, '(Sin ciudad)') AS ciudad,
-                    COALESCE(c.ambito, sg.ambito)      AS ambito,
+                    COALESCE(sg.ciudad, '(Sin ciudad)') AS ciudad,
+                    sg.ambito                           AS ambito,
                     COUNT(*)::int                       AS seriales
                 FROM seriales_gestion sg
-                LEFT JOIN ordenes o  ON sg.orden = o.numero_orden
-                LEFT JOIN ciudades c ON o.ciudad_destino_id = c.id
                 WHERE sg.planilla = :planilla
-                GROUP BY COALESCE(c.nombre, '(Sin ciudad)'),
-                         COALESCE(c.ambito, sg.ambito)
+                GROUP BY COALESCE(sg.ciudad, '(Sin ciudad)'), sg.ambito
                 ORDER BY COUNT(*) DESC
             """),
             {"planilla": planilla},
@@ -435,51 +435,28 @@ async def precio_por_ciudades(
                     UPDATE seriales_gestion sg
                     SET precio_mensajero    = CASE cl.tipo WHEN 'local' THEN :pl ELSE :pn END,
                         editado_manualmente = TRUE
-                    FROM ordenes o
-                    JOIN ciudades c  ON o.ciudad_destino_id = c.id
-                    JOIN clasificacion cl ON c.nombre = cl.ciudad
+                    FROM clasificacion cl
                     WHERE sg.planilla = :planilla
-                      AND sg.orden    = o.numero_orden
+                      AND COALESCE(sg.ciudad, '(Sin ciudad)') = cl.ciudad
                     RETURNING CASE cl.tipo WHEN 'local' THEN 1 ELSE 0 END AS es_local
                 )
                 SELECT
-                    COUNT(*)                        AS total,
-                    SUM(es_local)                   AS local,
-                    COUNT(*) - SUM(es_local)        AS nacional
+                    COUNT(*)                 AS total,
+                    SUM(es_local)            AS local,
+                    COUNT(*) - SUM(es_local) AS nacional
                 FROM updated
             """),
             params,
         )
     ).mappings().one()
 
-    # Seriales sin orden o sin ciudad: aplicar por ambito existente
-    sin_ciudad_result = (
-        await db.execute(
-            text("""
-                WITH sin_ciudad AS (
-                    SELECT sg.id, sg.ambito
-                    FROM seriales_gestion sg
-                    LEFT JOIN ordenes o  ON sg.orden = o.numero_orden
-                    LEFT JOIN ciudades c ON o.ciudad_destino_id = c.id
-                    WHERE sg.planilla = :planilla
-                      AND c.id IS NULL
-                )
-                UPDATE seriales_gestion sg
-                SET precio_mensajero    = CASE sc.ambito WHEN 'bogota' THEN :pl ELSE :pn END,
-                    editado_manualmente = TRUE
-                FROM sin_ciudad sc
-                WHERE sg.id = sc.id
-                RETURNING sg.id
-            """),
-            {"planilla": planilla, "pl": req.precio_local, "pn": req.precio_nacional},
-        )
-    ).rowcount
-
     await db.commit()
+    total = int(result["total"] or 0)
+    local = int(result["local"] or 0)
     return PrecioCiudadesResult(
         planilla=planilla,
-        seriales_actualizados=int(result["total"] or 0) + sin_ciudad_result,
-        local=int(result["local"] or 0),
-        nacional=int(result["nacional"] or 0),
-        sin_ciudad=sin_ciudad_result,
+        seriales_actualizados=total,
+        local=local,
+        nacional=total - local,
+        sin_ciudad=0,
     )

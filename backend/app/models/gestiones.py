@@ -30,6 +30,7 @@ class SerialGestion(Base):
     liquidacion_id: Mapped[int | None] = mapped_column()
     factura_id: Mapped[int | None] = mapped_column()
     origen: Mapped[str] = mapped_column(String(8), default="scanner")
+    ciudad: Mapped[str | None] = mapped_column(String(150))
     editado_manualmente: Mapped[bool] = mapped_column(Boolean, default=False)
     observaciones: Mapped[str | None] = mapped_column(Text)
     fecha_creacion: Mapped[datetime | None] = mapped_column(_ts)

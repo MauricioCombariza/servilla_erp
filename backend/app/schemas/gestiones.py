@@ -40,6 +40,7 @@ class SerialGestionRead(BaseModel):
     estado: str
     liquidacion_id: int | None
     factura_id: int | None
+    ciudad: str | None = None
     editado_manualmente: bool
     observaciones: str | None
     fecha_creacion: datetime | None

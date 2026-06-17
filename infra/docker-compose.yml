@@ -25,6 +25,7 @@ services:
     container_name: servilla_backend
     environment:
       DATABASE_URL:     postgresql+asyncpg://servilla:${POSTGRES_PASSWORD}@postgres:5432/servilla_erp
+      BASES_WEB_URL:    ${BASES_WEB_URL:-}
       JWT_SECRET:       ${JWT_SECRET}
       ALLOWED_ORIGINS:  ${ALLOWED_ORIGINS:-http://localhost}
       ENVIRONMENT:      ${ENVIRONMENT:-production}
