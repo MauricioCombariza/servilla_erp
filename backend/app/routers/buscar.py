@@ -1,13 +1,14 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_role
 from app.database import get_db
-from app.models.clientes import Cliente
 from app.models.gestiones import SerialGestion
-from app.models.ordenes import Orden
 from app.schemas.buscar import BuscarResultado, PaqueteItem
+from app.services.bases_web import buscar_histo
 
 router = APIRouter(prefix="/api/buscar", tags=["buscar"])
 _auth = Depends(require_role("administrador", "logistica", "mensajero"))
@@ -21,106 +22,91 @@ def _fmt_date(d) -> str | None:
     return d.isoformat() if hasattr(d, "isoformat") else str(d)
 
 
-def _serial_to_item(sg: SerialGestion) -> PaqueteItem:
+def _histo_row_to_item(row: dict) -> PaqueteItem:
+    f_emi = row.get("f_emi")
+    fecha = _fmt_date(f_emi) if f_emi else None
+    return PaqueteItem(
+        clave=str(row.get("serial") or ""),
+        fuente="Histórico",
+        nombre=str(row.get("nombred") or "").strip().title() or None,
+        direccion=str(row.get("dirdes1") or "").strip() or None,
+        ciudad=str(row.get("ciudad1") or "").strip().title() or None,
+        fecha=fecha,
+        cod_men=str(row.get("cod_men") or "").strip() or None,
+        estado=str(row.get("estado") or "").strip() or None,
+    )
+
+
+def _sg_to_item(sg: SerialGestion) -> PaqueteItem:
     cliente_nombre = sg.cliente.nombre_empresa if sg.cliente else None
-    mensajero_nombre = (
+    mensajero = (
         sg.mensajero.nombre_completo if sg.mensajero else sg.cod_men or None
     )
     return PaqueteItem(
         clave=sg.serial,
-        tipo="serial",
-        numero_orden=sg.orden,
-        cliente=cliente_nombre,
-        mensajero=mensajero_nombre,
+        fuente="ERP",
+        nombre=None,
+        direccion=None,
         ciudad=sg.ciudad,
         fecha=_fmt_date(sg.f_emi),
+        cod_men=mensajero,
         estado=sg.estado,
+        cliente=cliente_nombre,
         planilla=sg.planilla,
         tipo_gestion=sg.tipo_gestion,
-    )
-
-
-def _orden_to_item(o: Orden) -> PaqueteItem:
-    cliente_nombre = o.cliente.nombre_empresa if o.cliente else None
-    return PaqueteItem(
-        clave=o.numero_orden,
-        tipo="orden",
-        numero_orden=o.numero_orden,
-        cliente=cliente_nombre,
-        mensajero=None,
-        ciudad=o.ciudad_destino.nombre if o.ciudad_destino else None,
-        fecha=_fmt_date(o.fecha_recepcion),
-        estado=o.estado,
-        planilla=None,
-        tipo_gestion=None,
     )
 
 
 @router.get("/paquete", response_model=BuscarResultado)
 async def buscar_paquete(
     q: str = Query(min_length=2, max_length=200),
-    modo: str = Query(default="serial", pattern="^(serial|orden|cliente)$"),
+    modo: str = Query(default="serial", pattern="^(serial|nombre|telefono)$"),
     db: AsyncSession = Depends(get_db),
     _=_auth,
 ):
-    term = f"%{q.strip()}%"
+    q = q.strip()
     items: list[PaqueteItem] = []
 
     if modo == "serial":
-        stmt = (
+        # Buscar en paralelo: histórico MySQL y ERP PostgreSQL
+        histo_task = buscar_histo(q, "serial")
+        erp_stmt = (
             select(SerialGestion)
-            .where(SerialGestion.serial.ilike(term))
+            .where(SerialGestion.serial.ilike(f"%{q}%"))
             .order_by(SerialGestion.f_emi.desc())
             .limit(LIMIT)
         )
-        rows = (await db.execute(stmt)).scalars().all()
-        items = [_serial_to_item(r) for r in rows]
-
-    elif modo == "orden":
-        # seriales_gestion with matching orden field
-        stmt_sg = (
-            select(SerialGestion)
-            .where(SerialGestion.orden.ilike(term))
-            .order_by(SerialGestion.f_emi.desc())
-            .limit(LIMIT)
+        histo_rows, erp_result = await asyncio.gather(
+            histo_task,
+            db.execute(erp_stmt),
         )
-        sg_rows = (await db.execute(stmt_sg)).scalars().all()
-        sg_items = [_serial_to_item(r) for r in sg_rows]
+        histo_items = [_histo_row_to_item(r) for r in histo_rows]
+        erp_items = [_sg_to_item(r) for r in erp_result.scalars().all()]
 
-        # ordenes table
-        stmt_o = (
-            select(Orden)
-            .where(Orden.numero_orden.ilike(term))
-            .order_by(Orden.fecha_recepcion.desc())
-            .limit(LIMIT)
-        )
-        o_rows = (await db.execute(stmt_o)).scalars().all()
-        o_items = [_orden_to_item(r) for r in o_rows]
-
-        # merge, dedup by (clave, tipo)
-        seen: set[tuple[str, str]] = set()
-        for item in sg_items + o_items:
-            key = (item.clave, item.tipo)
-            if key not in seen:
-                seen.add(key)
+        # Merge: ERP primero, luego histórico sin duplicar serial
+        seen_serials: set[str] = set()
+        for item in erp_items:
+            seen_serials.add(item.clave)
+            items.append(item)
+        for item in histo_items:
+            if item.clave not in seen_serials:
+                seen_serials.add(item.clave)
                 items.append(item)
 
-    elif modo == "cliente":
-        palabras = [p for p in q.strip().split() if p]
-        stmt = select(SerialGestion).order_by(SerialGestion.f_emi.desc()).limit(LIMIT)
-        # filter via joined cliente
-        stmt = stmt.join(Cliente, SerialGestion.cliente_id == Cliente.id)
-        for palabra in palabras:
-            stmt = stmt.where(Cliente.nombre_empresa.ilike(f"%{palabra}%"))
-        rows = (await db.execute(stmt)).scalars().all()
-        items = [_serial_to_item(r) for r in rows]
+    elif modo == "nombre":
+        histo_rows = await buscar_histo(q, "nombre")
+        items = [_histo_row_to_item(r) for r in histo_rows]
 
-    n_seriales = sum(1 for i in items if i.tipo == "serial")
-    n_ordenes = sum(1 for i in items if i.tipo == "orden")
+    elif modo == "telefono":
+        # El histórico no tiene teléfono — sin resultados
+        items = []
+
+    n_historico = sum(1 for i in items if i.fuente == "Histórico")
+    n_erp = sum(1 for i in items if i.fuente == "ERP")
 
     return BuscarResultado(
         total=len(items),
-        seriales=n_seriales,
-        ordenes=n_ordenes,
+        historico=n_historico,
+        erp=n_erp,
         items=items,
     )

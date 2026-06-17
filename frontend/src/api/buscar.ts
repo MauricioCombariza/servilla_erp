@@ -2,25 +2,26 @@ import api from "./client";
 
 export interface PaqueteItem {
   clave: string;
-  tipo: "serial" | "orden";
-  numero_orden: string | null;
-  cliente: string | null;
-  mensajero: string | null;
+  fuente: "Histórico" | "ERP";
+  nombre: string | null;
+  direccion: string | null;
   ciudad: string | null;
   fecha: string | null;
-  estado: string;
+  cod_men: string | null;
+  estado: string | null;
+  cliente: string | null;
   planilla: string | null;
   tipo_gestion: string | null;
 }
 
 export interface BuscarResultado {
   total: number;
-  seriales: number;
-  ordenes: number;
+  historico: number;
+  erp: number;
   items: PaqueteItem[];
 }
 
-export type BuscarModo = "serial" | "orden" | "cliente";
+export type BuscarModo = "serial" | "nombre" | "telefono";
 
 export const buscarApi = {
   buscarPaquete: (q: string, modo: BuscarModo) =>

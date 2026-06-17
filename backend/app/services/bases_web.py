@@ -76,6 +76,67 @@ def _fetch_ciudades_sync(planilla: str) -> list[tuple[str, str | None]]:
         return []
 
 
+def _buscar_histo_serial_sync(termino: str) -> list[dict]:
+    dsn = _parse_dsn()
+    if not dsn:
+        return []
+    try:
+        conn = pymysql.connect(
+            **dsn,
+            cursorclass=pymysql.cursors.DictCursor,
+            connect_timeout=5,
+            read_timeout=15,
+        )
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT serial, nombred, dirdes1, ciudad1, f_emi, cod_men, estado "
+                    "FROM histo WHERE serial LIKE %s ORDER BY f_emi DESC LIMIT 100",
+                    (f"%{termino}%",),
+                )
+                return cur.fetchall()
+    except Exception as exc:
+        logger.error("Error buscando serial en bases_web.histo: %s", exc)
+        return []
+
+
+def _buscar_histo_nombre_sync(termino: str) -> list[dict]:
+    dsn = _parse_dsn()
+    if not dsn:
+        return []
+    palabras = [p for p in termino.strip().split() if p]
+    if not palabras:
+        return []
+    try:
+        conn = pymysql.connect(
+            **dsn,
+            cursorclass=pymysql.cursors.DictCursor,
+            connect_timeout=5,
+            read_timeout=15,
+        )
+        with conn:
+            with conn.cursor() as cur:
+                cond = " AND ".join(["LOWER(nombred) LIKE %s"] * len(palabras))
+                params = tuple(f"%{p.lower()}%" for p in palabras)
+                cur.execute(
+                    f"SELECT serial, nombred, dirdes1, ciudad1, f_emi, cod_men, estado "
+                    f"FROM histo WHERE {cond} ORDER BY f_emi DESC LIMIT 200",
+                    params,
+                )
+                return cur.fetchall()
+    except Exception as exc:
+        logger.error("Error buscando nombre en bases_web.histo: %s", exc)
+        return []
+
+
+async def buscar_histo(termino: str, modo: str) -> list[dict]:
+    if modo == "serial":
+        return await asyncio.to_thread(_buscar_histo_serial_sync, termino)
+    elif modo == "nombre":
+        return await asyncio.to_thread(_buscar_histo_nombre_sync, termino)
+    return []
+
+
 async def sync_ciudades_planilla(planilla: str, db: AsyncSession) -> int:
     """
     Obtiene ciudad1 desde bases_web.histo para cada serial de la planilla
