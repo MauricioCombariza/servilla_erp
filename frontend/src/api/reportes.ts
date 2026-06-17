@@ -3,11 +3,10 @@ import api from "./client";
 export interface ResumenClienteRow {
   cliente: string;
   cliente_id: number | null;
-  entregas: number;
-  devoluciones: number;
   total_seriales: number;
   ingreso_cliente: number;
   costo_mensajero: number;
+  costo_flete: number;
   margen: number;
   margen_pct: number | null;
 }

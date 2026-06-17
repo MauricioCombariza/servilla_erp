@@ -38,18 +38,24 @@ async def get_operacional(
     desde, hasta = _rango_anio_mes(anio, mes)
     rows = (await db.execute(
         text("""
+            WITH flete_cliente AS (
+                SELECT cliente_id, COALESCE(SUM(costo_flete_total), 0) AS costo_flete
+                FROM ordenes
+                WHERE fecha_recepcion BETWEEN :desde AND :hasta
+                GROUP BY cliente_id
+            )
             SELECT
                 COALESCE(c.nombre_empresa, 'Sin cliente') AS cliente,
                 c.id                                       AS cliente_id,
-                COUNT(CASE WHEN sg.tipo_gestion = 'Entrega'   THEN 1 END)::int AS entregas,
-                COUNT(CASE WHEN sg.tipo_gestion = 'Devolucion' THEN 1 END)::int AS devoluciones,
                 COUNT(*)::int                              AS total_seriales,
                 COALESCE(SUM(sg.precio_cliente),   0)     AS ingreso_cliente,
-                COALESCE(SUM(sg.precio_mensajero), 0)     AS costo_mensajero
+                COALESCE(SUM(sg.precio_mensajero), 0)     AS costo_mensajero,
+                COALESCE(fc.costo_flete,           0)     AS costo_flete
             FROM seriales_gestion sg
             LEFT JOIN clientes c ON sg.cliente_id = c.id
+            LEFT JOIN flete_cliente fc ON fc.cliente_id = c.id
             WHERE sg.f_emi BETWEEN :desde AND :hasta
-            GROUP BY c.id, c.nombre_empresa
+            GROUP BY c.id, c.nombre_empresa, fc.costo_flete
             ORDER BY ingreso_cliente DESC
         """),
         {"desde": desde, "hasta": hasta},
@@ -59,15 +65,15 @@ async def get_operacional(
     for r in rows:
         ing = float(r["ingreso_cliente"])
         cos = float(r["costo_mensajero"])
+        fle = float(r["costo_flete"])
         mar = ing - cos
         result.append(ResumenClienteRow(
             cliente=r["cliente"],
             cliente_id=r["cliente_id"],
-            entregas=r["entregas"],
-            devoluciones=r["devoluciones"],
             total_seriales=r["total_seriales"],
             ingreso_cliente=round(ing, 2),
             costo_mensajero=round(cos, 2),
+            costo_flete=round(fle, 2),
             margen=round(mar, 2),
             margen_pct=round(mar / ing * 100, 1) if ing else None,
         ))

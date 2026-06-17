@@ -78,6 +78,7 @@ function TabOperacional() {
   const totalSer = data.reduce((s, r) => s + r.total_seriales, 0);
   const totalIng = data.reduce((s, r) => s + r.ingreso_cliente, 0);
   const totalCos = data.reduce((s, r) => s + r.costo_mensajero, 0);
+  const totalFle = data.reduce((s, r) => s + r.costo_flete, 0);
   const totalMar = totalIng - totalCos;
 
   return (
@@ -101,17 +102,17 @@ function TabOperacional() {
       </div>
 
       <MetricCards items={[
-        { label: "Seriales", value: totalSer.toLocaleString() },
+        { label: "Envíos", value: totalSer.toLocaleString() },
         { label: "Ingreso estimado", value: fmt(totalIng) },
         { label: "Costo mensajero", value: fmt(totalCos) },
-        { label: "Margen", value: fmt(totalMar), sub: totalIng ? pct(totalMar / totalIng * 100) : "—" },
+        { label: "Costo flete", value: fmt(totalFle) },
       ]} />
 
       {isLoading ? <div className="text-center py-16 text-gray-400">Cargando...</div> : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
           <table className="w-full text-sm min-w-[750px]">
             <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>{["Cliente","Entregas","Dev.","Total","Ingreso","Costo Mensajero","Margen","Margen %"].map((h) => (
+              <tr>{["Cliente","Envíos","Ingreso","Costo Mensajero","Costo Flete","Margen","Margen %"].map((h) => (
                 <th key={h} className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">{h}</th>
               ))}</tr>
             </thead>
@@ -119,11 +120,10 @@ function TabOperacional() {
               {data.map((r) => (
                 <tr key={r.cliente} className="hover:bg-gray-50">
                   <td className="px-4 py-2.5 font-medium text-gray-900 max-w-[180px] truncate">{r.cliente}</td>
-                  <td className="px-4 py-2.5 text-green-700">{r.entregas.toLocaleString()}</td>
-                  <td className="px-4 py-2.5 text-orange-600">{r.devoluciones.toLocaleString()}</td>
                   <td className="px-4 py-2.5 text-gray-700">{r.total_seriales.toLocaleString()}</td>
                   <td className="px-4 py-2.5"><CurrencyCell value={r.ingreso_cliente} /></td>
                   <td className="px-4 py-2.5"><CurrencyCell value={r.costo_mensajero} /></td>
+                  <td className="px-4 py-2.5"><CurrencyCell value={r.costo_flete} /></td>
                   <td className="px-4 py-2.5"><CurrencyCell value={r.margen} /></td>
                   <td className="px-4 py-2.5">
                     <span className={`text-xs font-medium ${(r.margen_pct ?? 0) >= 0 ? "text-green-700" : "text-red-600"}`}>

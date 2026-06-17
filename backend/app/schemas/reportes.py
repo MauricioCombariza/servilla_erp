@@ -6,11 +6,10 @@ from pydantic import BaseModel
 class ResumenClienteRow(BaseModel):
     cliente: str
     cliente_id: int | None
-    entregas: int
-    devoluciones: int
     total_seriales: int
     ingreso_cliente: float
     costo_mensajero: float
+    costo_flete: float
     margen: float
     margen_pct: float | None   # None cuando ingreso_cliente = 0
 
