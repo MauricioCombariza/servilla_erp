@@ -39,6 +39,7 @@ from app.services.planillas_service import (
     desmarcar_revisada,
     marcar_revisada,
     precio_por_ciudades,
+    recalcular_bloqueados_sin_precio,
     recalcular_precios,
     resumen_planillas,
 )
@@ -116,6 +117,15 @@ async def get_ciudades_planilla(
     _=_auth,
 ):
     return await ciudades_planilla(planilla, db)
+
+
+@router.post("/planillas/{planilla}/fix-precios-cero", response_model=RecalcularResult)
+async def post_fix_precios_cero(
+    planilla: str = Path(...),
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    return await recalcular_bloqueados_sin_precio(planilla, db)
 
 
 @router.post("/planillas/{planilla}/precio-ciudades", response_model=PrecioCiudadesResult)

@@ -667,6 +667,10 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
       gestionesApi.patch(id, { editado_manualmente: val }),
     onSuccess: invalidar,
   });
+  const fixPreciosCero = useMutation({
+    mutationFn: (id: string) => gestionesApi.fixPreciosCero(id),
+    onSuccess: invalidar,
+  });
 
   // Agrupar seriales por (cod_men, precio_mensajero)
   type Grupo = {
@@ -890,9 +894,19 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
               </span>
             )}
             {p.con_precio_cero > 0 && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
-                <AlertTriangle size={10} /> {p.con_precio_cero} sin precio
-              </span>
+              <>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+                  <AlertTriangle size={10} /> {p.con_precio_cero} sin precio
+                </span>
+                <button
+                  onClick={() => fixPreciosCero.mutate(p.planilla)}
+                  disabled={fixPreciosCero.isPending}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 border border-amber-300 text-amber-700 hover:bg-amber-100 transition-colors disabled:opacity-50"
+                  title="Recalcular precios de seriales bloqueados con precio 0"
+                >
+                  {fixPreciosCero.isPending ? "…" : "Corregir"}
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -1400,6 +1414,11 @@ export function PlanillasPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["planillas"] }),
   });
 
+  const fixPreciosCero = useMutation({
+    mutationFn: (planilla: string) => gestionesApi.fixPreciosCero(planilla),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["planillas"] }),
+  });
+
   const totalSeriales = planillas.reduce((s, p) => s + p.total_seriales, 0);
   const totalMensajero = planillas.reduce((s, p) => s + p.total_mensajero, 0);
   const sinPrecio = planillas.reduce((s, p) => s + p.con_precio_cero, 0);
@@ -1580,12 +1599,22 @@ export function PlanillasPage() {
                   <td className="px-4 py-3">
                     <span className="font-medium text-gray-900">{p.total_seriales}</span>
                     {p.con_precio_cero > 0 && (
-                      <span
-                        className="ml-1 text-amber-500"
-                        title={`${p.con_precio_cero} sin precio`}
-                      >
-                        <AlertTriangle size={12} className="inline" />
-                      </span>
+                      <>
+                        <span
+                          className="ml-1 text-amber-500"
+                          title={`${p.con_precio_cero} sin precio`}
+                        >
+                          <AlertTriangle size={12} className="inline" />
+                        </span>
+                        <button
+                          onClick={() => fixPreciosCero.mutate(p.planilla)}
+                          disabled={fixPreciosCero.isPending}
+                          className="ml-1 text-xs text-amber-600 hover:text-amber-800 underline disabled:opacity-50"
+                          title="Recalcular precios de seriales bloqueados con precio 0"
+                        >
+                          {fixPreciosCero.isPending ? "…" : "Corregir"}
+                        </button>
+                      </>
                     )}
                   </td>
                   <td className="px-4 py-3">

@@ -388,6 +388,105 @@ async def bulk_patch_seriales(req: BulkPatchRequest, db: AsyncSession) -> BulkPa
     return BulkPatchResult(actualizados=len(ids))
 
 
+async def recalcular_bloqueados_sin_precio(planilla: str, db: AsyncSession) -> RecalcularResult:
+    """Corrige seriales bloqueados (editado_manualmente=TRUE) con precio_mensajero=0.
+
+    Desbloquea temporalmente solo esos seriales, corre el recálculo desde precios_cliente
+    y los vuelve a bloquear si recibieron un precio > 0.
+    """
+    await db.execute(
+        text("""
+            UPDATE seriales_gestion
+            SET editado_manualmente = FALSE
+            WHERE planilla = :p AND precio_mensajero = 0 AND editado_manualmente = TRUE
+        """),
+        {"p": planilla},
+    )
+
+    update_sql = text("""
+        WITH candidatos AS (
+            SELECT sg.id,
+                   sg.tipo_gestion,
+                   sg.precio_cliente,
+                   sg.cliente_id,
+                   sg.tipo_envio,
+                   sg.ambito,
+                   sg.f_esc,
+                   sg.mensajero_id
+            FROM seriales_gestion sg
+            WHERE sg.planilla = :planilla
+              AND sg.editado_manualmente = FALSE
+              AND sg.precio_mensajero = 0
+        ),
+        precio_vigente AS (
+            SELECT DISTINCT ON (c.id)
+                   c.id                          AS serial_id,
+                   c.tipo_gestion,
+                   c.precio_cliente              AS precio_cli_actual,
+                   c.ambito,
+                   pc.precio_entrega,
+                   pc.costo_mensajero_entrega,
+                   pc.costo_mensajero_devolucion,
+                   men.tipo_personal             AS tipo_men,
+                   men.precio_local              AS men_local,
+                   men.precio_nacional           AS men_nac
+            FROM candidatos c
+            JOIN precios_cliente pc
+              ON pc.cliente_id    = c.cliente_id
+             AND pc.tipo_servicio = c.tipo_envio
+             AND pc.ambito        = c.ambito
+             AND pc.activo        = TRUE
+             AND pc.vigencia_desde <= c.f_esc
+             AND (pc.vigencia_hasta IS NULL OR pc.vigencia_hasta >= c.f_esc)
+            LEFT JOIN personal men ON men.id = c.mensajero_id
+            ORDER BY c.id, pc.vigencia_desde DESC
+        ),
+        updated AS (
+            UPDATE seriales_gestion sg
+            SET precio_cliente   = CASE
+                                     WHEN pv.precio_entrega > 0 THEN pv.precio_entrega
+                                     ELSE pv.precio_cli_actual
+                                   END,
+                precio_mensajero = CASE
+                                     WHEN pv.tipo_men = 'courier_externo' THEN
+                                         CASE pv.ambito
+                                             WHEN 'bogota'
+                                             THEN COALESCE(NULLIF(pv.men_local, 0), pv.costo_mensajero_entrega)
+                                             ELSE COALESCE(NULLIF(pv.men_nac,   0), pv.costo_mensajero_entrega)
+                                         END
+                                     WHEN pv.tipo_gestion = 'Entrega'
+                                     THEN pv.costo_mensajero_entrega
+                                     ELSE pv.costo_mensajero_devolucion
+                                   END,
+                editado_manualmente = TRUE
+            FROM precio_vigente pv
+            WHERE sg.id = pv.serial_id
+            RETURNING sg.id
+        )
+        SELECT COUNT(*) AS actualizados FROM updated
+    """)
+
+    result = (await db.execute(update_sql, {"planilla": planilla})).mappings().one()
+    actualizados = int(result["actualizados"])
+
+    sin_precio_row = (await db.execute(
+        text("""
+            SELECT COUNT(*) AS sin_precio
+            FROM seriales_gestion
+            WHERE planilla = :planilla AND precio_mensajero = 0
+        """),
+        {"planilla": planilla},
+    )).mappings().one()
+    sin_precio = int(sin_precio_row["sin_precio"])
+
+    await db.commit()
+    return RecalcularResult(
+        seriales_actualizados=actualizados,
+        seriales_sin_precio=sin_precio,
+        errores=[],
+    )
+
+
 async def ciudades_planilla(planilla: str, db: AsyncSession) -> list[CiudadGrupo]:
     from app.services.bases_web import sync_ciudades_planilla
     await sync_ciudades_planilla(planilla, db)

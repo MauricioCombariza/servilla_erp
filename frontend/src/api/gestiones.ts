@@ -162,4 +162,9 @@ export const gestionesApi = {
       `/gestiones/planillas/${encodeURIComponent(planilla)}/precio-ciudades`,
       data
     ),
+
+  fixPreciosCero: (planilla: string) =>
+    api.post<RecalcularResult>(
+      `/gestiones/planillas/${encodeURIComponent(planilla)}/fix-precios-cero`
+    ),
 };
