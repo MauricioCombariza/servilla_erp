@@ -70,6 +70,13 @@ class ResumenNomina(BaseModel):
     costo_total: float
 
 
+class NominaParametroCreate(BaseModel):
+    parametro: str
+    valor: float
+    descripcion: str | None = None
+    vigencia_desde: date
+
+
 class NominaParametroRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -84,3 +91,71 @@ class NominaParametroUpdate(BaseModel):
     valor: float | None = None
     descripcion: str | None = None
     activo: bool | None = None
+
+
+class PagoOperativoCreate(BaseModel):
+    tipo: str
+    periodo_mes: int
+    periodo_anio: int
+    monto_total: float
+    fecha_vencimiento: date | None = None
+    observaciones: str | None = None
+
+
+class PagoOperativoRead(PagoOperativoCreate):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    estado: str
+    fecha_pago: date | None = None
+    created_at: datetime | None = None
+
+
+class MarcarPagadoRequest(BaseModel):
+    fecha_pago: date
+
+
+class EmpleadoResumen(BaseModel):
+    id: int
+    nombre_completo: str
+    cargo: str | None = None
+    salario_mensual: float
+    auxilio_no_salarial: float
+    auxilio_transporte: float
+    arl: float
+    eps: float
+    afp: float
+    caja_compensacion: float
+    prima: float
+    cesantias: float
+    int_cesantias: float
+    vacaciones: float
+    total_seguridad_social: float
+    total_provisiones: float
+    costo_total: float
+
+
+class ResumenNominaDetallado(BaseModel):
+    total_empleados: int
+    empleados: list[EmpleadoResumen]
+    total_salarios: float
+    total_aux_no_salarial: float
+    total_aux_transporte: float
+    total_nomina_base: float
+    total_arl: float
+    total_eps: float
+    total_afp: float
+    total_caja: float
+    total_seguridad_social: float
+    total_prima: float
+    total_cesantias: float
+    total_int_cesantias: float
+    total_vacaciones: float
+    total_provisiones: float
+    costo_total: float
+
+
+class PeriodoHistorico(BaseModel):
+    periodo_mes: int
+    periodo_anio: int
+    total_empleados: int
+    costo_total: float

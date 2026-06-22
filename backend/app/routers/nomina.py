@@ -1,17 +1,20 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_role
 from app.database import get_db
-from app.models.nomina import NominaEmpleado, NominaParametro, NominaProvision
+from app.models.nomina import NominaEmpleado, NominaParametro, NominaProvision, PagoOperativo
 from app.schemas.nomina import (
     CalcularProvisionesRequest,
+    EmpleadoResumen,
+    MarcarPagadoRequest,
     NominaEmpleadoCreate, NominaEmpleadoRead, NominaEmpleadoUpdate,
-    NominaParametroRead, NominaParametroUpdate,
-    NominaProvisionRead, ResumenNomina,
+    NominaParametroCreate, NominaParametroRead, NominaParametroUpdate,
+    NominaProvisionRead, PeriodoHistorico, ResumenNomina, ResumenNominaDetallado,
+    PagoOperativoCreate, PagoOperativoRead,
 )
 
 router = APIRouter(prefix="/api/nomina", tags=["nomina"])
@@ -27,7 +30,7 @@ _DEFAULTS = {
     "cesantias": 1 / 12,
     "int_cesantias": 0.12,
     "vacaciones": 1 / 24,
-    "auxilio_transporte": 162_000.0,
+    "auxilio_transporte": 249_095.0,
 }
 
 
@@ -41,6 +44,25 @@ async def _get_tasas(db: AsyncSession) -> dict:
     for r in rows:
         tasas[r.parametro] = float(r.valor)
     return tasas
+
+
+def _calc(sal: float, aux_t: float, aux_ns: float, tasas: dict) -> dict:
+    arl = round(sal * tasas["arl"], 2)
+    eps = round(sal * tasas["eps"], 2)
+    afp = round(sal * tasas["afp"], 2)
+    caja = round(sal * tasas["caja"], 2)
+    prima = round(sal * tasas["prima"], 2)
+    ces = round(sal * tasas["cesantias"], 2)
+    int_ces = round(ces * tasas["int_cesantias"], 2)
+    vac = round(sal * tasas["vacaciones"], 2)
+    ss = arl + eps + afp + caja
+    prov = prima + ces + int_ces + vac
+    return {
+        "arl": arl, "eps": eps, "afp": afp, "caja": caja,
+        "prima": prima, "cesantias": ces, "int_cesantias": int_ces, "vacaciones": vac,
+        "ss": ss, "prov": prov,
+        "costo": sal + aux_t + aux_ns + ss + prov,
+    }
 
 
 # ── Empleados ─────────────────────────────────────────────────────────────────
@@ -129,26 +151,13 @@ async def calcular_provisiones(
         sal = float(emp.salario_mensual)
         aux_t = float(tasas["auxilio_transporte"]) if emp.tiene_auxilio_transporte else 0.0
         aux_ns = float(emp.auxilio_no_salarial)
-
-        arl = round(sal * tasas["arl"], 2)
-        eps = round(sal * tasas["eps"], 2)
-        afp = round(sal * tasas["afp"], 2)
-        caja = round(sal * tasas["caja"], 2)
-        prima = round(sal * tasas["prima"], 2)
-        ces = round(sal * tasas["cesantias"], 2)
-        int_ces = round(ces * tasas["int_cesantias"], 2)
-        vac = round(sal * tasas["vacaciones"], 2)
-
-        ss = arl + eps + afp + caja
-        prov = prima + ces + int_ces + vac
-        costo_emp = sal + aux_t + aux_ns + ss + prov
+        c = _calc(sal, aux_t, aux_ns, tasas)
 
         total_salarios += sal
-        total_ss += ss
-        total_prov += prov
-        total_costo += costo_emp
+        total_ss += c["ss"]
+        total_prov += c["prov"]
+        total_costo += c["costo"]
 
-        # upsert provision
         existing = (
             await db.execute(
                 select(NominaProvision).where(
@@ -163,32 +172,31 @@ async def calcular_provisiones(
             existing.salario_base = sal
             existing.auxilio_transporte = aux_t
             existing.auxilio_no_salarial = aux_ns
-            existing.arl = arl
-            existing.eps = eps
-            existing.afp = afp
-            existing.caja_compensacion = caja
-            existing.prima = prima
-            existing.cesantias = ces
-            existing.int_cesantias = int_ces
-            existing.vacaciones = vac
+            existing.arl = c["arl"]
+            existing.eps = c["eps"]
+            existing.afp = c["afp"]
+            existing.caja_compensacion = c["caja"]
+            existing.prima = c["prima"]
+            existing.cesantias = c["cesantias"]
+            existing.int_cesantias = c["int_cesantias"]
+            existing.vacaciones = c["vacaciones"]
         else:
-            prov_rec = NominaProvision(
+            db.add(NominaProvision(
                 empleado_id=emp.id,
                 periodo_mes=body.periodo_mes,
                 periodo_anio=body.periodo_anio,
                 salario_base=sal,
                 auxilio_transporte=aux_t,
                 auxilio_no_salarial=aux_ns,
-                arl=arl,
-                eps=eps,
-                afp=afp,
-                caja_compensacion=caja,
-                prima=prima,
-                cesantias=ces,
-                int_cesantias=int_ces,
-                vacaciones=vac,
-            )
-            db.add(prov_rec)
+                arl=c["arl"],
+                eps=c["eps"],
+                afp=c["afp"],
+                caja_compensacion=c["caja"],
+                prima=c["prima"],
+                cesantias=c["cesantias"],
+                int_cesantias=c["int_cesantias"],
+                vacaciones=c["vacaciones"],
+            ))
 
     await db.commit()
 
@@ -201,6 +209,104 @@ async def calcular_provisiones(
         total_provisiones=round(total_prov, 2),
         costo_total=round(total_costo, 2),
     )
+
+
+@router.get("/resumen", response_model=ResumenNominaDetallado)
+async def get_resumen(db: AsyncSession = Depends(get_db), _=_auth):
+    empleados = (
+        await db.execute(
+            select(NominaEmpleado)
+            .where(NominaEmpleado.activo == True)  # noqa: E712
+            .order_by(NominaEmpleado.nombre_completo)
+        )
+    ).scalars().all()
+
+    tasas = await _get_tasas(db)
+    rows: list[EmpleadoResumen] = []
+    tots = {k: 0.0 for k in [
+        "sal", "aux_t", "aux_ns", "arl", "eps", "afp", "caja",
+        "prima", "cesantias", "int_cesantias", "vacaciones", "ss", "prov", "costo",
+    ]}
+
+    for emp in empleados:
+        sal = float(emp.salario_mensual)
+        aux_t = float(tasas["auxilio_transporte"]) if emp.tiene_auxilio_transporte else 0.0
+        aux_ns = float(emp.auxilio_no_salarial)
+        c = _calc(sal, aux_t, aux_ns, tasas)
+
+        rows.append(EmpleadoResumen(
+            id=emp.id,
+            nombre_completo=emp.nombre_completo,
+            cargo=emp.cargo,
+            salario_mensual=sal,
+            auxilio_no_salarial=aux_ns,
+            auxilio_transporte=aux_t,
+            arl=c["arl"], eps=c["eps"], afp=c["afp"], caja_compensacion=c["caja"],
+            prima=c["prima"], cesantias=c["cesantias"],
+            int_cesantias=c["int_cesantias"], vacaciones=c["vacaciones"],
+            total_seguridad_social=c["ss"],
+            total_provisiones=c["prov"],
+            costo_total=c["costo"],
+        ))
+        tots["sal"] += sal; tots["aux_t"] += aux_t; tots["aux_ns"] += aux_ns
+        for k in ["arl", "eps", "afp", "caja", "prima", "cesantias", "int_cesantias", "vacaciones", "ss", "prov", "costo"]:
+            tots[k] += c[k]
+
+    return ResumenNominaDetallado(
+        total_empleados=len(empleados),
+        empleados=rows,
+        total_salarios=round(tots["sal"], 2),
+        total_aux_no_salarial=round(tots["aux_ns"], 2),
+        total_aux_transporte=round(tots["aux_t"], 2),
+        total_nomina_base=round(tots["sal"] + tots["aux_ns"] + tots["aux_t"], 2),
+        total_arl=round(tots["arl"], 2),
+        total_eps=round(tots["eps"], 2),
+        total_afp=round(tots["afp"], 2),
+        total_caja=round(tots["caja"], 2),
+        total_seguridad_social=round(tots["ss"], 2),
+        total_prima=round(tots["prima"], 2),
+        total_cesantias=round(tots["cesantias"], 2),
+        total_int_cesantias=round(tots["int_cesantias"], 2),
+        total_vacaciones=round(tots["vacaciones"], 2),
+        total_provisiones=round(tots["prov"], 2),
+        costo_total=round(tots["costo"], 2),
+    )
+
+
+@router.get("/provisiones/historico", response_model=list[PeriodoHistorico])
+async def get_provisiones_historico(db: AsyncSession = Depends(get_db), _=_auth):
+    result = await db.execute(
+        select(
+            NominaProvision.periodo_anio,
+            NominaProvision.periodo_mes,
+            func.count(NominaProvision.empleado_id).label("total_empleados"),
+            func.sum(
+                func.coalesce(NominaProvision.salario_base, 0)
+                + func.coalesce(NominaProvision.auxilio_transporte, 0)
+                + func.coalesce(NominaProvision.auxilio_no_salarial, 0)
+                + func.coalesce(NominaProvision.arl, 0)
+                + func.coalesce(NominaProvision.eps, 0)
+                + func.coalesce(NominaProvision.afp, 0)
+                + func.coalesce(NominaProvision.caja_compensacion, 0)
+                + func.coalesce(NominaProvision.prima, 0)
+                + func.coalesce(NominaProvision.cesantias, 0)
+                + func.coalesce(NominaProvision.int_cesantias, 0)
+                + func.coalesce(NominaProvision.vacaciones, 0)
+            ).label("costo_total"),
+        )
+        .group_by(NominaProvision.periodo_anio, NominaProvision.periodo_mes)
+        .order_by(NominaProvision.periodo_anio.desc(), NominaProvision.periodo_mes.desc())
+        .limit(12)
+    )
+    return [
+        PeriodoHistorico(
+            periodo_mes=r.periodo_mes,
+            periodo_anio=r.periodo_anio,
+            total_empleados=r.total_empleados,
+            costo_total=float(r.costo_total),
+        )
+        for r in result.all()
+    ]
 
 
 # ── Parámetros ────────────────────────────────────────────────────────────────
@@ -219,11 +325,11 @@ async def list_parametros(db: AsyncSession = Depends(get_db), _=_auth):
     status_code=status.HTTP_201_CREATED,
 )
 async def create_parametro(
-    body: NominaParametroRead,
+    body: NominaParametroCreate,
     db: AsyncSession = Depends(get_db),
     _=_auth,
 ):
-    p = NominaParametro(**body.model_dump(exclude={"id"}))
+    p = NominaParametro(**body.model_dump())
     db.add(p)
     await db.commit()
     await db.refresh(p)
@@ -246,3 +352,70 @@ async def update_parametro(
     await db.commit()
     await db.refresh(p)
     return p
+
+
+# ── Pagos Operativos ──────────────────────────────────────────────────────────
+
+@router.get("/pagos", response_model=list[PagoOperativoRead])
+async def list_pagos(
+    mes: int | None = None,
+    anio: int | None = None,
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    q = select(PagoOperativo).order_by(
+        PagoOperativo.periodo_anio.desc(),
+        PagoOperativo.periodo_mes.desc(),
+        PagoOperativo.tipo,
+    )
+    if mes is not None:
+        q = q.where(PagoOperativo.periodo_mes == mes)
+    if anio is not None:
+        q = q.where(PagoOperativo.periodo_anio == anio)
+    result = await db.execute(q)
+    return result.scalars().all()
+
+
+@router.post("/pagos", response_model=PagoOperativoRead, status_code=status.HTTP_201_CREATED)
+async def upsert_pago(body: PagoOperativoCreate, db: AsyncSession = Depends(get_db), _=_auth):
+    existing = (
+        await db.execute(
+            select(PagoOperativo).where(
+                PagoOperativo.tipo == body.tipo,
+                PagoOperativo.periodo_mes == body.periodo_mes,
+                PagoOperativo.periodo_anio == body.periodo_anio,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if existing:
+        existing.monto_total = body.monto_total
+        existing.fecha_vencimiento = body.fecha_vencimiento
+        existing.observaciones = body.observaciones
+        await db.commit()
+        await db.refresh(existing)
+        return existing
+
+    pago = PagoOperativo(**body.model_dump())
+    db.add(pago)
+    await db.commit()
+    await db.refresh(pago)
+    return pago
+
+
+@router.put("/pagos/{pago_id}/marcar-pagado", response_model=PagoOperativoRead)
+async def marcar_pagado(
+    pago_id: int,
+    body: MarcarPagadoRequest,
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    result = await db.execute(select(PagoOperativo).where(PagoOperativo.id == pago_id))
+    pago = result.scalar_one_or_none()
+    if pago is None:
+        raise HTTPException(status_code=404, detail="Pago no encontrado")
+    pago.estado = "pagado"
+    pago.fecha_pago = body.fecha_pago
+    await db.commit()
+    await db.refresh(pago)
+    return pago

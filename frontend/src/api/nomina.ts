@@ -1,8 +1,12 @@
 import api from "./client";
 import type {
   NominaEmpleado,
+  NominaParametro,
   NominaProvision,
+  PagoOperativo,
+  PeriodoHistorico,
   ResumenNomina,
+  ResumenNominaDetallado,
 } from "@/types/domain";
 
 export const nominaApi = {
@@ -22,4 +26,28 @@ export const nominaApi = {
 
   calcularProvisiones: (periodo_mes: number, periodo_anio: number) =>
     api.post<ResumenNomina>("/nomina/provisiones/calcular", { periodo_mes, periodo_anio }),
+
+  getResumen: () =>
+    api.get<ResumenNominaDetallado>("/nomina/resumen"),
+
+  listHistorico: () =>
+    api.get<PeriodoHistorico[]>("/nomina/provisiones/historico"),
+
+  listParametros: () =>
+    api.get<NominaParametro[]>("/nomina/parametros"),
+
+  createParametro: (data: { parametro: string; valor: number; descripcion?: string; vigencia_desde: string }) =>
+    api.post<NominaParametro>("/nomina/parametros", data),
+
+  updateParametro: (id: number, data: { valor?: number; descripcion?: string; activo?: boolean }) =>
+    api.put<NominaParametro>(`/nomina/parametros/${id}`, data),
+
+  listPagos: (params?: { mes?: number; anio?: number }) =>
+    api.get<PagoOperativo[]>("/nomina/pagos", { params }),
+
+  upsertPago: (data: Omit<PagoOperativo, "id" | "estado" | "fecha_pago" | "created_at">) =>
+    api.post<PagoOperativo>("/nomina/pagos", data),
+
+  marcarPagado: (id: number, fecha_pago: string) =>
+    api.put<PagoOperativo>(`/nomina/pagos/${id}/marcar-pagado`, { fecha_pago }),
 };

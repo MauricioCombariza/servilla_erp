@@ -229,6 +229,75 @@ export interface ResumenNomina {
   costo_total: number;
 }
 
+export interface NominaParametro {
+  id: number;
+  parametro: string;
+  valor: number;
+  descripcion: string | null;
+  vigencia_desde: string;
+  activo: boolean;
+}
+
+export interface PagoOperativo {
+  id: number;
+  tipo: string;
+  periodo_mes: number;
+  periodo_anio: number;
+  monto_total: number;
+  fecha_vencimiento: string | null;
+  estado: "pendiente" | "pagado";
+  fecha_pago: string | null;
+  observaciones: string | null;
+  created_at: string | null;
+}
+
+export interface EmpleadoResumen {
+  id: number;
+  nombre_completo: string;
+  cargo: string | null;
+  salario_mensual: number;
+  auxilio_no_salarial: number;
+  auxilio_transporte: number;
+  arl: number;
+  eps: number;
+  afp: number;
+  caja_compensacion: number;
+  prima: number;
+  cesantias: number;
+  int_cesantias: number;
+  vacaciones: number;
+  total_seguridad_social: number;
+  total_provisiones: number;
+  costo_total: number;
+}
+
+export interface ResumenNominaDetallado {
+  total_empleados: number;
+  empleados: EmpleadoResumen[];
+  total_salarios: number;
+  total_aux_no_salarial: number;
+  total_aux_transporte: number;
+  total_nomina_base: number;
+  total_arl: number;
+  total_eps: number;
+  total_afp: number;
+  total_caja: number;
+  total_seguridad_social: number;
+  total_prima: number;
+  total_cesantias: number;
+  total_int_cesantias: number;
+  total_vacaciones: number;
+  total_provisiones: number;
+  costo_total: number;
+}
+
+export interface PeriodoHistorico {
+  periodo_mes: number;
+  periodo_anio: number;
+  total_empleados: number;
+  costo_total: number;
+}
+
 // ── Labores ───────────────────────────────────────────────────────────────────
 
 export interface RegistroHoras {
