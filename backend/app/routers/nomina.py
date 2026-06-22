@@ -1,7 +1,7 @@
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_role
@@ -44,6 +44,12 @@ async def _get_tasas(db: AsyncSession) -> dict:
     for r in rows:
         tasas[r.parametro] = float(r.valor)
     return tasas
+
+
+def _ultimo_dia_mes(mes: int, anio: int) -> date:
+    if mes == 12:
+        return date(anio + 1, 1, 1) - timedelta(days=1)
+    return date(anio, mes + 1, 1) - timedelta(days=1)
 
 
 def _calc(sal: float, aux_t: float, aux_ns: float, tasas: dict) -> dict:
@@ -132,14 +138,21 @@ async def list_provisiones(
 async def calcular_provisiones(
     body: CalcularProvisionesRequest, db: AsyncSession = Depends(get_db), _=_auth
 ):
+    corte = _ultimo_dia_mes(body.periodo_mes, body.periodo_anio)
     empleados = (
         await db.execute(
-            select(NominaEmpleado).where(NominaEmpleado.activo == True)  # noqa: E712
+            select(NominaEmpleado).where(
+                NominaEmpleado.activo == True,  # noqa: E712
+                or_(
+                    NominaEmpleado.fecha_ingreso == None,  # noqa: E711
+                    NominaEmpleado.fecha_ingreso <= corte,
+                ),
+            )
         )
     ).scalars().all()
 
     if not empleados:
-        raise HTTPException(status_code=400, detail="No hay empleados activos")
+        raise HTTPException(status_code=400, detail="No hay empleados activos para este período")
 
     tasas = await _get_tasas(db)
     total_salarios = 0.0
