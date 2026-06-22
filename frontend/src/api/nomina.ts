@@ -50,4 +50,10 @@ export const nominaApi = {
 
   marcarPagado: (id: number, fecha_pago: string) =>
     api.put<PagoOperativo>(`/nomina/pagos/${id}/marcar-pagado`, { fecha_pago }),
+
+  deleteProvisiones: (mes: number, anio: number) =>
+    api.delete(`/nomina/provisiones`, { params: { mes, anio } }),
+
+  deleteEmpleado: (id: number) =>
+    api.delete(`/nomina/empleados/${id}`),
 };

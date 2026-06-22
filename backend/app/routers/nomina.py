@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_role
@@ -160,6 +160,15 @@ async def calcular_provisiones(
     total_prov = 0.0
     total_costo = 0.0
 
+    # Borra todas las provisiones del período para que empleados que ya no
+    # califican (ej. contratados después del período) queden eliminados.
+    await db.execute(
+        delete(NominaProvision).where(
+            NominaProvision.periodo_mes == body.periodo_mes,
+            NominaProvision.periodo_anio == body.periodo_anio,
+        )
+    )
+
     for emp in empleados:
         sal = float(emp.salario_mensual)
         aux_t = float(tasas["auxilio_transporte"]) if emp.tiene_auxilio_transporte else 0.0
@@ -171,45 +180,22 @@ async def calcular_provisiones(
         total_prov += c["prov"]
         total_costo += c["costo"]
 
-        existing = (
-            await db.execute(
-                select(NominaProvision).where(
-                    NominaProvision.empleado_id == emp.id,
-                    NominaProvision.periodo_mes == body.periodo_mes,
-                    NominaProvision.periodo_anio == body.periodo_anio,
-                )
-            )
-        ).scalar_one_or_none()
-
-        if existing:
-            existing.salario_base = sal
-            existing.auxilio_transporte = aux_t
-            existing.auxilio_no_salarial = aux_ns
-            existing.arl = c["arl"]
-            existing.eps = c["eps"]
-            existing.afp = c["afp"]
-            existing.caja_compensacion = c["caja"]
-            existing.prima = c["prima"]
-            existing.cesantias = c["cesantias"]
-            existing.int_cesantias = c["int_cesantias"]
-            existing.vacaciones = c["vacaciones"]
-        else:
-            db.add(NominaProvision(
-                empleado_id=emp.id,
-                periodo_mes=body.periodo_mes,
-                periodo_anio=body.periodo_anio,
-                salario_base=sal,
-                auxilio_transporte=aux_t,
-                auxilio_no_salarial=aux_ns,
-                arl=c["arl"],
-                eps=c["eps"],
-                afp=c["afp"],
-                caja_compensacion=c["caja"],
-                prima=c["prima"],
-                cesantias=c["cesantias"],
-                int_cesantias=c["int_cesantias"],
-                vacaciones=c["vacaciones"],
-            ))
+        db.add(NominaProvision(
+            empleado_id=emp.id,
+            periodo_mes=body.periodo_mes,
+            periodo_anio=body.periodo_anio,
+            salario_base=sal,
+            auxilio_transporte=aux_t,
+            auxilio_no_salarial=aux_ns,
+            arl=c["arl"],
+            eps=c["eps"],
+            afp=c["afp"],
+            caja_compensacion=c["caja"],
+            prima=c["prima"],
+            cesantias=c["cesantias"],
+            int_cesantias=c["int_cesantias"],
+            vacaciones=c["vacaciones"],
+        ))
 
     await db.commit()
 
@@ -222,6 +208,37 @@ async def calcular_provisiones(
         total_provisiones=round(total_prov, 2),
         costo_total=round(total_costo, 2),
     )
+
+
+@router.delete("/provisiones", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_provisiones_periodo(
+    mes: int,
+    anio: int,
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    await db.execute(
+        delete(NominaProvision).where(
+            NominaProvision.periodo_mes == mes,
+            NominaProvision.periodo_anio == anio,
+        )
+    )
+    await db.commit()
+
+
+@router.delete("/empleados/{empleado_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_empleado(
+    empleado_id: int, db: AsyncSession = Depends(get_db), _=_auth
+):
+    result = await db.execute(select(NominaEmpleado).where(NominaEmpleado.id == empleado_id))
+    emp = result.scalar_one_or_none()
+    if emp is None:
+        raise HTTPException(status_code=404, detail="Empleado no encontrado")
+    await db.execute(
+        delete(NominaProvision).where(NominaProvision.empleado_id == empleado_id)
+    )
+    await db.delete(emp)
+    await db.commit()
 
 
 @router.get("/resumen", response_model=ResumenNominaDetallado)

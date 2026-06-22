@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Pencil, Calculator, CheckCircle, Clock, AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
+import { Plus, Pencil, Trash2, Calculator, CheckCircle, Clock, AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
 import { nominaApi } from "@/api/nomina";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
 import { Badge } from "@/components/ui/Badge";
@@ -79,6 +79,14 @@ export function NominaPage() {
       setCalcResult(
         `${res.data.total_empleados} empleados — costo total: $${fmt.format(res.data.costo_total)}`
       );
+    },
+  });
+
+  const borrarPeriodo = useMutation({
+    mutationFn: () => nominaApi.deleteProvisiones(mes, anio),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["nomina-provisiones"] });
+      qc.invalidateQueries({ queryKey: ["nomina-historico"] });
     },
   });
 
@@ -227,6 +235,11 @@ export function NominaPage() {
           loading={loadingProv}
           historico={historico}
           loadingHistorico={loadingHistorico}
+          onBorrarPeriodo={() => {
+            if (confirm(`¿Borrar todas las provisiones de ${MESES[mes - 1]} ${anio}?`))
+              borrarPeriodo.mutate();
+          }}
+          borrando={borrarPeriodo.isPending}
         />
       )}
 
@@ -245,6 +258,13 @@ export function NominaPage() {
           onSaved={() => {
             qc.invalidateQueries({ queryKey: ["nomina-empleados"] });
             qc.invalidateQueries({ queryKey: ["nomina-resumen"] });
+            setShowForm(false);
+            setEditing(null);
+          }}
+          onDeleted={() => {
+            qc.invalidateQueries({ queryKey: ["nomina-empleados"] });
+            qc.invalidateQueries({ queryKey: ["nomina-resumen"] });
+            qc.invalidateQueries({ queryKey: ["nomina-historico"] });
             setShowForm(false);
             setEditing(null);
           }}
@@ -391,12 +411,16 @@ function ProvisionesTab({
   loading,
   historico,
   loadingHistorico,
+  onBorrarPeriodo,
+  borrando,
 }: {
   provisiones: NominaProvision[];
   empleados: NominaEmpleado[];
   loading: boolean;
   historico: PeriodoHistorico[];
   loadingHistorico: boolean;
+  onBorrarPeriodo: () => void;
+  borrando: boolean;
 }) {
   const [showHistorico, setShowHistorico] = useState(false);
 
@@ -421,7 +445,7 @@ function ProvisionesTab({
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-3 gap-4 mb-6">
+          <div className="grid grid-cols-3 gap-4 mb-4">
             {[
               { label: "Total salarios", value: totales.salario },
               { label: "Seguridad social", value: totales.ss },
@@ -432,6 +456,15 @@ function ProvisionesTab({
                 <p className="text-xl font-semibold text-gray-900 mt-1">${fmt.format(m.value)}</p>
               </div>
             ))}
+          </div>
+          <div className="flex justify-end mb-4">
+            <button
+              onClick={onBorrarPeriodo}
+              disabled={borrando}
+              className="flex items-center gap-1.5 text-xs text-red-600 hover:text-red-800 border border-red-200 hover:bg-red-50 px-3 py-1.5 rounded-lg disabled:opacity-60 transition-colors"
+            >
+              <Trash2 size={13} /> {borrando ? "Borrando..." : "Borrar período"}
+            </button>
           </div>
           <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto mb-6">
             <table className="w-full text-sm">
@@ -932,10 +965,12 @@ function EmpleadoForm({
   initial,
   onClose,
   onSaved,
+  onDeleted,
 }: {
   initial: NominaEmpleado | null;
   onClose: () => void;
   onSaved: () => void;
+  onDeleted?: () => void;
 }) {
   const [form, setForm] = useState({
     nombre_completo: initial?.nombre_completo ?? "",
@@ -948,6 +983,7 @@ function EmpleadoForm({
     activo: initial?.activo ?? true,
   });
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -967,6 +1003,18 @@ function EmpleadoForm({
       onSaved();
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!initial) return;
+    if (!confirm(`¿Eliminar a ${initial.nombre_completo}? Se borrarán también todas sus provisiones.`)) return;
+    setDeleting(true);
+    try {
+      await nominaApi.deleteEmpleado(initial.id);
+      onDeleted?.();
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -1064,17 +1112,29 @@ function EmpleadoForm({
               </label>
             </div>
           )}
-          <div className="flex justify-end gap-3 pt-2">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg">
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-4 py-2 text-sm bg-primary hover:bg-primary-hover text-white rounded-lg disabled:opacity-60"
-            >
-              {saving ? "Guardando..." : "Guardar"}
-            </button>
+          <div className="flex items-center justify-between pt-2">
+            {initial ? (
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleting}
+                className="flex items-center gap-1.5 text-sm text-red-600 hover:text-red-800 disabled:opacity-60"
+              >
+                <Trash2 size={14} /> {deleting ? "Eliminando..." : "Eliminar empleado"}
+              </button>
+            ) : <span />}
+            <div className="flex gap-3">
+              <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg">
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={saving}
+                className="px-4 py-2 text-sm bg-primary hover:bg-primary-hover text-white rounded-lg disabled:opacity-60"
+              >
+                {saving ? "Guardando..." : "Guardar"}
+              </button>
+            </div>
           </div>
         </form>
       </div>
