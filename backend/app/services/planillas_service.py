@@ -340,7 +340,7 @@ async def cambiar_precio_courier(
             text("""
                 WITH updated AS (
                     UPDATE seriales_gestion
-                    SET precio_mensajero = CASE ambito WHEN 'bogota' THEN :pl ELSE :pn END,
+                    SET precio_mensajero = CASE ambito WHEN 'bogota' THEN :pl::numeric ELSE :pn::numeric END,
                         editado_manualmente = TRUE
                     WHERE planilla = :planilla
                     RETURNING ambito
@@ -354,6 +354,20 @@ async def cambiar_precio_courier(
             {"pl": req.precio_local, "pn": req.precio_nacional, "planilla": planilla},
         )
     ).mappings().one()
+    await db.execute(
+        text("""
+            UPDATE personal
+            SET precio_local    = :pl,
+                precio_nacional = :pn
+            WHERE id = (
+                SELECT mensajero_id FROM seriales_gestion
+                WHERE planilla = :planilla AND mensajero_id IS NOT NULL
+                LIMIT 1
+            )
+            AND tipo_personal = 'courier_externo'
+        """),
+        {"pl": req.precio_local, "pn": req.precio_nacional, "planilla": planilla},
+    )
     await db.commit()
     return PrecioCourierResult(
         planilla=planilla,
@@ -551,6 +565,20 @@ async def precio_por_ciudades(
     )
     result = (await db.execute(sql, params)).mappings().one()
 
+    await db.execute(
+        text("""
+            UPDATE personal
+            SET precio_local    = :pl,
+                precio_nacional = :pn
+            WHERE id = (
+                SELECT mensajero_id FROM seriales_gestion
+                WHERE planilla = :planilla AND mensajero_id IS NOT NULL
+                LIMIT 1
+            )
+            AND tipo_personal = 'courier_externo'
+        """),
+        {"pl": req.precio_local, "pn": req.precio_nacional, "planilla": planilla},
+    )
     await db.commit()
     total = int(result["total"] or 0)
     local = int(result["local"] or 0)
