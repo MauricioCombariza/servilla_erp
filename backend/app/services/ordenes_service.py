@@ -148,10 +148,11 @@ _SERIAL_UPSERT = text("""
         precio_mensajero = EXCLUDED.precio_mensajero,
         origen           = EXCLUDED.origen
     WHERE seriales_gestion.estado = 'pendiente'
+      AND seriales_gestion.editado_manualmente = FALSE
 """)
 
 _SERIAL_EXISTS = (
-    text("SELECT serial, estado FROM seriales_gestion WHERE serial = ANY(:serials)")
+    text("SELECT serial, estado, editado_manualmente FROM seriales_gestion WHERE serial = ANY(:serials)")
     .bindparams(bindparam("serials", type_=ARRAY(String)))
 )
 
@@ -316,11 +317,12 @@ async def procesar_csv(
     # ── Paso 1b: resolver nuevos vs actualizados (1 query) ────────────────────
     sg_nuevos = 0
     sg_actualizados = 0
+    sg_bloqueados = 0
 
     if all_serial_params:
         incoming_serials = [p["serial"] for p in all_serial_params]
         rows = (await db.execute(_SERIAL_EXISTS, {"serials": incoming_serials})).fetchall()
-        existing_map = {r[0]: r[1] for r in rows}  # serial → estado actual
+        existing_map = {r[0]: (r[1], r[2]) for r in rows}  # serial → (estado, editado_manualmente)
 
         params_to_process: list[dict] = []
         for p in all_serial_params:
@@ -328,10 +330,12 @@ async def procesar_csv(
             if s not in existing_map:
                 sg_nuevos += 1
                 params_to_process.append(p)
-            elif existing_map[s] == "pendiente":
+            elif existing_map[s][0] == "pendiente" and not existing_map[s][1]:
                 sg_actualizados += 1
                 params_to_process.append(p)
-            # estado != pendiente → no-op (no se inserta ni actualiza)
+            elif existing_map[s][1]:  # editado_manualmente=True → planilla fija, no se toca
+                sg_bloqueados += 1
+            # else: estado != pendiente → no-op silencioso
 
         # ── Paso 1c: batch upsert seriales (1 round-trip) ─────────────────────
         if params_to_process:
@@ -425,15 +429,16 @@ async def procesar_csv(
     await db.commit()
     logger.info(
         "Carga masiva: órdenes_nuevas=%d actualizadas=%d "
-        "seriales_nuevos=%d actualizados=%d ignoradas=%d errores=%d",
+        "seriales_nuevos=%d actualizados=%d bloqueados=%d ignoradas=%d errores=%d",
         ordenes_nuevas, ordenes_actualizadas, sg_nuevos, sg_actualizados,
-        filas_ignoradas, len(errores),
+        sg_bloqueados, filas_ignoradas, len(errores),
     )
     return CargaMasivaResult(
         total_filas=total_filas,
         filas_ignoradas=filas_ignoradas,
         seriales_nuevos=sg_nuevos,
         seriales_actualizados=sg_actualizados,
+        seriales_bloqueados=sg_bloqueados,
         ordenes_nuevas=ordenes_nuevas,
         ordenes_actualizadas=ordenes_actualizadas,
         errores=errores[:50],

@@ -84,6 +84,7 @@ class CargaMasivaResult(BaseModel):
     filas_ignoradas: int
     seriales_nuevos: int
     seriales_actualizados: int
+    seriales_bloqueados: int = 0
     ordenes_nuevas: int
     ordenes_actualizadas: int
     errores: list[str]
