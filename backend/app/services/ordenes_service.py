@@ -98,15 +98,22 @@ async def _cargar_maestros(
 
     rows_per = (
         await db.execute(
-            select(Personal.id, Personal.codigo, Personal.nombre_completo, Personal.tipo_personal).where(
-                Personal.activo == True  # noqa: E712
-            )
+            select(
+                Personal.id,
+                Personal.codigo,
+                Personal.nombre_completo,
+                Personal.tipo_personal,
+                Personal.precio_local,
+                Personal.precio_nacional,
+            ).where(Personal.activo == True)  # noqa: E712
         )
     ).all()
     personal_by_code = {
         r.codigo.strip().upper(): {
-            'id':            r.id,
-            'tipo_personal': r.tipo_personal or 'mensajero',
+            'id':             r.id,
+            'tipo_personal':  r.tipo_personal or 'mensajero',
+            'precio_local':   float(r.precio_local   or 0),
+            'precio_nacional': float(r.precio_nacional or 0),
         }
         for r in rows_per if r.codigo
     }
@@ -299,6 +306,11 @@ async def procesar_csv(
         men_info     = personal_by_code.get(cod_men_val) if cod_men_val else None
         mensajero_id = men_info['id'] if men_info else None
         tipo_men     = men_info['tipo_personal'] if men_info else 'mensajero'
+        if tipo_men == 'courier_externo' and men_info:
+            precio_men = (
+                men_info['precio_local'] if ambito_val == 'bogota'
+                else men_info['precio_nacional']
+            )
         if tipo_men == 'courier_externo':
             planilla_val = str(fila["_planilla_col"]) if fila["_planilla_col"] else ""
         else:
