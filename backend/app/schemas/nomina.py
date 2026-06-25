@@ -159,3 +159,18 @@ class PeriodoHistorico(BaseModel):
     periodo_anio: int
     total_empleados: int
     costo_total: float
+
+
+class RosterAddRequest(BaseModel):
+    empleado_id: int
+    mes: int
+    anio: int
+
+
+class RosterEntryRead(BaseModel):
+    id: int
+    empleado_id: int
+    periodo_mes: int
+    periodo_anio: int
+    fecha_creacion: datetime | None = None
+    empleado: NominaEmpleadoRead

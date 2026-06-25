@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Pencil, Trash2, Calculator, CheckCircle, Clock, AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
+import { Plus, Pencil, Trash2, Calculator, CheckCircle, Clock, AlertTriangle, ChevronDown, ChevronRight, X, UserPlus } from "lucide-react";
 import { nominaApi } from "@/api/nomina";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
 import { Badge } from "@/components/ui/Badge";
@@ -12,6 +12,7 @@ import type {
   PagoOperativo,
   PeriodoHistorico,
   ResumenNominaDetallado,
+  RosterEntry,
 } from "@/types/domain";
 
 const fmt = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 });
@@ -240,6 +241,8 @@ export function NominaPage() {
               borrarPeriodo.mutate();
           }}
           borrando={borrarPeriodo.isPending}
+          mes={mes}
+          anio={anio}
         />
       )}
 
@@ -413,6 +416,8 @@ function ProvisionesTab({
   loadingHistorico,
   onBorrarPeriodo,
   borrando,
+  mes,
+  anio,
 }: {
   provisiones: NominaProvision[];
   empleados: NominaEmpleado[];
@@ -421,8 +426,47 @@ function ProvisionesTab({
   loadingHistorico: boolean;
   onBorrarPeriodo: () => void;
   borrando: boolean;
+  mes: number;
+  anio: number;
 }) {
+  const qc = useQueryClient();
   const [showHistorico, setShowHistorico] = useState(false);
+  const [selectedToAdd, setSelectedToAdd] = useState<number | "">("");
+  const [rosterError, setRosterError] = useState<string | null>(null);
+
+  const { data: roster = [], isLoading: loadingRoster } = useQuery({
+    queryKey: ["nomina-roster", mes, anio],
+    queryFn: () => nominaApi.getRoster(mes, anio).then((r) => r.data),
+  });
+
+  const invalidateRoster = () => qc.invalidateQueries({ queryKey: ["nomina-roster", mes, anio] });
+
+  const inicializar = useMutation({
+    mutationFn: () => nominaApi.inicializarRoster(mes, anio),
+    onSuccess: invalidateRoster,
+  });
+
+  const copiarAnterior = useMutation({
+    mutationFn: () => nominaApi.copiarMesAnterior(mes, anio),
+    onSuccess: () => { invalidateRoster(); setRosterError(null); },
+    onError: (e: unknown) => {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setRosterError(msg ?? "No hay roster definido en el mes anterior");
+    },
+  });
+
+  const remover = useMutation({
+    mutationFn: (entryId: number) => nominaApi.removeFromRoster(entryId),
+    onSuccess: invalidateRoster,
+  });
+
+  const agregar = useMutation({
+    mutationFn: (empleadoId: number) => nominaApi.addToRoster(empleadoId, mes, anio),
+    onSuccess: () => { invalidateRoster(); setSelectedToAdd(""); },
+  });
+
+  const rosterIds = new Set(roster.map((r: RosterEntry) => r.empleado_id));
+  const disponibles = empleados.filter((e) => e.activo && !rosterIds.has(e.id));
 
   if (loading) return <div className="text-center py-16 text-gray-500">Cargando...</div>;
 
@@ -439,6 +483,98 @@ function ProvisionesTab({
 
   return (
     <>
+      {/* ── Roster del período ── */}
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-blue-900">
+            Personal en nómina — {MESES[mes - 1]} {anio}
+            {!loadingRoster && (
+              <span className="ml-2 font-normal text-blue-600 text-xs">
+                ({roster.length} {roster.length === 1 ? "empleado" : "empleados"})
+              </span>
+            )}
+          </h3>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { setRosterError(null); copiarAnterior.mutate(); }}
+              disabled={copiarAnterior.isPending}
+              className="text-xs border border-blue-300 bg-white hover:bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg disabled:opacity-60 transition-colors"
+            >
+              {copiarAnterior.isPending ? "Copiando..." : "Copiar mes anterior"}
+            </button>
+            <button
+              onClick={() => inicializar.mutate()}
+              disabled={inicializar.isPending}
+              className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg disabled:opacity-60 transition-colors"
+            >
+              {inicializar.isPending ? "Inicializando..." : "Inicializar todos los activos"}
+            </button>
+          </div>
+        </div>
+
+        {rosterError && (
+          <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">
+            {rosterError}
+          </p>
+        )}
+
+        {loadingRoster ? (
+          <div className="text-xs text-blue-600 py-2">Cargando roster...</div>
+        ) : roster.length === 0 ? (
+          <p className="text-xs text-blue-600 py-2">
+            No hay personal en el roster de este período. Use "Inicializar" para agregar todos los empleados activos, o "Copiar mes anterior" para copiar el período previo.
+          </p>
+        ) : (
+          <div className="rounded-lg border border-blue-200 bg-white overflow-hidden mb-3">
+            <table className="w-full text-xs">
+              <tbody className="divide-y divide-blue-100">
+                {roster.map((r: RosterEntry) => (
+                  <tr key={r.id} className="flex items-center justify-between px-3 py-2 hover:bg-blue-50">
+                    <td className="font-medium text-gray-800 flex-1">{r.empleado.nombre_completo}</td>
+                    <td className="text-gray-500 w-40">{r.empleado.cargo ?? "—"}</td>
+                    <td>
+                      <button
+                        onClick={() => remover.mutate(r.id)}
+                        disabled={remover.isPending}
+                        className="text-red-400 hover:text-red-600 transition-colors disabled:opacity-40"
+                        title="Quitar del período"
+                      >
+                        <X size={14} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {disponibles.length > 0 && (
+          <div className="flex items-center gap-2 mt-2">
+            <select
+              value={selectedToAdd}
+              onChange={(e) => setSelectedToAdd(e.target.value ? +e.target.value : "")}
+              className="flex-1 border border-blue-300 rounded-lg px-3 py-1.5 text-xs bg-white"
+            >
+              <option value="">Seleccionar empleado para agregar...</option>
+              {disponibles.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.nombre_completo}{e.cargo ? ` — ${e.cargo}` : ""}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => selectedToAdd !== "" && agregar.mutate(+selectedToAdd)}
+              disabled={selectedToAdd === "" || agregar.isPending}
+              className="flex items-center gap-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg disabled:opacity-60 transition-colors whitespace-nowrap"
+            >
+              <UserPlus size={13} /> {agregar.isPending ? "Agregando..." : "Agregar al período"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ── Provisiones calculadas ── */}
       {provisiones.length === 0 ? (
         <div className="text-center py-12 text-gray-400">
           Sin provisiones para este período. Use "Calcular período" para generarlas.
@@ -494,7 +630,7 @@ function ProvisionesTab({
         </>
       )}
 
-      {/* Historial */}
+      {/* ── Historial ── */}
       <div className="bg-white rounded-xl border border-gray-200">
         <button
           onClick={() => setShowHistorico(!showHistorico)}

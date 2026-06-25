@@ -7,6 +7,7 @@ import type {
   PeriodoHistorico,
   ResumenNomina,
   ResumenNominaDetallado,
+  RosterEntry,
 } from "@/types/domain";
 
 export const nominaApi = {
@@ -56,4 +57,19 @@ export const nominaApi = {
 
   deleteEmpleado: (id: number) =>
     api.delete(`/nomina/empleados/${id}`),
+
+  getRoster: (mes: number, anio: number) =>
+    api.get<RosterEntry[]>("/nomina/roster", { params: { mes, anio } }),
+
+  addToRoster: (empleado_id: number, mes: number, anio: number) =>
+    api.post<RosterEntry>("/nomina/roster", { empleado_id, mes, anio }),
+
+  removeFromRoster: (entryId: number) =>
+    api.delete(`/nomina/roster/${entryId}`),
+
+  inicializarRoster: (mes: number, anio: number) =>
+    api.post<RosterEntry[]>("/nomina/roster/inicializar", null, { params: { mes, anio } }),
+
+  copiarMesAnterior: (mes: number, anio: number) =>
+    api.post<RosterEntry[]>("/nomina/roster/copiar-mes-anterior", null, { params: { mes, anio } }),
 };

@@ -298,6 +298,15 @@ export interface PeriodoHistorico {
   costo_total: number;
 }
 
+export interface RosterEntry {
+  id: number;
+  empleado_id: number;
+  periodo_mes: number;
+  periodo_anio: number;
+  fecha_creacion: string | null;
+  empleado: NominaEmpleado;
+}
+
 // ── Labores ───────────────────────────────────────────────────────────────────
 
 export interface RegistroHoras {

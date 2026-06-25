@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_role
 from app.database import get_db
-from app.models.nomina import NominaEmpleado, NominaParametro, NominaProvision, PagoOperativo
+from app.models.nomina import NominaEmpleado, NominaEmpleadoPeriodo, NominaParametro, NominaProvision, PagoOperativo
 from app.schemas.nomina import (
     CalcularProvisionesRequest,
     EmpleadoResumen,
@@ -15,6 +15,7 @@ from app.schemas.nomina import (
     NominaParametroCreate, NominaParametroRead, NominaParametroUpdate,
     NominaProvisionRead, PeriodoHistorico, ResumenNomina, ResumenNominaDetallado,
     PagoOperativoCreate, PagoOperativoRead,
+    RosterAddRequest, RosterEntryRead,
 )
 
 router = APIRouter(prefix="/api/nomina", tags=["nomina"])
@@ -69,6 +70,180 @@ def _calc(sal: float, aux_t: float, aux_ns: float, tasas: dict) -> dict:
         "ss": ss, "prov": prov,
         "costo": sal + aux_t + aux_ns + ss + prov,
     }
+
+
+# ── Roster helpers ────────────────────────────────────────────────────────────
+
+async def _build_roster(mes: int, anio: int, db: AsyncSession) -> list[RosterEntryRead]:
+    rows = (
+        await db.execute(
+            select(NominaEmpleadoPeriodo, NominaEmpleado)
+            .join(NominaEmpleado, NominaEmpleadoPeriodo.empleado_id == NominaEmpleado.id)
+            .where(
+                NominaEmpleadoPeriodo.periodo_mes == mes,
+                NominaEmpleadoPeriodo.periodo_anio == anio,
+            )
+            .order_by(NominaEmpleado.nombre_completo)
+        )
+    ).all()
+    return [
+        RosterEntryRead(
+            id=rp.id,
+            empleado_id=rp.empleado_id,
+            periodo_mes=rp.periodo_mes,
+            periodo_anio=rp.periodo_anio,
+            fecha_creacion=rp.fecha_creacion,
+            empleado=NominaEmpleadoRead.model_validate(re),
+        )
+        for rp, re in rows
+    ]
+
+
+# ── Roster endpoints ───────────────────────────────────────────────────────────
+
+@router.get("/roster", response_model=list[RosterEntryRead])
+async def get_roster(
+    mes: int,
+    anio: int,
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    return await _build_roster(mes, anio, db)
+
+
+@router.post("/roster/inicializar", response_model=list[RosterEntryRead])
+async def inicializar_roster(
+    mes: int,
+    anio: int,
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    activos = (
+        await db.execute(
+            select(NominaEmpleado).where(NominaEmpleado.activo == True)  # noqa: E712
+        )
+    ).scalars().all()
+
+    existing_ids = set(
+        (
+            await db.execute(
+                select(NominaEmpleadoPeriodo.empleado_id).where(
+                    NominaEmpleadoPeriodo.periodo_mes == mes,
+                    NominaEmpleadoPeriodo.periodo_anio == anio,
+                )
+            )
+        ).scalars().all()
+    )
+
+    for emp in activos:
+        if emp.id not in existing_ids:
+            db.add(NominaEmpleadoPeriodo(empleado_id=emp.id, periodo_mes=mes, periodo_anio=anio))
+    await db.commit()
+    return await _build_roster(mes, anio, db)
+
+
+@router.post("/roster/copiar-mes-anterior", response_model=list[RosterEntryRead])
+async def copiar_roster_mes_anterior(
+    mes: int,
+    anio: int,
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    mes_ant = 12 if mes == 1 else mes - 1
+    anio_ant = anio - 1 if mes == 1 else anio
+
+    prev_ids = set(
+        (
+            await db.execute(
+                select(NominaEmpleadoPeriodo.empleado_id).where(
+                    NominaEmpleadoPeriodo.periodo_mes == mes_ant,
+                    NominaEmpleadoPeriodo.periodo_anio == anio_ant,
+                )
+            )
+        ).scalars().all()
+    )
+
+    if not prev_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No hay roster definido para {mes_ant}/{anio_ant}",
+        )
+
+    existing_ids = set(
+        (
+            await db.execute(
+                select(NominaEmpleadoPeriodo.empleado_id).where(
+                    NominaEmpleadoPeriodo.periodo_mes == mes,
+                    NominaEmpleadoPeriodo.periodo_anio == anio,
+                )
+            )
+        ).scalars().all()
+    )
+
+    for emp_id in prev_ids:
+        if emp_id not in existing_ids:
+            db.add(NominaEmpleadoPeriodo(empleado_id=emp_id, periodo_mes=mes, periodo_anio=anio))
+    await db.commit()
+    return await _build_roster(mes, anio, db)
+
+
+@router.post("/roster", response_model=RosterEntryRead, status_code=status.HTTP_201_CREATED)
+async def add_to_roster(
+    body: RosterAddRequest,
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    emp = (
+        await db.execute(select(NominaEmpleado).where(NominaEmpleado.id == body.empleado_id))
+    ).scalar_one_or_none()
+    if emp is None:
+        raise HTTPException(status_code=404, detail="Empleado no encontrado")
+
+    existing = (
+        await db.execute(
+            select(NominaEmpleadoPeriodo).where(
+                NominaEmpleadoPeriodo.empleado_id == body.empleado_id,
+                NominaEmpleadoPeriodo.periodo_mes == body.mes,
+                NominaEmpleadoPeriodo.periodo_anio == body.anio,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=409, detail="El empleado ya está en el roster de este período")
+
+    entry = NominaEmpleadoPeriodo(
+        empleado_id=body.empleado_id,
+        periodo_mes=body.mes,
+        periodo_anio=body.anio,
+    )
+    db.add(entry)
+    await db.commit()
+    await db.refresh(entry)
+    return RosterEntryRead(
+        id=entry.id,
+        empleado_id=entry.empleado_id,
+        periodo_mes=entry.periodo_mes,
+        periodo_anio=entry.periodo_anio,
+        fecha_creacion=entry.fecha_creacion,
+        empleado=NominaEmpleadoRead.model_validate(emp),
+    )
+
+
+@router.delete("/roster/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_from_roster(
+    entry_id: int,
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    entry = (
+        await db.execute(
+            select(NominaEmpleadoPeriodo).where(NominaEmpleadoPeriodo.id == entry_id)
+        )
+    ).scalar_one_or_none()
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Entrada de roster no encontrada")
+    await db.delete(entry)
+    await db.commit()
 
 
 # ── Empleados ─────────────────────────────────────────────────────────────────
@@ -139,17 +314,42 @@ async def calcular_provisiones(
     body: CalcularProvisionesRequest, db: AsyncSession = Depends(get_db), _=_auth
 ):
     corte = _ultimo_dia_mes(body.periodo_mes, body.periodo_anio)
-    empleados = (
+
+    roster_count = (
         await db.execute(
-            select(NominaEmpleado).where(
-                NominaEmpleado.activo == True,  # noqa: E712
-                or_(
-                    NominaEmpleado.fecha_ingreso == None,  # noqa: E711
-                    NominaEmpleado.fecha_ingreso <= corte,
-                ),
+            select(func.count(NominaEmpleadoPeriodo.id)).where(
+                NominaEmpleadoPeriodo.periodo_mes == body.periodo_mes,
+                NominaEmpleadoPeriodo.periodo_anio == body.periodo_anio,
             )
         )
-    ).scalars().all()
+    ).scalar() or 0
+
+    if roster_count > 0:
+        empleados = (
+            await db.execute(
+                select(NominaEmpleado)
+                .join(
+                    NominaEmpleadoPeriodo,
+                    NominaEmpleado.id == NominaEmpleadoPeriodo.empleado_id,
+                )
+                .where(
+                    NominaEmpleadoPeriodo.periodo_mes == body.periodo_mes,
+                    NominaEmpleadoPeriodo.periodo_anio == body.periodo_anio,
+                )
+            )
+        ).scalars().all()
+    else:
+        empleados = (
+            await db.execute(
+                select(NominaEmpleado).where(
+                    NominaEmpleado.activo == True,  # noqa: E712
+                    or_(
+                        NominaEmpleado.fecha_ingreso == None,  # noqa: E711
+                        NominaEmpleado.fecha_ingreso <= corte,
+                    ),
+                )
+            )
+        ).scalars().all()
 
     if not empleados:
         raise HTTPException(status_code=400, detail="No hay empleados activos para este período")
