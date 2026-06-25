@@ -13,7 +13,7 @@ from app.schemas.nomina import (
     MarcarPagadoRequest,
     NominaEmpleadoCreate, NominaEmpleadoRead, NominaEmpleadoUpdate,
     NominaParametroCreate, NominaParametroRead, NominaParametroUpdate,
-    NominaProvisionRead, PeriodoHistorico, ResumenNomina, ResumenNominaDetallado,
+    NominaProvisionRead, NominaResumenPeriodo, PeriodoHistorico, ResumenNomina, ResumenNominaDetallado,
     PagoOperativoCreate, PagoOperativoRead,
     RosterAddRequest, RosterEntryRead,
 )
@@ -537,6 +537,46 @@ async def get_provisiones_historico(db: AsyncSession = Depends(get_db), _=_auth)
         )
         for r in result.all()
     ]
+
+
+@router.get("/provisiones/total", response_model=NominaResumenPeriodo)
+async def get_provisiones_total(
+    anio: int,
+    mes: int | None = None,
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    q = (
+        select(
+            func.count(NominaProvision.empleado_id).label("total_empleados"),
+            func.coalesce(
+                func.sum(
+                    func.coalesce(NominaProvision.salario_base, 0)
+                    + func.coalesce(NominaProvision.auxilio_transporte, 0)
+                    + func.coalesce(NominaProvision.auxilio_no_salarial, 0)
+                    + func.coalesce(NominaProvision.arl, 0)
+                    + func.coalesce(NominaProvision.eps, 0)
+                    + func.coalesce(NominaProvision.afp, 0)
+                    + func.coalesce(NominaProvision.caja_compensacion, 0)
+                    + func.coalesce(NominaProvision.prima, 0)
+                    + func.coalesce(NominaProvision.cesantias, 0)
+                    + func.coalesce(NominaProvision.int_cesantias, 0)
+                    + func.coalesce(NominaProvision.vacaciones, 0)
+                ),
+                0,
+            ).label("costo_total"),
+        )
+        .where(NominaProvision.periodo_anio == anio)
+    )
+    if mes is not None:
+        q = q.where(NominaProvision.periodo_mes == mes)
+    row = (await db.execute(q)).one()
+    return NominaResumenPeriodo(
+        anio=anio,
+        mes=mes,
+        total_empleados=row.total_empleados or 0,
+        costo_total=float(row.costo_total or 0),
+    )
 
 
 # ── Parámetros ────────────────────────────────────────────────────────────────

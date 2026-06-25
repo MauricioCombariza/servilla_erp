@@ -307,6 +307,13 @@ export interface RosterEntry {
   empleado: NominaEmpleado;
 }
 
+export interface NominaResumenPeriodo {
+  anio: number;
+  mes: number | null;
+  total_empleados: number;
+  costo_total: number;
+}
+
 // ── Labores ───────────────────────────────────────────────────────────────────
 
 export interface RegistroHoras {

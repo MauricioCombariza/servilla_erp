@@ -3,6 +3,7 @@ import type {
   NominaEmpleado,
   NominaParametro,
   NominaProvision,
+  NominaResumenPeriodo,
   PagoOperativo,
   PeriodoHistorico,
   ResumenNomina,
@@ -72,4 +73,9 @@ export const nominaApi = {
 
   copiarMesAnterior: (mes: number, anio: number) =>
     api.post<RosterEntry[]>("/nomina/roster/copiar-mes-anterior", null, { params: { mes, anio } }),
+
+  getProvisionesTotal: (anio: number, mes?: number) =>
+    api.get<NominaResumenPeriodo>("/nomina/provisiones/total", {
+      params: mes !== undefined ? { anio, mes } : { anio },
+    }),
 };

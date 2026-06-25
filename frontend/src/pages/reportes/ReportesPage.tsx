@@ -7,6 +7,7 @@ import {
 import { Download } from "lucide-react";
 import { reportesApi } from "@/api/reportes";
 import { clientesApi } from "@/api/clientes";
+import { nominaApi } from "@/api/nomina";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
 
 // ── Utilidades ────────────────────────────────────────────────────────────────
@@ -64,6 +65,69 @@ function MetricCards({ items }: { items: { label: string; value: string; sub?: s
   );
 }
 
+// ── P&L Summary ───────────────────────────────────────────────────────────────
+function PLSummary({
+  totalMar, nominaData, mes, anio,
+}: {
+  totalMar: number;
+  nominaData: { total_empleados: number; costo_total: number } | undefined;
+  mes: number | undefined;
+  anio: number;
+}) {
+  const utilidad = nominaData != null ? totalMar - nominaData.costo_total : null;
+  const pctU = utilidad !== null && totalMar ? (utilidad / totalMar) * 100 : null;
+  return (
+    <div className="mt-5 bg-white rounded-xl border border-gray-200 p-5">
+      <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4">
+        Resultado operacional — {mes ? MESES[mes] : "Año completo"} {anio}
+      </h3>
+      <div className="space-y-2">
+        <div className="flex justify-between items-center py-2 border-b border-gray-100">
+          <span className="text-sm text-gray-600">
+            Margen bruto
+            <span className="text-xs text-gray-400 ml-1">(ingresos − costo mensajero)</span>
+          </span>
+          <span className="text-sm font-semibold text-gray-900">{fmt(totalMar)}</span>
+        </div>
+        {nominaData != null ? (
+          <div className="flex justify-between items-center py-2 border-b border-gray-100">
+            <span className="text-sm text-gray-600">
+              Gasto nómina
+              {nominaData.total_empleados > 0 && (
+                <span className="text-xs text-gray-400 ml-1">
+                  ({nominaData.total_empleados} empleados{!mes ? " — año completo" : ""})
+                </span>
+              )}
+            </span>
+            <span className="text-sm font-semibold text-orange-600">
+              {nominaData.costo_total > 0 ? `− ${fmt(nominaData.costo_total)}` : fmt(0)}
+            </span>
+          </div>
+        ) : (
+          <div className="py-2 border-b border-gray-100 text-xs text-gray-400">
+            Sin provisiones de nómina calculadas para este período
+          </div>
+        )}
+        {utilidad !== null && (
+          <div className="flex justify-between items-center py-2.5 bg-gray-50 rounded-lg px-3">
+            <span className="text-sm font-semibold text-gray-800">Utilidad neta estimada</span>
+            <div className="flex items-baseline gap-2">
+              <span className={`text-base font-bold ${utilidad >= 0 ? "text-green-700" : "text-red-600"}`}>
+                {fmt(utilidad)}
+              </span>
+              {pctU !== null && (
+                <span className={`text-xs font-medium ${utilidad >= 0 ? "text-green-600" : "text-red-500"}`}>
+                  ({pctU.toFixed(1)}%)
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Tab 1: Operacional ────────────────────────────────────────────────────────
 function TabOperacional() {
   const anioActual = new Date().getFullYear();
@@ -73,6 +137,12 @@ function TabOperacional() {
   const { data = [], isLoading } = useQuery({
     queryKey: ["reporte-operacional", anio, mes],
     queryFn: () => reportesApi.operacional(anio, mes).then((r) => r.data),
+  });
+
+  const { data: nominaData } = useQuery({
+    queryKey: ["nomina-provisiones-total", anio, mes],
+    queryFn: () => nominaApi.getProvisionesTotal(anio, mes).then((r) => r.data),
+    retry: false,
   });
 
   const totalSer = data.reduce((s, r) => s + r.total_seriales, 0);
@@ -136,6 +206,9 @@ function TabOperacional() {
           </table>
           {!data.length && <div className="text-center py-12 text-gray-400">Sin datos para este período</div>}
         </div>
+      )}
+      {data.length > 0 && (
+        <PLSummary totalMar={totalMar} nominaData={nominaData} mes={mes} anio={anio} />
       )}
     </div>
   );
