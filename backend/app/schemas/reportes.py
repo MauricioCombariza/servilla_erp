@@ -53,3 +53,10 @@ class TendenciaMesRow(BaseModel):
     devoluciones: int
     ingreso_estimado: float
     costo_mensajero: float
+
+
+class PLMensualRow(BaseModel):
+    mes: int
+    margen_clientes: float
+    gasto_nomina: float
+    utilidad_neta: float

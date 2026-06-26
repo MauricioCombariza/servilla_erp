@@ -10,6 +10,7 @@ from app.database import get_db
 from app.schemas.reportes import (
     FacturacionClienteRow,
     OrdenReporteRow,
+    PLMensualRow,
     ResumenClienteRow,
     ResumenMensajeroRow,
     TendenciaMesRow,
@@ -82,7 +83,60 @@ async def get_operacional(
     return result
 
 
-# ── 2. Gestiones por mensajero ────────────────────────────────────────────────
+# ── 2. P&L mensual (margen clientes − gasto nómina) ──────────────────────────
+
+@router.get("/pl-mensual", response_model=list[PLMensualRow])
+async def get_pl_mensual(
+    anio: int = Query(default=2026),
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    margen_rows = (await db.execute(
+        text("""
+            SELECT
+                EXTRACT(MONTH FROM f_emi)::int AS mes,
+                COALESCE(SUM(precio_cliente - precio_mensajero), 0) AS margen_clientes
+            FROM seriales_gestion
+            WHERE f_emi BETWEEN :desde AND :hasta
+            GROUP BY EXTRACT(MONTH FROM f_emi)
+        """),
+        {"desde": date(anio, 1, 1), "hasta": date(anio, 12, 31)},
+    )).mappings().all()
+
+    nomina_rows = (await db.execute(
+        text("""
+            SELECT
+                periodo_mes AS mes,
+                COALESCE(SUM(
+                    COALESCE(salario_base, 0) + COALESCE(auxilio_transporte, 0) +
+                    COALESCE(auxilio_no_salarial, 0) + COALESCE(arl, 0) +
+                    COALESCE(eps, 0) + COALESCE(afp, 0) +
+                    COALESCE(caja_compensacion, 0) + COALESCE(prima, 0) +
+                    COALESCE(cesantias, 0) + COALESCE(int_cesantias, 0) +
+                    COALESCE(vacaciones, 0)
+                ), 0) AS gasto_nomina
+            FROM nomina_provisiones
+            WHERE periodo_anio = :anio
+            GROUP BY periodo_mes
+        """),
+        {"anio": anio},
+    )).mappings().all()
+
+    margen_by_mes = {int(r["mes"]): float(r["margen_clientes"]) for r in margen_rows}
+    nomina_by_mes = {int(r["mes"]): float(r["gasto_nomina"]) for r in nomina_rows}
+
+    return [
+        PLMensualRow(
+            mes=m,
+            margen_clientes=round(margen_by_mes.get(m, 0.0), 2),
+            gasto_nomina=round(nomina_by_mes.get(m, 0.0), 2),
+            utilidad_neta=round(margen_by_mes.get(m, 0.0) - nomina_by_mes.get(m, 0.0), 2),
+        )
+        for m in range(1, 13)
+    ]
+
+
+# ── 3. Gestiones por mensajero ────────────────────────────────────────────────
 
 @router.get("/mensajeros", response_model=list[ResumenMensajeroRow])
 async def get_mensajeros(

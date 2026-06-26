@@ -6,8 +6,8 @@ import {
 } from "recharts";
 import { Download } from "lucide-react";
 import { reportesApi } from "@/api/reportes";
+import type { PLMensualRow } from "@/api/reportes";
 import { clientesApi } from "@/api/clientes";
-import { nominaApi } from "@/api/nomina";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
 
 // ── Utilidades ────────────────────────────────────────────────────────────────
@@ -65,64 +65,105 @@ function MetricCards({ items }: { items: { label: string; value: string; sub?: s
   );
 }
 
-// ── P&L Summary ───────────────────────────────────────────────────────────────
-function PLSummary({
-  totalMar, nominaData, mes, anio,
-}: {
-  totalMar: number;
-  nominaData: { total_empleados: number; costo_total: number } | undefined;
-  mes: number | undefined;
+// ── P&L Mensual ───────────────────────────────────────────────────────────────
+function PLMensualTable({ data, anio, mesFiltro }: {
+  data: PLMensualRow[];
   anio: number;
+  mesFiltro: number | undefined;
 }) {
-  const utilidad = nominaData != null ? totalMar - nominaData.costo_total : null;
-  const pctU = utilidad !== null && totalMar ? (utilidad / totalMar) * 100 : null;
+  const tot = data.reduce(
+    (acc, r) => ({
+      margen: acc.margen + r.margen_clientes,
+      nomina: acc.nomina + r.gasto_nomina,
+      util: acc.util + r.utilidad_neta,
+    }),
+    { margen: 0, nomina: 0, util: 0 },
+  );
+  const totPct = tot.margen ? (tot.util / tot.margen) * 100 : null;
+
+  const chartData = data.map((r) => ({
+    name: MESES[r.mes].substring(0, 3),
+    margen: r.margen_clientes,
+    nomina: r.gasto_nomina,
+    utilidad: r.utilidad_neta,
+  }));
+
   return (
-    <div className="mt-5 bg-white rounded-xl border border-gray-200 p-5">
-      <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4">
-        Resultado operacional — {mes ? MESES[mes] : "Año completo"} {anio}
-      </h3>
-      <div className="space-y-2">
-        <div className="flex justify-between items-center py-2 border-b border-gray-100">
-          <span className="text-sm text-gray-600">
-            Margen bruto
-            <span className="text-xs text-gray-400 ml-1">(ingresos − costo mensajero)</span>
-          </span>
-          <span className="text-sm font-semibold text-gray-900">{fmt(totalMar)}</span>
-        </div>
-        {nominaData != null ? (
-          <div className="flex justify-between items-center py-2 border-b border-gray-100">
-            <span className="text-sm text-gray-600">
-              Gasto nómina
-              {nominaData.total_empleados > 0 && (
-                <span className="text-xs text-gray-400 ml-1">
-                  ({nominaData.total_empleados} empleados{!mes ? " — año completo" : ""})
-                </span>
-              )}
-            </span>
-            <span className="text-sm font-semibold text-orange-600">
-              {nominaData.costo_total > 0 ? `− ${fmt(nominaData.costo_total)}` : fmt(0)}
-            </span>
-          </div>
-        ) : (
-          <div className="py-2 border-b border-gray-100 text-xs text-gray-400">
-            Sin provisiones de nómina calculadas para este período
-          </div>
-        )}
-        {utilidad !== null && (
-          <div className="flex justify-between items-center py-2.5 bg-gray-50 rounded-lg px-3">
-            <span className="text-sm font-semibold text-gray-800">Utilidad neta estimada</span>
-            <div className="flex items-baseline gap-2">
-              <span className={`text-base font-bold ${utilidad >= 0 ? "text-green-700" : "text-red-600"}`}>
-                {fmt(utilidad)}
-              </span>
-              {pctU !== null && (
-                <span className={`text-xs font-medium ${utilidad >= 0 ? "text-green-600" : "text-red-500"}`}>
-                  ({pctU.toFixed(1)}%)
-                </span>
-              )}
-            </div>
-          </div>
-        )}
+    <div className="mt-5 bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
+          P&L mensual — {anio}
+        </h3>
+        <span className="text-xs text-gray-400">Margen clientes − Gasto nómina</span>
+      </div>
+
+      <div className="px-4 pt-4">
+        <ResponsiveContainer width="100%" height={200}>
+          <BarChart data={chartData} margin={{ top: 0, right: 8, left: 8, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+            <XAxis dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
+            <YAxis
+              tickFormatter={(v: number) => v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `$${(v / 1e3).toFixed(0)}k` : `$${v}`}
+              tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={60}
+            />
+            <Tooltip formatter={(v: number) => [fmt(v), ""]} labelStyle={{ fontWeight: 600 }} />
+            <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+            <Bar dataKey="margen" name="Margen clientes" fill="#93c5fd" radius={[3, 3, 0, 0]} maxBarSize={24} />
+            <Bar dataKey="nomina" name="Gasto nómina" fill="#fb923c" radius={[3, 3, 0, 0]} maxBarSize={24} />
+            <Bar dataKey="utilidad" name="Utilidad neta" fill="#4ade80" radius={[3, 3, 0, 0]} maxBarSize={24} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[560px]">
+          <thead className="bg-gray-50 border-y border-gray-200">
+            <tr>
+              {["Mes", "Margen clientes", "Gasto nómina", "Utilidad neta", "%"].map((h, i) => (
+                <th key={h} className={`px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide ${i === 0 ? "text-left" : "text-right"}`}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {data.map((r) => {
+              const hasDatos = r.margen_clientes > 0 || r.gasto_nomina > 0;
+              const rowPct = r.margen_clientes ? (r.utilidad_neta / r.margen_clientes) * 100 : null;
+              const highlight = mesFiltro === r.mes;
+              return (
+                <tr key={r.mes} className={highlight ? "bg-blue-50" : "hover:bg-gray-50"}>
+                  <td className={`px-4 py-2.5 font-medium ${highlight ? "text-blue-700" : "text-gray-700"}`}>
+                    {MESES[r.mes]}
+                  </td>
+                  <td className="px-4 py-2.5 text-right text-gray-700">
+                    {hasDatos ? fmt(r.margen_clientes) : <span className="text-gray-300">—</span>}
+                  </td>
+                  <td className="px-4 py-2.5 text-right text-orange-600">
+                    {r.gasto_nomina > 0 ? fmt(r.gasto_nomina) : <span className="text-gray-300">—</span>}
+                  </td>
+                  <td className={`px-4 py-2.5 text-right font-semibold ${hasDatos ? (r.utilidad_neta >= 0 ? "text-green-700" : "text-red-600") : "text-gray-300"}`}>
+                    {hasDatos ? fmt(r.utilidad_neta) : "—"}
+                  </td>
+                  <td className={`px-4 py-2.5 text-right text-xs ${hasDatos ? (r.utilidad_neta >= 0 ? "text-green-600" : "text-red-500") : "text-gray-300"}`}>
+                    {hasDatos && rowPct !== null ? `${rowPct.toFixed(1)}%` : ""}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot className="bg-gray-50 border-t-2 border-gray-300">
+            <tr>
+              <td className="px-4 py-3 text-xs font-bold text-gray-700 uppercase">Total {anio}</td>
+              <td className="px-4 py-3 text-right text-sm font-bold text-gray-900">{fmt(tot.margen)}</td>
+              <td className="px-4 py-3 text-right text-sm font-bold text-orange-600">{fmt(tot.nomina)}</td>
+              <td className={`px-4 py-3 text-right text-sm font-bold ${tot.util >= 0 ? "text-green-700" : "text-red-600"}`}>
+                {fmt(tot.util)}
+              </td>
+              <td className={`px-4 py-3 text-right text-xs font-bold ${tot.util >= 0 ? "text-green-600" : "text-red-500"}`}>
+                {totPct !== null ? `${totPct.toFixed(1)}%` : ""}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
       </div>
     </div>
   );
@@ -139,10 +180,9 @@ function TabOperacional() {
     queryFn: () => reportesApi.operacional(anio, mes).then((r) => r.data),
   });
 
-  const { data: nominaData } = useQuery({
-    queryKey: ["nomina-provisiones-total", anio, mes],
-    queryFn: () => nominaApi.getProvisionesTotal(anio, mes).then((r) => r.data),
-    retry: false,
+  const { data: plMensual = [] } = useQuery({
+    queryKey: ["reporte-pl-mensual", anio],
+    queryFn: () => reportesApi.plMensual(anio).then((r) => r.data),
   });
 
   const totalSer = data.reduce((s, r) => s + r.total_seriales, 0);
@@ -207,9 +247,7 @@ function TabOperacional() {
           {!data.length && <div className="text-center py-12 text-gray-400">Sin datos para este período</div>}
         </div>
       )}
-      {data.length > 0 && (
-        <PLSummary totalMar={totalMar} nominaData={nominaData} mes={mes} anio={anio} />
-      )}
+      <PLMensualTable data={plMensual} anio={anio} mesFiltro={mes} />
     </div>
   );
 }

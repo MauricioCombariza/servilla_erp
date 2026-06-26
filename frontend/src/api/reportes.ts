@@ -52,6 +52,13 @@ export interface TendenciaMesRow {
   costo_mensajero: number;
 }
 
+export interface PLMensualRow {
+  mes: number;
+  margen_clientes: number;
+  gasto_nomina: number;
+  utilidad_neta: number;
+}
+
 export const reportesApi = {
   operacional: (anio: number, mes?: number) =>
     api.get<ResumenClienteRow[]>("/reportes/operacional", {
@@ -75,4 +82,7 @@ export const reportesApi = {
 
   tendencias: (meses: number) =>
     api.get<TendenciaMesRow[]>("/reportes/tendencias", { params: { meses } }),
+
+  plMensual: (anio: number) =>
+    api.get<PLMensualRow[]>("/reportes/pl-mensual", { params: { anio } }),
 };
