@@ -1,13 +1,44 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle, DollarSign, Trash2, Plus } from "lucide-react";
+import { CheckCircle, DollarSign, Trash2, Plus, Rows3 } from "lucide-react";
 import api from "@/api/client";
+import { gestionesApi } from "@/api/gestiones";
+import { laboresApi } from "@/api/labores";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
+import type { PlanillaResumen, ResumenLabores } from "@/types/domain";
 
 const fmt = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 });
 const MESES = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
 const HOY = new Date();
 const METODOS = ["efectivo","transferencia","cheque","tarjeta","otros"];
+
+const TIPO_LABEL: Record<string, string> = {
+  mensajero: "Mensajero",
+  alistamiento: "Alistamiento",
+  conductor: "Conductor",
+  courier_externo: "Courier Ext.",
+  transportadora: "Transportadora",
+};
+const TIPO_BADGE: Record<string, string> = {
+  alistamiento: "bg-indigo-100 text-indigo-800",
+  conductor: "bg-sky-100 text-sky-800",
+  courier_externo: "bg-purple-100 text-purple-800",
+  transportadora: "bg-orange-100 text-orange-800",
+};
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+// Rango de fechas del mes seleccionado, en YYYY-MM-DD, sin pasar por toISOString
+// (evita el desfase de timezone al construir Date con new Date(anio, mes, 0)).
+function rangoMes(mes: number, anio: number): { desde: string; hasta: string } {
+  const ultimoDia = new Date(anio, mes, 0).getDate();
+  return {
+    desde: `${anio}-${pad2(mes)}-01`,
+    hasta: `${anio}-${pad2(mes)}-${pad2(ultimoDia)}`,
+  };
+}
 
 type Tab = "pendientes" | "liquidaciones";
 
@@ -79,7 +110,7 @@ export function LiquidacionesPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Gestión de Pagos — Mensajeros</h1>
+          <h1 className="text-xl font-semibold text-gray-900">Gestión de Pagos — Personal Operativo</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             {MESES[mes - 1]} {anio}
             {tab === "pendientes" && ` · Pendiente total: `}
@@ -116,37 +147,14 @@ export function LiquidacionesPage() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    {["Mensajero","Seriales","Monto seriales","Horas","Labores","Total","Estado",""].map((h) => (
+                    {["Personal","Seriales","Monto seriales","Horas","Labores","Total","Estado","",""].map((h) => (
                       <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {pendientes.map((p) => (
-                    <tr key={p.personal_id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-gray-900">{p.nombre_completo}</p>
-                        <p className="text-xs text-gray-400">{p.codigo}</p>
-                      </td>
-                      <td className="px-4 py-3 text-gray-600">{p.total_seriales}</td>
-                      <td className="px-4 py-3 text-gray-700"><CurrencyCell value={p.total_mensajero} /></td>
-                      <td className="px-4 py-3 text-gray-600">{fmt.format(p.total_horas)}h · <CurrencyCell value={p.total_horas_monto} /></td>
-                      <td className="px-4 py-3 text-gray-600">{p.total_labores} · <CurrencyCell value={p.total_labores_monto} /></td>
-                      <td className="px-4 py-3 font-semibold text-gray-900"><CurrencyCell value={p.total_pendiente} /></td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${p.ya_liquidado ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
-                          {p.ya_liquidado ? "Liquidado" : "Pendiente"}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        {!p.ya_liquidado && (
-                          <button onClick={() => setGenerando(p)}
-                            className="flex items-center gap-1 text-xs bg-primary hover:bg-primary-hover text-white px-2 py-1 rounded">
-                            <Plus size={12} /> Generar
-                          </button>
-                        )}
-                      </td>
-                    </tr>
+                    <PendienteRow key={p.personal_id} p={p} mes={mes} anio={anio} onGenerar={() => setGenerando(p)} />
                   ))}
                 </tbody>
               </table>
@@ -235,6 +243,158 @@ export function LiquidacionesPage() {
         />
       )}
     </div>
+  );
+}
+
+// ── Fila expandible de pendiente ────────────────────────────────────────────────
+
+function PendienteRow({ p, mes, anio, onGenerar }: {
+  p: Pendiente; mes: number; anio: number; onGenerar: () => void;
+}) {
+  const [expandido, setExpandido] = useState(false);
+  const esMensajero = p.tipo_personal === "mensajero";
+  const { desde, hasta } = rangoMes(mes, anio);
+
+  const { data: planillas = [], isLoading: cargandoPlanillas } = useQuery({
+    queryKey: ["pago-planillas", p.codigo, mes, anio],
+    queryFn: () => gestionesApi.planillasResumen({ cod_men: p.codigo, fecha_desde: desde, fecha_hasta: hasta }).then((r) => r.data),
+    enabled: expandido && esMensajero,
+  });
+
+  const { data: diario = [], isLoading: cargandoDiario } = useQuery({
+    queryKey: ["pago-diario", p.personal_id, mes, anio],
+    queryFn: () => laboresApi.resumenDiario({ personal_id: p.personal_id, mes, anio, aprobado: true, liquidado: false }).then((r) => r.data),
+    enabled: expandido && !esMensajero,
+  });
+
+  return (
+    <>
+      <tr className="hover:bg-gray-50">
+        <td className="px-4 py-3">
+          <p className="font-medium text-gray-900">{p.nombre_completo}</p>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <p className="text-xs text-gray-400">{p.codigo}</p>
+            {!esMensajero && (
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${TIPO_BADGE[p.tipo_personal] ?? "bg-gray-100 text-gray-600"}`}>
+                {TIPO_LABEL[p.tipo_personal] ?? p.tipo_personal}
+              </span>
+            )}
+          </div>
+        </td>
+        <td className="px-4 py-3 text-gray-600">{p.total_seriales}</td>
+        <td className="px-4 py-3 text-gray-700"><CurrencyCell value={p.total_mensajero} /></td>
+        <td className="px-4 py-3 text-gray-600">{fmt.format(p.total_horas)}h · <CurrencyCell value={p.total_horas_monto} /></td>
+        <td className="px-4 py-3 text-gray-600">{p.total_labores} · <CurrencyCell value={p.total_labores_monto} /></td>
+        <td className="px-4 py-3 font-semibold text-gray-900"><CurrencyCell value={p.total_pendiente} /></td>
+        <td className="px-4 py-3">
+          <span className={`px-2 py-0.5 rounded text-xs font-medium ${p.ya_liquidado ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
+            {p.ya_liquidado ? "Liquidado" : "Pendiente"}
+          </span>
+        </td>
+        <td className="px-4 py-3">
+          <button
+            onClick={() => setExpandido((v) => !v)}
+            className={`flex items-center gap-1 text-xs px-2 py-1 rounded border transition-colors ${expandido ? "border-primary text-primary bg-blue-50" : "border-gray-300 text-gray-500 hover:bg-gray-50"}`}
+            title="Ver registros detallados"
+          >
+            <Rows3 size={13} />
+            {expandido ? "Ocultar" : "Registros"}
+          </button>
+        </td>
+        <td className="px-4 py-3">
+          {!p.ya_liquidado && (
+            <button onClick={onGenerar}
+              className="flex items-center gap-1 text-xs bg-primary hover:bg-primary-hover text-white px-2 py-1 rounded">
+              <Plus size={12} /> Generar
+            </button>
+          )}
+        </td>
+      </tr>
+
+      {expandido && (
+        <tr>
+          <td colSpan={9} className="bg-gray-50/60 border-t border-gray-100 px-4 py-3">
+            {esMensajero ? (
+              cargandoPlanillas ? (
+                <p className="text-xs text-gray-400">Cargando planillas…</p>
+              ) : planillas.length === 0 ? (
+                <p className="text-xs text-gray-400">Sin planillas en este período.</p>
+              ) : (
+                <PlanillasDetalle planillas={planillas} />
+              )
+            ) : (
+              cargandoDiario ? (
+                <p className="text-xs text-gray-400">Cargando registros diarios…</p>
+              ) : diario.length === 0 ? (
+                <p className="text-xs text-gray-400">Sin horas/labores aprobadas pendientes en este período.</p>
+              ) : (
+                <DiarioDetalle diario={diario} />
+              )
+            )}
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+function PlanillasDetalle({ planillas }: { planillas: PlanillaResumen[] }) {
+  return (
+    <table className="w-full text-xs bg-white border border-gray-200 rounded-lg overflow-hidden">
+      <thead className="bg-gray-50 border-b border-gray-100">
+        <tr>
+          <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Fecha</th>
+          <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Planilla</th>
+          <th className="px-3 py-1.5 text-right text-gray-500 font-medium">Seriales</th>
+          <th className="px-3 py-1.5 text-right text-gray-500 font-medium">Valor pagado</th>
+          <th className="px-3 py-1.5 text-center text-gray-500 font-medium">Estado</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-gray-50">
+        {planillas.map((pl) => (
+          <tr key={pl.planilla}>
+            <td className="px-3 py-1.5 text-gray-700">{pl.fecha_escaner ?? "—"}</td>
+            <td className="px-3 py-1.5 font-mono text-gray-700">{pl.planilla}</td>
+            <td className="px-3 py-1.5 text-right text-gray-700">{pl.total_seriales}</td>
+            <td className="px-3 py-1.5 text-right text-gray-700">${fmt.format(pl.total_mensajero)}</td>
+            <td className="px-3 py-1.5 text-center">
+              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${pl.bloqueada ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"}`}>
+                {pl.bloqueada ? "Cerrada" : "Abierta"}
+              </span>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function DiarioDetalle({ diario }: { diario: (ResumenLabores & { fecha: string })[] }) {
+  return (
+    <table className="w-full text-xs bg-white border border-gray-200 rounded-lg overflow-hidden">
+      <thead className="bg-gray-50 border-b border-gray-100">
+        <tr>
+          <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Fecha</th>
+          <th className="px-3 py-1.5 text-right text-gray-500 font-medium">Horas</th>
+          <th className="px-3 py-1.5 text-right text-gray-500 font-medium">Monto horas</th>
+          <th className="px-3 py-1.5 text-right text-gray-500 font-medium">Labores</th>
+          <th className="px-3 py-1.5 text-right text-gray-500 font-medium">Monto labores</th>
+          <th className="px-3 py-1.5 text-right text-gray-500 font-medium">Total</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-gray-50">
+        {diario.map((d) => (
+          <tr key={d.fecha}>
+            <td className="px-3 py-1.5 text-gray-700">{d.fecha}</td>
+            <td className="px-3 py-1.5 text-right text-gray-700">{fmt.format(d.total_horas)}h</td>
+            <td className="px-3 py-1.5 text-right text-gray-700">${fmt.format(d.total_horas_monto)}</td>
+            <td className="px-3 py-1.5 text-right text-gray-700">{d.total_labores}</td>
+            <td className="px-3 py-1.5 text-right text-gray-700">${fmt.format(d.total_labores_monto)}</td>
+            <td className="px-3 py-1.5 text-right font-semibold text-gray-800">${fmt.format(d.total_general)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

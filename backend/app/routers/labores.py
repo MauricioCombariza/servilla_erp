@@ -344,18 +344,35 @@ async def aprobar_labor(labor_id: int, db: AsyncSession = Depends(get_db), _=_au
 async def resumen_diario(
     mes: int | None = None,
     anio: int | None = None,
+    personal_id: int | None = None,
+    aprobado: bool | None = None,
+    liquidado: bool | None = None,
     db: AsyncSession = Depends(get_db),
     _=_auth,
 ):
     params: dict = {}
     mes_filter = ""
     anio_filter = ""
+    personal_filter = ""
+    aprobado_filter = ""
+    liquidado_filter = ""
     if mes is not None:
         mes_filter = "AND EXTRACT(MONTH FROM r.fecha) = :mes"
         params["mes"] = mes
     if anio is not None:
         anio_filter = "AND EXTRACT(YEAR FROM r.fecha) = :anio"
         params["anio"] = anio
+    if personal_id is not None:
+        personal_filter = "AND r.personal_id = :personal_id"
+        params["personal_id"] = personal_id
+    if aprobado is not None:
+        aprobado_filter = "AND r.aprobado = :aprobado"
+        params["aprobado"] = aprobado
+    if liquidado is not None:
+        liquidado_filter = "AND r.liquidado = :liquidado"
+        params["liquidado"] = liquidado
+
+    filters = f"{mes_filter} {anio_filter} {personal_filter} {aprobado_filter} {liquidado_filter}"
 
     sql = text(f"""
         SELECT
@@ -368,23 +385,23 @@ async def resumen_diario(
             COALESCE(l.total_labores_monto, 0)  AS total_labores_monto,
             COALESCE(h.total_horas_monto, 0) + COALESCE(l.total_labores_monto, 0) AS total_general
         FROM (
-            SELECT DISTINCT personal_id, fecha FROM registro_horas r WHERE 1=1 {mes_filter} {anio_filter}
+            SELECT DISTINCT personal_id, fecha FROM registro_horas r WHERE 1=1 {filters}
             UNION
-            SELECT DISTINCT personal_id, fecha FROM registro_labores r WHERE 1=1 {mes_filter} {anio_filter}
+            SELECT DISTINCT personal_id, fecha FROM registro_labores r WHERE 1=1 {filters}
         ) d
         JOIN personal p ON p.id = d.personal_id
         LEFT JOIN (
             SELECT personal_id, fecha,
                    SUM(horas_trabajadas)               AS total_horas,
                    SUM(horas_trabajadas * tarifa_hora) AS total_horas_monto
-            FROM registro_horas r WHERE 1=1 {mes_filter} {anio_filter}
+            FROM registro_horas r WHERE 1=1 {filters}
             GROUP BY personal_id, fecha
         ) h ON h.personal_id = d.personal_id AND h.fecha = d.fecha
         LEFT JOIN (
             SELECT personal_id, fecha,
                    SUM(cantidad)                   AS total_labores,
                    SUM(cantidad * tarifa_unitaria)  AS total_labores_monto
-            FROM registro_labores r WHERE 1=1 {mes_filter} {anio_filter}
+            FROM registro_labores r WHERE 1=1 {filters}
             GROUP BY personal_id, fecha
         ) l ON l.personal_id = d.personal_id AND l.fecha = d.fecha
         ORDER BY d.fecha DESC, p.nombre_completo
