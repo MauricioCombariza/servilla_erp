@@ -19,6 +19,7 @@ class LiquidacionRead(BaseModel):
     cantidad_horas: float
     total_labores: float
     cantidad_labores: int
+    total_subsidio: float
     bonificaciones: float
     descuentos: float
     total_a_pagar: float
@@ -65,5 +66,6 @@ class ResumenPendientePago(BaseModel):
     total_horas_monto: float
     total_labores: int
     total_labores_monto: float
+    total_subsidio: float
     total_pendiente: float
     ya_liquidado: bool

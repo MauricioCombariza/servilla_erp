@@ -27,6 +27,7 @@ class Liquidacion(Base):
     cantidad_horas: Mapped[float] = mapped_column(Numeric(5, 2), default=0)
     total_labores: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     cantidad_labores: Mapped[int] = mapped_column(default=0)
+    total_subsidio: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     bonificaciones: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     descuentos: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     total_a_pagar: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)

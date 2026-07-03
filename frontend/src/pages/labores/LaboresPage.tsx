@@ -1,11 +1,11 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, CheckCircle, Trash2, X, FileDown, Pencil, ChevronDown, ChevronUp } from "lucide-react";
 import { laboresApi } from "@/api/labores";
 import { ordenesApi } from "@/api/ordenes";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
 import { generarPdfPegado } from "@/utils/pdfPegado";
-import type { RegistroHoras, RegistroLabores } from "@/types/domain";
+import type { RegistroHoras, RegistroLabores, ResumenLabores } from "@/types/domain";
 
 const fmt = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 });
 const MESES = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
@@ -405,21 +405,14 @@ export function LaboresPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
-                      {["Personal", "Horas", "Monto horas", "Labores", "Monto labores", "Total"].map(h => (
+                      {["Personal", "Horas", "Monto horas", "Labores", "Monto labores", "Subsidio transp.", "Total", ""].map(h => (
                         <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {resumen.map(r => (
-                      <tr key={r.personal_id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 font-medium text-gray-900">{r.nombre_completo}</td>
-                        <td className="px-4 py-3 text-gray-600">{decimalToHhmm(r.total_horas)}</td>
-                        <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_horas_monto} /></td>
-                        <td className="px-4 py-3 text-gray-600">{r.total_labores}</td>
-                        <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_labores_monto} /></td>
-                        <td className="px-4 py-3 font-semibold text-gray-900"><CurrencyCell value={r.total_general} /></td>
-                      </tr>
+                      <PersonaMesRow key={r.personal_id} r={r} mes={mes} anio={anio} />
                     ))}
                   </tbody>
                 </table>
@@ -435,7 +428,7 @@ export function LaboresPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
-                      {["Fecha", "Personal", "Horas", "Monto horas", "Labores", "Monto labores", "Total", ""].map(h => (
+                      {["Fecha", "Personal", "Horas", "Monto horas", "Labores", "Monto labores", "Subsidio transp.", "Total", ""].map(h => (
                         <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
                       ))}
                     </tr>
@@ -445,14 +438,15 @@ export function LaboresPage() {
                       const key = `${r.personal_id}-${r.fecha}`;
                       const expandido = expandidoDiario === key;
                       return (
-                        <>
-                          <tr key={`${key}-${i}`} className={`border-b border-gray-100 hover:bg-gray-50 ${expandido ? "bg-blue-50/40" : ""}`}>
+                        <Fragment key={`${key}-${i}`}>
+                          <tr className={`border-b border-gray-100 hover:bg-gray-50 ${expandido ? "bg-blue-50/40" : ""}`}>
                             <td className="px-4 py-3 font-mono text-xs text-gray-500">{r.fecha}</td>
                             <td className="px-4 py-3 font-medium text-gray-900">{r.nombre_completo}</td>
                             <td className="px-4 py-3 text-gray-600">{decimalToHhmm(r.total_horas)}</td>
                             <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_horas_monto} /></td>
                             <td className="px-4 py-3 text-gray-600">{r.total_labores}</td>
                             <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_labores_monto} /></td>
+                            <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_subsidio} /></td>
                             <td className="px-4 py-3 font-semibold text-gray-900"><CurrencyCell value={r.total_general} /></td>
                             <td className="px-4 py-3">
                               <button
@@ -465,8 +459,8 @@ export function LaboresPage() {
                             </td>
                           </tr>
                           {expandido && (
-                            <tr key={`${key}-detalle`}>
-                              <td colSpan={8} className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+                            <tr>
+                              <td colSpan={9} className="bg-gray-50 px-6 py-4 border-b border-gray-200">
                                 <DetalleFilaDiaria
                                   personalId={r.personal_id}
                                   fecha={r.fecha}
@@ -477,7 +471,7 @@ export function LaboresPage() {
                               </td>
                             </tr>
                           )}
-                        </>
+                        </Fragment>
                       );
                     })}
                   </tbody>
@@ -504,6 +498,104 @@ export function LaboresPage() {
         />
       )}
     </div>
+  );
+}
+
+// ── Fila expandible de Resumen "Mes" (desglose diario por persona) ───────────
+
+function PersonaMesRow({ r, mes, anio }: { r: ResumenLabores; mes: number; anio: number }) {
+  const qc = useQueryClient();
+  const [expandido, setExpandido] = useState(false);
+  const [expandidoFecha, setExpandidoFecha] = useState<string | null>(null);
+
+  const { data: diario = [], isLoading } = useQuery({
+    queryKey: ["labores-resumen-diario-persona", r.personal_id, mes, anio],
+    queryFn: () => laboresApi.resumenDiario({ personal_id: r.personal_id, mes, anio }).then(res => res.data),
+    enabled: expandido,
+  });
+
+  return (
+    <>
+      <tr className="hover:bg-gray-50">
+        <td className="px-4 py-3 font-medium text-gray-900">{r.nombre_completo}</td>
+        <td className="px-4 py-3 text-gray-600">{decimalToHhmm(r.total_horas)}</td>
+        <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_horas_monto} /></td>
+        <td className="px-4 py-3 text-gray-600">{r.total_labores}</td>
+        <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_labores_monto} /></td>
+        <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_subsidio} /></td>
+        <td className="px-4 py-3 font-semibold text-gray-900"><CurrencyCell value={r.total_general} /></td>
+        <td className="px-4 py-3">
+          <button
+            onClick={() => setExpandido(v => !v)}
+            className="text-gray-400 hover:text-primary transition-colors"
+            title="Ver desglose diario"
+          >
+            {expandido ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
+        </td>
+      </tr>
+      {expandido && (
+        <tr>
+          <td colSpan={8} className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+            {isLoading ? (
+              <p className="text-xs text-gray-400">Cargando…</p>
+            ) : diario.length === 0 ? (
+              <p className="text-xs text-gray-400">Sin registros en este período.</p>
+            ) : (
+              <table className="w-full text-xs bg-white border border-gray-200 rounded-lg overflow-hidden">
+                <thead className="bg-gray-100">
+                  <tr>
+                    {["Fecha", "Horas", "Monto horas", "Labores", "Monto labores", "Subsidio transp.", "Total", ""].map(h => (
+                      <th key={h} className="px-3 py-2 text-left font-medium text-gray-600">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {diario.map(d => {
+                    const exp = expandidoFecha === d.fecha;
+                    return (
+                      <Fragment key={d.fecha}>
+                        <tr className="border-t border-gray-100 hover:bg-gray-50">
+                          <td className="px-3 py-2 font-mono text-gray-500">{d.fecha}</td>
+                          <td className="px-3 py-2">{decimalToHhmm(d.total_horas)}</td>
+                          <td className="px-3 py-2"><CurrencyCell value={d.total_horas_monto} /></td>
+                          <td className="px-3 py-2">{d.total_labores}</td>
+                          <td className="px-3 py-2"><CurrencyCell value={d.total_labores_monto} /></td>
+                          <td className="px-3 py-2"><CurrencyCell value={d.total_subsidio} /></td>
+                          <td className="px-3 py-2 font-semibold"><CurrencyCell value={d.total_general} /></td>
+                          <td className="px-3 py-2">
+                            <button
+                              onClick={() => setExpandidoFecha(exp ? null : d.fecha)}
+                              className="text-gray-400 hover:text-primary transition-colors"
+                              title="Ver y editar registros"
+                            >
+                              {exp ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                            </button>
+                          </td>
+                        </tr>
+                        {exp && (
+                          <tr>
+                            <td colSpan={8} className="bg-gray-50/60 px-4 py-3">
+                              <DetalleFilaDiaria
+                                personalId={r.personal_id}
+                                fecha={d.fecha}
+                                mes={mes}
+                                anio={anio}
+                                onSaved={() => qc.invalidateQueries({ queryKey: ["labores-resumen-diario-persona", r.personal_id, mes, anio] })}
+                              />
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 

@@ -94,6 +94,7 @@ class ResumenLabores(BaseModel):
     total_horas_monto: float
     total_labores: int
     total_labores_monto: float
+    total_subsidio: float
     total_general: float
 
 
@@ -105,4 +106,5 @@ class ResumenDiario(BaseModel):
     total_horas_monto: float
     total_labores: int
     total_labores_monto: float
+    total_subsidio: float
     total_general: float

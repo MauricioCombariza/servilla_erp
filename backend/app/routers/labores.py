@@ -57,7 +57,8 @@ async def _upsert_subsidio_transporte(db: AsyncSession, personal_id: int, fecha)
     if horas <= 0:
         return
 
-    tipo = 'transporte_completo' if horas >= 5.0 else 'medio_transporte'
+    # Alistamiento siempre recibe transporte completo, sin importar las horas trabajadas.
+    tipo = 'transporte_completo'
 
     tr = await db.execute(text("""
         SELECT tarifa FROM tarifas_servicios
@@ -181,8 +182,13 @@ async def update_hora(
         raise HTTPException(status_code=404, detail="Registro no encontrado")
     if r.aprobado:
         raise HTTPException(status_code=400, detail="No se puede editar un registro aprobado")
+    fecha_original = r.fecha
     for field, value in body.model_dump(exclude_none=True).items():
         setattr(r, field, value)
+    await db.flush()
+    await _upsert_subsidio_transporte(db, r.personal_id, fecha_original)
+    if r.fecha != fecha_original:
+        await _upsert_subsidio_transporte(db, r.personal_id, r.fecha)
     await db.commit()
     await db.refresh(r)
     return r
@@ -373,6 +379,9 @@ async def resumen_diario(
         params["liquidado"] = liquidado
 
     filters = f"{mes_filter} {anio_filter} {personal_filter} {aprobado_filter} {liquidado_filter}"
+    # subsidio_transporte no tiene flujo de aprobación implementado (aprobado siempre
+    # queda en false) — no se filtra por aprobado para no ocultarlo permanentemente.
+    filters_sub = f"{mes_filter} {anio_filter} {personal_filter} {liquidado_filter}"
 
     sql = text(f"""
         SELECT
@@ -383,7 +392,9 @@ async def resumen_diario(
             COALESCE(h.total_horas_monto, 0)   AS total_horas_monto,
             COALESCE(l.total_labores, 0)        AS total_labores,
             COALESCE(l.total_labores_monto, 0)  AS total_labores_monto,
-            COALESCE(h.total_horas_monto, 0) + COALESCE(l.total_labores_monto, 0) AS total_general
+            COALESCE(sub.total_subsidio, 0)     AS total_subsidio,
+            COALESCE(h.total_horas_monto, 0) + COALESCE(l.total_labores_monto, 0)
+              + COALESCE(sub.total_subsidio, 0) AS total_general
         FROM (
             SELECT DISTINCT personal_id, fecha FROM registro_horas r WHERE 1=1 {filters}
             UNION
@@ -404,6 +415,12 @@ async def resumen_diario(
             FROM registro_labores r WHERE 1=1 {filters}
             GROUP BY personal_id, fecha
         ) l ON l.personal_id = d.personal_id AND l.fecha = d.fecha
+        LEFT JOIN (
+            SELECT personal_id, fecha,
+                   SUM(tarifa) AS total_subsidio
+            FROM subsidio_transporte r WHERE 1=1 {filters_sub}
+            GROUP BY personal_id, fecha
+        ) sub ON sub.personal_id = d.personal_id AND sub.fecha = d.fecha
         ORDER BY d.fecha DESC, p.nombre_completo
     """)
     rows = (await db.execute(sql, params)).mappings().all()
@@ -435,7 +452,9 @@ async def resumen_labores(
             COALESCE(h.total_horas_monto, 0)   AS total_horas_monto,
             COALESCE(l.total_labores, 0)        AS total_labores,
             COALESCE(l.total_labores_monto, 0)  AS total_labores_monto,
-            COALESCE(h.total_horas_monto, 0) + COALESCE(l.total_labores_monto, 0) AS total_general
+            COALESCE(sub.total_subsidio, 0)     AS total_subsidio,
+            COALESCE(h.total_horas_monto, 0) + COALESCE(l.total_labores_monto, 0)
+              + COALESCE(sub.total_subsidio, 0) AS total_general
         FROM personal p
         LEFT JOIN (
             SELECT personal_id,
@@ -451,7 +470,13 @@ async def resumen_labores(
             FROM registro_labores r WHERE 1=1 {mes_filter} {anio_filter}
             GROUP BY personal_id
         ) l ON p.id = l.personal_id
-        WHERE h.personal_id IS NOT NULL OR l.personal_id IS NOT NULL
+        LEFT JOIN (
+            SELECT personal_id,
+                   SUM(tarifa) AS total_subsidio
+            FROM subsidio_transporte r WHERE 1=1 {mes_filter} {anio_filter}
+            GROUP BY personal_id
+        ) sub ON p.id = sub.personal_id
+        WHERE h.personal_id IS NOT NULL OR l.personal_id IS NOT NULL OR sub.personal_id IS NOT NULL
         ORDER BY total_general DESC
     """)
     rows = (await db.execute(sql, params)).mappings().all()

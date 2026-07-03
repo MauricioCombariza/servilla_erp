@@ -344,6 +344,7 @@ export interface ResumenLabores {
   total_horas_monto: number;
   total_labores: number;
   total_labores_monto: number;
+  total_subsidio: number;
   total_general: number;
 }
 
