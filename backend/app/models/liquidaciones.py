@@ -32,7 +32,7 @@ class Liquidacion(Base):
     total_a_pagar: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
     estado: Mapped[str] = mapped_column(String(10), default="generada")
     fecha_pago_real: Mapped[date | None] = mapped_column()
-    metodo_pago: Mapped[str] = mapped_column(String(12), default="transferencia")
+    metodo_pago: Mapped[str] = mapped_column(String(15), default="transferencia")
     referencia_pago: Mapped[str | None] = mapped_column(String(100))
     observaciones: Mapped[str | None] = mapped_column(Text)
     generado_por: Mapped[int | None] = mapped_column(
