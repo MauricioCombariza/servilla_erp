@@ -44,7 +44,7 @@ async def pendientes_pago(
             WHERE sg.estado = 'pendiente'
               AND EXTRACT(MONTH FROM sg.f_esc) = :mes
               AND EXTRACT(YEAR  FROM sg.f_esc) = :anio
-              AND p.tipo_personal = 'mensajero'
+              AND p.tipo_personal NOT IN ('courier_externo', 'transportadora')
             GROUP BY p.id, p.codigo, p.nombre_completo, p.tipo_personal
         ),
         horas AS (
