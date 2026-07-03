@@ -239,7 +239,7 @@ export function NominaPage() {
       )}
 
       {tab === "pagos" && (
-        <LiquidacionesPanel mes={mes} anio={anio} />
+        <LiquidacionesPanel mes={mes} anio={anio} soloSeriales />
       )}
 
       {showForm && (

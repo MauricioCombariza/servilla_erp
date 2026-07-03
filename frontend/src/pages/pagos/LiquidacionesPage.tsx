@@ -74,7 +74,7 @@ export function LiquidacionesPage() {
   );
 }
 
-export function LiquidacionesPanel({ mes, anio }: { mes: number; anio: number }) {
+export function LiquidacionesPanel({ mes, anio, soloSeriales = false }: { mes: number; anio: number; soloSeriales?: boolean }) {
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>("pendientes");
   const [generando, setGenerando] = useState<Pendiente | null>(null);
@@ -133,14 +133,17 @@ export function LiquidacionesPanel({ mes, anio }: { mes: number; anio: number })
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    {["Personal","Seriales","Monto seriales","Horas","Labores","Total","Estado","",""].map((h, i) => (
+                    {(soloSeriales
+                      ? ["Personal","Seriales","Monto seriales","Total","Estado","",""]
+                      : ["Personal","Seriales","Monto seriales","Horas","Labores","Total","Estado","",""]
+                    ).map((h, i) => (
                       <th key={i} className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {pendientes.map((p) => (
-                    <PendienteRow key={p.personal_id} p={p} mes={mes} anio={anio} onGenerar={() => setGenerando(p)} />
+                    <PendienteRow key={p.personal_id} p={p} mes={mes} anio={anio} soloSeriales={soloSeriales} onGenerar={() => setGenerando(p)} />
                   ))}
                 </tbody>
               </table>
@@ -158,7 +161,10 @@ export function LiquidacionesPanel({ mes, anio }: { mes: number; anio: number })
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    {["N° Liquidación","Período","Entregas","Horas","Bonif./Desc.","Total","Estado","Pago prog.",""].map((h) => (
+                    {(soloSeriales
+                      ? ["N° Liquidación","Período","Entregas","Bonif./Desc.","Total","Estado","Pago prog.",""]
+                      : ["N° Liquidación","Período","Entregas","Horas","Bonif./Desc.","Total","Estado","Pago prog.",""]
+                    ).map((h) => (
                       <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
                     ))}
                   </tr>
@@ -169,7 +175,9 @@ export function LiquidacionesPanel({ mes, anio }: { mes: number; anio: number })
                       <td className="px-4 py-3 font-mono text-xs text-gray-700">{l.numero_liquidacion}</td>
                       <td className="px-4 py-3 text-gray-600">{MESES[l.periodo_mes - 1]} {l.periodo_anio}</td>
                       <td className="px-4 py-3 text-gray-600">{l.cantidad_entregas} · <CurrencyCell value={l.total_entregas} /></td>
-                      <td className="px-4 py-3 text-gray-600"><CurrencyCell value={l.total_horas} /></td>
+                      {!soloSeriales && (
+                        <td className="px-4 py-3 text-gray-600"><CurrencyCell value={l.total_horas} /></td>
+                      )}
                       <td className="px-4 py-3 text-gray-600">+<CurrencyCell value={l.bonificaciones} /> -<CurrencyCell value={l.descuentos} /></td>
                       <td className="px-4 py-3 font-semibold text-gray-900"><CurrencyCell value={l.total_a_pagar} /></td>
                       <td className="px-4 py-3">
@@ -234,8 +242,8 @@ export function LiquidacionesPanel({ mes, anio }: { mes: number; anio: number })
 
 // ── Fila expandible de pendiente ────────────────────────────────────────────────
 
-function PendienteRow({ p, mes, anio, onGenerar }: {
-  p: Pendiente; mes: number; anio: number; onGenerar: () => void;
+function PendienteRow({ p, mes, anio, soloSeriales, onGenerar }: {
+  p: Pendiente; mes: number; anio: number; soloSeriales: boolean; onGenerar: () => void;
 }) {
   const [expandido, setExpandido] = useState(false);
   const esMensajero = p.tipo_personal === "mensajero";
@@ -269,8 +277,12 @@ function PendienteRow({ p, mes, anio, onGenerar }: {
         </td>
         <td className="px-4 py-3 text-gray-600">{p.total_seriales}</td>
         <td className="px-4 py-3 text-gray-700"><CurrencyCell value={p.total_mensajero} /></td>
-        <td className="px-4 py-3 text-gray-600">{fmt.format(p.total_horas)}h · <CurrencyCell value={p.total_horas_monto} /></td>
-        <td className="px-4 py-3 text-gray-600">{p.total_labores} · <CurrencyCell value={p.total_labores_monto} /></td>
+        {!soloSeriales && (
+          <>
+            <td className="px-4 py-3 text-gray-600">{fmt.format(p.total_horas)}h · <CurrencyCell value={p.total_horas_monto} /></td>
+            <td className="px-4 py-3 text-gray-600">{p.total_labores} · <CurrencyCell value={p.total_labores_monto} /></td>
+          </>
+        )}
         <td className="px-4 py-3 font-semibold text-gray-900"><CurrencyCell value={p.total_pendiente} /></td>
         <td className="px-4 py-3">
           <span className={`px-2 py-0.5 rounded text-xs font-medium ${p.ya_liquidado ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
@@ -299,7 +311,7 @@ function PendienteRow({ p, mes, anio, onGenerar }: {
 
       {expandido && (
         <tr>
-          <td colSpan={9} className="bg-gray-50/60 border-t border-gray-100 px-4 py-3">
+          <td colSpan={soloSeriales ? 7 : 9} className="bg-gray-50/60 border-t border-gray-100 px-4 py-3">
             {esMensajero ? (
               cargandoPlanillas ? (
                 <p className="text-xs text-gray-400">Cargando planillas…</p>
