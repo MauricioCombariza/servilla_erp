@@ -105,12 +105,18 @@ export function LiquidacionesPanel({ mes, anio, soloSeriales = false }: { mes: n
   });
 
   const totalPendiente = pendientes.filter((p) => !p.ya_liquidado).reduce((s, p) => s + p.total_pendiente, 0);
+  const totalGenerado = liquidaciones.reduce((s, l) => s + l.total_a_pagar, 0);
 
   return (
     <div>
       {tab === "pendientes" && (
         <p className="text-sm text-gray-500 mb-2">
           Pendiente total: <span className="font-medium text-gray-800">${fmt.format(totalPendiente)}</span>
+        </p>
+      )}
+      {tab === "liquidaciones" && (
+        <p className="text-sm text-gray-500 mb-2">
+          Total generado: <span className="font-medium text-gray-800">${fmt.format(totalGenerado)}</span>
         </p>
       )}
       <div className="flex border-b border-gray-200 mb-4">
