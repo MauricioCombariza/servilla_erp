@@ -100,7 +100,7 @@ async def pendientes_pago(
         FULL OUTER JOIN labores  l   ON COALESCE(s.personal_id, h.personal_id) = l.personal_id
         FULL OUTER JOIN subsidio sub ON COALESCE(s.personal_id, h.personal_id, l.personal_id) = sub.personal_id
         LEFT JOIN personal p2 ON p2.id = COALESCE(s.personal_id, h.personal_id, l.personal_id, sub.personal_id)
-        ORDER BY total_pendiente DESC
+        ORDER BY codigo ASC
     """)
     rows = (await db.execute(sql, {"mes": mes, "anio": anio})).mappings().all()
     return [ResumenPendientePago(**dict(r)) for r in rows]
