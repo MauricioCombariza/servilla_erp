@@ -3,6 +3,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, CheckCircle, Trash2, X, FileDown, Pencil, ChevronDown, ChevronUp } from "lucide-react";
 import { laboresApi } from "@/api/labores";
 import { ordenesApi } from "@/api/ordenes";
+import { liqApi, type Pendiente } from "@/api/liquidaciones";
+import { GenerarLiquidacionModal } from "@/pages/pagos/LiquidacionesPage";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
 import { generarPdfPegado } from "@/utils/pdfPegado";
 import type { RegistroHoras, RegistroLabores, ResumenLabores } from "@/types/domain";
@@ -87,6 +89,7 @@ export function LaboresPage() {
   const [showPdfMenu, setShowPdfMenu] = useState(false);
   const [vistaDiaria, setVistaDiaria] = useState(false);
   const [expandidoDiario, setExpandidoDiario] = useState<string | null>(null);
+  const [generandoLiq, setGenerandoLiq] = useState<Pendiente | null>(null);
   const pdfMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -124,6 +127,13 @@ export function LaboresPage() {
     queryFn: () => laboresApi.resumenDiario(filtros).then(r => r.data),
     enabled: tab === "resumen" && vistaDiaria,
   });
+
+  const { data: liqPendientes = [] } = useQuery({
+    queryKey: ["liq-pendientes", mes, anio],
+    queryFn: () => liqApi.pendientes(mes, anio).then(r => r.data),
+    enabled: tab === "resumen" && !vistaDiaria,
+  });
+  const pendientesPorPersona = new Map(liqPendientes.map(p => [p.personal_id, p]));
 
   const aprobarHora = useMutation({
     mutationFn: (id: number) => laboresApi.aprobarHora(id),
@@ -405,14 +415,21 @@ export function LaboresPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
-                      {["Personal", "Horas", "Monto horas", "Labores", "Monto labores", "Subsidio transp.", "Total", ""].map(h => (
-                        <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
+                      {["Personal", "Horas", "Monto horas", "Labores", "Monto labores", "Subsidio transp.", "Total", "", ""].map((h, i) => (
+                        <th key={i} className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {resumen.map(r => (
-                      <PersonaMesRow key={r.personal_id} r={r} mes={mes} anio={anio} />
+                      <PersonaMesRow
+                        key={r.personal_id}
+                        r={r}
+                        mes={mes}
+                        anio={anio}
+                        pendiente={pendientesPorPersona.get(r.personal_id)}
+                        onLiquidar={setGenerandoLiq}
+                      />
                     ))}
                   </tbody>
                 </table>
@@ -497,13 +514,27 @@ export function LaboresPage() {
           onSaved={() => { qc.invalidateQueries({ queryKey: ["labores-labores"] }); setShowLaborForm(false); }}
         />
       )}
+      {generandoLiq && (
+        <GenerarLiquidacionModal
+          pendiente={generandoLiq} mes={mes} anio={anio}
+          onClose={() => setGenerandoLiq(null)}
+          onSaved={() => {
+            qc.invalidateQueries({ queryKey: ["labores-resumen", mes, anio] });
+            qc.invalidateQueries({ queryKey: ["liq-pendientes", mes, anio] });
+            setGenerandoLiq(null);
+          }}
+        />
+      )}
     </div>
   );
 }
 
 // ── Fila expandible de Resumen "Mes" (desglose diario por persona) ───────────
 
-function PersonaMesRow({ r, mes, anio }: { r: ResumenLabores; mes: number; anio: number }) {
+function PersonaMesRow({ r, mes, anio, pendiente, onLiquidar }: {
+  r: ResumenLabores; mes: number; anio: number;
+  pendiente: Pendiente | undefined; onLiquidar: (p: Pendiente) => void;
+}) {
   const qc = useQueryClient();
   const [expandido, setExpandido] = useState(false);
   const [expandidoFecha, setExpandidoFecha] = useState<string | null>(null);
@@ -517,13 +548,26 @@ function PersonaMesRow({ r, mes, anio }: { r: ResumenLabores; mes: number; anio:
   return (
     <>
       <tr className="hover:bg-gray-50">
-        <td className="px-4 py-3 font-medium text-gray-900">{r.nombre_completo}</td>
+        <td className="px-4 py-3">
+          <p className="font-medium text-gray-900">{r.nombre_completo}</p>
+          <p className="text-xs text-gray-400 font-mono">{r.codigo}</p>
+        </td>
         <td className="px-4 py-3 text-gray-600">{decimalToHhmm(r.total_horas)}</td>
         <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_horas_monto} /></td>
         <td className="px-4 py-3 text-gray-600">{r.total_labores}</td>
         <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_labores_monto} /></td>
         <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_subsidio} /></td>
         <td className="px-4 py-3 font-semibold text-gray-900"><CurrencyCell value={r.total_general} /></td>
+        <td className="px-4 py-3">
+          {pendiente?.ya_liquidado ? (
+            <span className="px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">Liquidado</span>
+          ) : pendiente && pendiente.total_pendiente > 0 ? (
+            <button onClick={() => onLiquidar(pendiente)}
+              className="flex items-center gap-1 text-xs bg-primary hover:bg-primary-hover text-white px-2 py-1 rounded whitespace-nowrap">
+              <Plus size={12} /> Liquidar mes
+            </button>
+          ) : null}
+        </td>
         <td className="px-4 py-3">
           <button
             onClick={() => setExpandido(v => !v)}
@@ -536,7 +580,7 @@ function PersonaMesRow({ r, mes, anio }: { r: ResumenLabores; mes: number; anio:
       </tr>
       {expandido && (
         <tr>
-          <td colSpan={8} className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+          <td colSpan={9} className="bg-gray-50 px-6 py-4 border-b border-gray-200">
             {isLoading ? (
               <p className="text-xs text-gray-400">Cargando…</p>
             ) : diario.length === 0 ? (

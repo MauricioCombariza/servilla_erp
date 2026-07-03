@@ -386,6 +386,7 @@ async def resumen_diario(
     sql = text(f"""
         SELECT
             p.id AS personal_id,
+            p.codigo,
             p.nombre_completo,
             d.fecha,
             COALESCE(h.total_horas, 0)         AS total_horas,
@@ -447,6 +448,7 @@ async def resumen_labores(
     sql = text(f"""
         SELECT
             p.id AS personal_id,
+            p.codigo,
             p.nombre_completo,
             COALESCE(h.total_horas, 0)         AS total_horas,
             COALESCE(h.total_horas_monto, 0)   AS total_horas_monto,
@@ -477,7 +479,7 @@ async def resumen_labores(
             GROUP BY personal_id
         ) sub ON p.id = sub.personal_id
         WHERE h.personal_id IS NOT NULL OR l.personal_id IS NOT NULL OR sub.personal_id IS NOT NULL
-        ORDER BY total_general DESC
+        ORDER BY p.codigo ASC
     """)
     rows = (await db.execute(sql, params)).mappings().all()
     return [ResumenLabores(**dict(r)) for r in rows]

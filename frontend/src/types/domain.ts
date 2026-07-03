@@ -339,6 +339,7 @@ export interface RegistroLabores {
 
 export interface ResumenLabores {
   personal_id: number;
+  codigo: string;
   nombre_completo: string;
   total_horas: number;
   total_horas_monto: number;

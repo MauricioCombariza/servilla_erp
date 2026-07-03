@@ -89,6 +89,7 @@ class RegistroLaboresRead(RegistroLaboresBase):
 
 class ResumenLabores(BaseModel):
     personal_id: int
+    codigo: str
     nombre_completo: str
     total_horas: float
     total_horas_monto: float
@@ -100,6 +101,7 @@ class ResumenLabores(BaseModel):
 
 class ResumenDiario(BaseModel):
     personal_id: int
+    codigo: str
     nombre_completo: str
     fecha: date
     total_horas: float

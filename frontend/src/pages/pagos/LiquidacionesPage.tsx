@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle, DollarSign, Trash2, Plus, Rows3 } from "lucide-react";
-import api from "@/api/client";
 import { gestionesApi } from "@/api/gestiones";
 import { laboresApi } from "@/api/labores";
+import { liqApi, type Pendiente, type Liquidacion } from "@/api/liquidaciones";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
 import type { PlanillaResumen, ResumenLabores } from "@/types/domain";
 
@@ -41,30 +41,6 @@ function rangoMes(mes: number, anio: number): { desde: string; hasta: string } {
 }
 
 type Tab = "pendientes" | "liquidaciones";
-
-interface Pendiente {
-  personal_id: number; codigo: string; nombre_completo: string; tipo_personal: string;
-  total_seriales: number; total_mensajero: number; total_horas: number; total_horas_monto: number;
-  total_labores: number; total_labores_monto: number; total_pendiente: number; ya_liquidado: boolean;
-}
-interface Liquidacion {
-  id: number; numero_liquidacion: string; personal_id: number;
-  periodo_mes: number; periodo_anio: number; fecha_generacion: string;
-  fecha_pago_programada: string; total_entregas: number; cantidad_entregas: number;
-  total_horas: number; total_labores: number; bonificaciones: number; descuentos: number;
-  total_a_pagar: number; estado: string; fecha_pago_real: string | null;
-  metodo_pago: string; referencia_pago: string | null; observaciones: string | null;
-}
-
-const liqApi = {
-  pendientes: (mes: number, anio: number) =>
-    api.get<Pendiente[]>("/liquidaciones/pendientes", { params: { mes, anio } }),
-  list: (params: object) => api.get<Liquidacion[]>("/liquidaciones/", { params }),
-  generar: (data: object) => api.post<Liquidacion>("/liquidaciones/generar", data),
-  aprobar: (id: number) => api.post<Liquidacion>(`/liquidaciones/${id}/aprobar`),
-  pagar: (id: number, data: object) => api.post<Liquidacion>(`/liquidaciones/${id}/pagar`, data),
-  delete: (id: number) => api.delete(`/liquidaciones/${id}`),
-};
 
 const ESTADO_STYLE: Record<string, string> = {
   generada:  "bg-yellow-50 text-yellow-700",
@@ -410,7 +386,7 @@ function DiarioDetalle({ diario }: { diario: (ResumenLabores & { fecha: string }
 
 // ── Modal generar liquidación ──────────────────────────────────────────────────
 
-function GenerarLiquidacionModal({ pendiente, mes, anio, onClose, onSaved }: {
+export function GenerarLiquidacionModal({ pendiente, mes, anio, onClose, onSaved }: {
   pendiente: Pendiente; mes: number; anio: number; onClose: () => void; onSaved: () => void;
 }) {
   const hoy = new Date();
@@ -444,6 +420,7 @@ function GenerarLiquidacionModal({ pendiente, mes, anio, onClose, onSaved }: {
             <div className="flex justify-between"><span className="text-gray-600">Seriales ({pendiente.total_seriales})</span><span className="font-medium">${fmt.format(pendiente.total_mensajero)}</span></div>
             <div className="flex justify-between"><span className="text-gray-600">Horas</span><span>${fmt.format(pendiente.total_horas_monto)}</span></div>
             <div className="flex justify-between"><span className="text-gray-600">Labores</span><span>${fmt.format(pendiente.total_labores_monto)}</span></div>
+            <div className="flex justify-between"><span className="text-gray-600">Subsidio transporte</span><span>${fmt.format(pendiente.total_subsidio ?? 0)}</span></div>
             <div className="flex justify-between border-t pt-1 mt-1 font-semibold"><span>Subtotal</span><span>${fmt.format(pendiente.total_pendiente)}</span></div>
           </div>
           <div className="grid grid-cols-2 gap-4">
