@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import io
 import logging
+import unicodedata
 from datetime import date
 
 import pandas as pd
@@ -44,6 +45,14 @@ logger = logging.getLogger(__name__)
 DATE_CORTE = date(2026, 1, 1)
 _CLIENTE_IMILE = "imile sas"
 _COURIERS_EXCLUIDOS = {"LECTA", "PRINDEL"}
+
+
+def _normalizar_nombre(s: str) -> str:
+    """minúsculas + sin tildes/diacríticos + espacios colapsados, para que
+    'Pabón  Gomez' == 'Pabon Gomez' == 'PABÓN GOMEZ'."""
+    s = unicodedata.normalize("NFKD", s.strip().lower())
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return " ".join(s.split())
 
 
 def _es_flujo_imile(df: pd.DataFrame) -> bool:
@@ -118,7 +127,7 @@ async def _cargar_maestros(
         for r in rows_per if r.codigo
     }
     personal_by_name = {
-        r.nombre_completo.strip().lower(): r.id for r in rows_per if r.nombre_completo
+        _normalizar_nombre(r.nombre_completo): r.id for r in rows_per if r.nombre_completo
     }
 
     return clientes_by_name, precios_cli, precios_men, personal_by_code, personal_by_name
@@ -269,18 +278,28 @@ async def procesar_csv(
 
     # ── Resolver DA → cod_men para filas iMile ────────────────────────────────
     if es_imile and "_da_nombre" in df.columns:
+        id_to_codigo = {info['id']: cod for cod, info in personal_by_code.items()}
+        da_no_resueltos: dict[str, int] = {}
+
         def _resolver_da(nombre: str) -> str:
             nombre = (nombre or "").strip()
             if not nombre:
                 return ""
-            pid = personal_by_name.get(nombre.lower())
-            if pid:
-                for cod, info in personal_by_code.items():
-                    if info['id'] == pid:
-                        return cod
+            pid = personal_by_name.get(_normalizar_nombre(nombre))
+            cod = id_to_codigo.get(pid) if pid else None
+            if cod:
+                return cod
+            da_no_resueltos[nombre] = da_no_resueltos.get(nombre, 0) + 1
             return ""  # DA no encontrado → sin código asignado
 
         df["_cod_men"] = df["_da_nombre"].apply(_resolver_da)
+
+        if da_no_resueltos:
+            detalle = ", ".join(f"'{n}' ({c})" for n, c in sorted(da_no_resueltos.items()))
+            errores.append(
+                f"{sum(da_no_resueltos.values())} filas de Imile con DA no reconocido en personal "
+                f"(quedaron sin código asignado, revisar nombre exacto): {detalle}"
+            )
 
     # ── Paso 1: construir params en Python (sin DB) ───────────────────────────
     all_serial_params: list[dict] = []
