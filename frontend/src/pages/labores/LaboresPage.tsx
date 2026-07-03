@@ -135,9 +135,25 @@ export function LaboresPage() {
   });
   const pendientesPorPersona = new Map(liqPendientes.map(p => [p.personal_id, p]));
 
+  const invalidarTodoElPeriodo = () => {
+    qc.invalidateQueries({ queryKey: ["labores-horas", mes, anio] });
+    qc.invalidateQueries({ queryKey: ["labores-labores", mes, anio] });
+    qc.invalidateQueries({ queryKey: ["labores-resumen", mes, anio] });
+    qc.invalidateQueries({ queryKey: ["labores-resumen-diario", mes, anio] });
+    qc.invalidateQueries({ queryKey: ["liq-pendientes", mes, anio] });
+  };
+
   const aprobarHora = useMutation({
     mutationFn: (id: number) => laboresApi.aprobarHora(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["labores-horas"] }),
+  });
+  const aprobarHorasLote = useMutation({
+    mutationFn: () => laboresApi.aprobarHorasLote({ mes, anio }),
+    onSuccess: invalidarTodoElPeriodo,
+  });
+  const aprobarLaboresLote = useMutation({
+    mutationFn: () => laboresApi.aprobarLaboresLote({ mes, anio }),
+    onSuccess: invalidarTodoElPeriodo,
   });
   const deleteHora = useMutation({
     mutationFn: (id: number) => laboresApi.deleteHora(id),
@@ -177,10 +193,25 @@ export function LaboresPage() {
           <input type="number" value={anio} onChange={e => setAnio(+e.target.value)}
             className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-20" />
           {tab === "horas" && (
-            <button onClick={() => setShowHoraForm(true)}
-              className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-              <Plus size={16} /> Registrar horas
-            </button>
+            <>
+              {horas.some(h => !h.aprobado) && (
+                <button
+                  onClick={() => {
+                    const pendientes = horas.filter(h => !h.aprobado).length;
+                    if (confirm(`¿Aprobar ${pendientes} registro(s) de horas pendientes de ${MESES[mes - 1]} ${anio}?`)) {
+                      aprobarHorasLote.mutate();
+                    }
+                  }}
+                  disabled={aprobarHorasLote.isPending}
+                  className="flex items-center gap-2 border border-green-300 text-green-700 hover:bg-green-50 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-60">
+                  <CheckCircle size={16} /> {aprobarHorasLote.isPending ? "Aprobando..." : "Aprobar todo"}
+                </button>
+              )}
+              <button onClick={() => setShowHoraForm(true)}
+                className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                <Plus size={16} /> Registrar horas
+              </button>
+            </>
           )}
           {tab === "labores" && (
             <>
@@ -218,6 +249,19 @@ export function LaboresPage() {
                     </div>
                   )}
                 </div>
+              )}
+              {labores.some(l => !l.aprobado) && (
+                <button
+                  onClick={() => {
+                    const pendientes = labores.filter(l => !l.aprobado).length;
+                    if (confirm(`¿Aprobar ${pendientes} registro(s) de labores pendientes de ${MESES[mes - 1]} ${anio}?`)) {
+                      aprobarLaboresLote.mutate();
+                    }
+                  }}
+                  disabled={aprobarLaboresLote.isPending}
+                  className="flex items-center gap-2 border border-green-300 text-green-700 hover:bg-green-50 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-60">
+                  <CheckCircle size={16} /> {aprobarLaboresLote.isPending ? "Aprobando..." : "Aprobar todo"}
+                </button>
               )}
               <button onClick={() => setShowLaborForm(true)}
                 className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">

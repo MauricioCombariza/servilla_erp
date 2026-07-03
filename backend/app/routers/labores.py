@@ -226,6 +226,35 @@ async def aprobar_hora(hora_id: int, db: AsyncSession = Depends(get_db), _=_auth
     return r
 
 
+@router.post("/horas/aprobar-lote")
+async def aprobar_horas_lote(
+    mes: int | None = None,
+    anio: int | None = None,
+    personal_id: int | None = None,
+    db: AsyncSession = Depends(get_db),
+    _=_auth_admin,
+):
+    filters = ["aprobado = FALSE"]
+    params: dict = {}
+    if mes is not None:
+        filters.append("EXTRACT(MONTH FROM fecha) = :mes")
+        params["mes"] = mes
+    if anio is not None:
+        filters.append("EXTRACT(YEAR FROM fecha) = :anio")
+        params["anio"] = anio
+    if personal_id is not None:
+        filters.append("personal_id = :personal_id")
+        params["personal_id"] = personal_id
+
+    where = " AND ".join(filters)
+    result = await db.execute(text(f"""
+        UPDATE registro_horas SET aprobado = TRUE, fecha_aprobacion = NOW()
+        WHERE {where}
+    """), params)
+    await db.commit()
+    return {"aprobados": result.rowcount}
+
+
 # ── Registro de labores ───────────────────────────────────────────────────────
 
 _LABORES_ENRICH_SQL = """
@@ -342,6 +371,35 @@ async def aprobar_labor(labor_id: int, db: AsyncSession = Depends(get_db), _=_au
     await db.commit()
     await db.refresh(r)
     return r
+
+
+@router.post("/labores/aprobar-lote")
+async def aprobar_labores_lote(
+    mes: int | None = None,
+    anio: int | None = None,
+    personal_id: int | None = None,
+    db: AsyncSession = Depends(get_db),
+    _=_auth_admin,
+):
+    filters = ["aprobado = FALSE"]
+    params: dict = {}
+    if mes is not None:
+        filters.append("EXTRACT(MONTH FROM fecha) = :mes")
+        params["mes"] = mes
+    if anio is not None:
+        filters.append("EXTRACT(YEAR FROM fecha) = :anio")
+        params["anio"] = anio
+    if personal_id is not None:
+        filters.append("personal_id = :personal_id")
+        params["personal_id"] = personal_id
+
+    where = " AND ".join(filters)
+    result = await db.execute(text(f"""
+        UPDATE registro_labores SET aprobado = TRUE, fecha_aprobacion = NOW()
+        WHERE {where}
+    """), params)
+    await db.commit()
+    return {"aprobados": result.rowcount}
 
 
 # ── Resumen por persona ───────────────────────────────────────────────────────

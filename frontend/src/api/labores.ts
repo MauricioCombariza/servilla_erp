@@ -34,6 +34,9 @@ export const laboresApi = {
 
   aprobarHora: (id: number) => api.post<RegistroHoras>(`/labores/horas/${id}/aprobar`),
 
+  aprobarHorasLote: (params: { mes?: number; anio?: number; personal_id?: number }) =>
+    api.post<{ aprobados: number }>("/labores/horas/aprobar-lote", null, { params }),
+
   listLabores: (params?: FiltrosPeriodo & { tipo_labor?: string }) =>
     api.get<RegistroLabores[]>("/labores/labores", { params }),
 
@@ -49,6 +52,9 @@ export const laboresApi = {
   deleteLabor: (id: number) => api.delete(`/labores/labores/${id}`),
 
   aprobarLabor: (id: number) => api.post<RegistroLabores>(`/labores/labores/${id}/aprobar`),
+
+  aprobarLaboresLote: (params: { mes?: number; anio?: number; personal_id?: number }) =>
+    api.post<{ aprobados: number }>("/labores/labores/aprobar-lote", null, { params }),
 
   resumen: (params?: { mes?: number; anio?: number }) =>
     api.get<ResumenLabores[]>("/labores/resumen", { params }),
