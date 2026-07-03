@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Numeric, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import TIMESTAMP
 
@@ -70,19 +70,3 @@ class NominaEmpleadoPeriodo(Base):
     periodo_mes: Mapped[int] = mapped_column(nullable=False)
     periodo_anio: Mapped[int] = mapped_column(nullable=False)
     fecha_creacion: Mapped[datetime | None] = mapped_column(_ts, server_default=func.now())
-
-
-class PagoOperativo(Base):
-    __tablename__ = "pagos_operativos_mensuales"
-    __table_args__ = (UniqueConstraint("tipo", "periodo_mes", "periodo_anio"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    tipo: Mapped[str] = mapped_column(String(50), nullable=False)
-    periodo_mes: Mapped[int] = mapped_column(nullable=False)
-    periodo_anio: Mapped[int] = mapped_column(nullable=False)
-    monto_total: Mapped[float] = mapped_column(Numeric(15, 2), nullable=False, default=0)
-    fecha_vencimiento: Mapped[date | None] = mapped_column()
-    estado: Mapped[str] = mapped_column(String(20), default="pendiente")
-    fecha_pago: Mapped[date | None] = mapped_column()
-    observaciones: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime | None] = mapped_column(_ts, server_default=func.now())

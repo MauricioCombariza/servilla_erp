@@ -4,7 +4,6 @@ import type {
   NominaParametro,
   NominaProvision,
   NominaResumenPeriodo,
-  PagoOperativo,
   PeriodoHistorico,
   ResumenNomina,
   ResumenNominaDetallado,
@@ -43,15 +42,6 @@ export const nominaApi = {
 
   updateParametro: (id: number, data: { valor?: number; descripcion?: string; activo?: boolean }) =>
     api.put<NominaParametro>(`/nomina/parametros/${id}`, data),
-
-  listPagos: (params?: { mes?: number; anio?: number }) =>
-    api.get<PagoOperativo[]>("/nomina/pagos", { params }),
-
-  upsertPago: (data: Omit<PagoOperativo, "id" | "estado" | "fecha_pago" | "created_at">) =>
-    api.post<PagoOperativo>("/nomina/pagos", data),
-
-  marcarPagado: (id: number, fecha_pago: string) =>
-    api.put<PagoOperativo>(`/nomina/pagos/${id}/marcar-pagado`, { fecha_pago }),
 
   deleteProvisiones: (mes: number, anio: number) =>
     api.delete(`/nomina/provisiones`, { params: { mes, anio } }),

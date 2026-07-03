@@ -73,10 +73,34 @@ const ESTADO_STYLE: Record<string, string> = {
 };
 
 export function LiquidacionesPage() {
-  const qc = useQueryClient();
-  const [tab, setTab] = useState<Tab>("pendientes");
   const [mes, setMes] = useState(HOY.getMonth() + 1);
   const [anio, setAnio] = useState(HOY.getFullYear());
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-xl font-semibold text-gray-900">Gestión de Pagos — Personal Operativo</h1>
+          <p className="text-sm text-gray-500 mt-0.5">{MESES[mes - 1]} {anio}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <select value={mes} onChange={(e) => setMes(+e.target.value)}
+            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm">
+            {MESES.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+          </select>
+          <input type="number" value={anio} onChange={(e) => setAnio(+e.target.value)}
+            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-20" />
+        </div>
+      </div>
+
+      <LiquidacionesPanel mes={mes} anio={anio} />
+    </div>
+  );
+}
+
+export function LiquidacionesPanel({ mes, anio }: { mes: number; anio: number }) {
+  const qc = useQueryClient();
+  const [tab, setTab] = useState<Tab>("pendientes");
   const [generando, setGenerando] = useState<Pendiente | null>(null);
   const [pagando, setPagando] = useState<Liquidacion | null>(null);
 
@@ -108,25 +132,11 @@ export function LiquidacionesPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-900">Gestión de Pagos — Personal Operativo</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            {MESES[mes - 1]} {anio}
-            {tab === "pendientes" && ` · Pendiente total: `}
-            {tab === "pendientes" && <span className="font-medium text-gray-800">${fmt.format(totalPendiente)}</span>}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <select value={mes} onChange={(e) => setMes(+e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm">
-            {MESES.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
-          </select>
-          <input type="number" value={anio} onChange={(e) => setAnio(+e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-20" />
-        </div>
-      </div>
-
+      {tab === "pendientes" && (
+        <p className="text-sm text-gray-500 mb-2">
+          Pendiente total: <span className="font-medium text-gray-800">${fmt.format(totalPendiente)}</span>
+        </p>
+      )}
       <div className="flex border-b border-gray-200 mb-4">
         {(["pendientes", "liquidaciones"] as Tab[]).map((t) => (
           <button key={t} onClick={() => setTab(t)}
@@ -147,8 +157,8 @@ export function LiquidacionesPage() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    {["Personal","Seriales","Monto seriales","Horas","Labores","Total","Estado","",""].map((h) => (
-                      <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
+                    {["Personal","Seriales","Monto seriales","Horas","Labores","Total","Estado","",""].map((h, i) => (
+                      <th key={i} className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
                     ))}
                   </tr>
                 </thead>

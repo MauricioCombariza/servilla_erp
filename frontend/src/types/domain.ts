@@ -238,19 +238,6 @@ export interface NominaParametro {
   activo: boolean;
 }
 
-export interface PagoOperativo {
-  id: number;
-  tipo: string;
-  periodo_mes: number;
-  periodo_anio: number;
-  monto_total: number;
-  fecha_vencimiento: string | null;
-  estado: "pendiente" | "pagado";
-  fecha_pago: string | null;
-  observaciones: string | null;
-  created_at: string | null;
-}
-
 export interface EmpleadoResumen {
   id: number;
   nombre_completo: string;

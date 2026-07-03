@@ -6,15 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_role
 from app.database import get_db
-from app.models.nomina import NominaEmpleado, NominaEmpleadoPeriodo, NominaParametro, NominaProvision, PagoOperativo
+from app.models.nomina import NominaEmpleado, NominaEmpleadoPeriodo, NominaParametro, NominaProvision
 from app.schemas.nomina import (
     CalcularProvisionesRequest,
     EmpleadoResumen,
-    MarcarPagadoRequest,
     NominaEmpleadoCreate, NominaEmpleadoRead, NominaEmpleadoUpdate,
     NominaParametroCreate, NominaParametroRead, NominaParametroUpdate,
     NominaProvisionRead, NominaResumenPeriodo, PeriodoHistorico, ResumenNomina, ResumenNominaDetallado,
-    PagoOperativoCreate, PagoOperativoRead,
     RosterAddRequest, RosterEntryRead,
 )
 
@@ -622,70 +620,3 @@ async def update_parametro(
     await db.commit()
     await db.refresh(p)
     return p
-
-
-# ── Pagos Operativos ──────────────────────────────────────────────────────────
-
-@router.get("/pagos", response_model=list[PagoOperativoRead])
-async def list_pagos(
-    mes: int | None = None,
-    anio: int | None = None,
-    db: AsyncSession = Depends(get_db),
-    _=_auth,
-):
-    q = select(PagoOperativo).order_by(
-        PagoOperativo.periodo_anio.desc(),
-        PagoOperativo.periodo_mes.desc(),
-        PagoOperativo.tipo,
-    )
-    if mes is not None:
-        q = q.where(PagoOperativo.periodo_mes == mes)
-    if anio is not None:
-        q = q.where(PagoOperativo.periodo_anio == anio)
-    result = await db.execute(q)
-    return result.scalars().all()
-
-
-@router.post("/pagos", response_model=PagoOperativoRead, status_code=status.HTTP_201_CREATED)
-async def upsert_pago(body: PagoOperativoCreate, db: AsyncSession = Depends(get_db), _=_auth):
-    existing = (
-        await db.execute(
-            select(PagoOperativo).where(
-                PagoOperativo.tipo == body.tipo,
-                PagoOperativo.periodo_mes == body.periodo_mes,
-                PagoOperativo.periodo_anio == body.periodo_anio,
-            )
-        )
-    ).scalar_one_or_none()
-
-    if existing:
-        existing.monto_total = body.monto_total
-        existing.fecha_vencimiento = body.fecha_vencimiento
-        existing.observaciones = body.observaciones
-        await db.commit()
-        await db.refresh(existing)
-        return existing
-
-    pago = PagoOperativo(**body.model_dump())
-    db.add(pago)
-    await db.commit()
-    await db.refresh(pago)
-    return pago
-
-
-@router.put("/pagos/{pago_id}/marcar-pagado", response_model=PagoOperativoRead)
-async def marcar_pagado(
-    pago_id: int,
-    body: MarcarPagadoRequest,
-    db: AsyncSession = Depends(get_db),
-    _=_auth,
-):
-    result = await db.execute(select(PagoOperativo).where(PagoOperativo.id == pago_id))
-    pago = result.scalar_one_or_none()
-    if pago is None:
-        raise HTTPException(status_code=404, detail="Pago no encontrado")
-    pago.estado = "pagado"
-    pago.fecha_pago = body.fecha_pago
-    await db.commit()
-    await db.refresh(pago)
-    return pago

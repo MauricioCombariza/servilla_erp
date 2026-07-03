@@ -1,15 +1,15 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Pencil, Trash2, Calculator, CheckCircle, Clock, AlertTriangle, ChevronDown, ChevronRight, X, UserPlus } from "lucide-react";
+import { Plus, Pencil, Trash2, Calculator, ChevronDown, ChevronRight, X, UserPlus } from "lucide-react";
 import { nominaApi } from "@/api/nomina";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
 import { Badge } from "@/components/ui/Badge";
+import { LiquidacionesPanel } from "@/pages/pagos/LiquidacionesPage";
 import type {
   EmpleadoResumen,
   NominaEmpleado,
   NominaParametro,
   NominaProvision,
-  PagoOperativo,
   PeriodoHistorico,
   ResumenNominaDetallado,
   RosterEntry,
@@ -20,12 +20,6 @@ const MESES = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov"
 const HOY = new Date();
 
 type Tab = "empleados" | "resumen" | "provisiones" | "parametros" | "pagos";
-
-function calcFechaVencimiento(mes: number, anio: number): string {
-  const nextMes = mes === 12 ? 1 : mes + 1;
-  const nextAnio = mes === 12 ? anio + 1 : anio;
-  return `${nextAnio}-${String(nextMes).padStart(2, "0")}-08`;
-}
 
 export function NominaPage() {
   const qc = useQueryClient();
@@ -63,12 +57,6 @@ export function NominaPage() {
     queryKey: ["nomina-parametros"],
     queryFn: () => nominaApi.listParametros().then((r) => r.data),
     enabled: tab === "parametros",
-  });
-
-  const { data: pagos = [], isLoading: loadingPagos } = useQuery({
-    queryKey: ["nomina-pagos", mes, anio],
-    queryFn: () => nominaApi.listPagos({ mes, anio }).then((r) => r.data),
-    enabled: tab === "pagos",
   });
 
   const calcular = useMutation({
@@ -251,7 +239,7 @@ export function NominaPage() {
       )}
 
       {tab === "pagos" && (
-        <PagosTab pagos={pagos} loading={loadingPagos} mes={mes} anio={anio} />
+        <LiquidacionesPanel mes={mes} anio={anio} />
       )}
 
       {showForm && (
@@ -853,242 +841,6 @@ function ParametrosTab({ parametros, loading }: { parametros: NominaParametro[];
               ))}
             </tbody>
           </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Pagos Tab ─────────────────────────────────────────────────────────────────
-
-function PagosTab({
-  pagos,
-  loading,
-  mes,
-  anio,
-}: {
-  pagos: PagoOperativo[];
-  loading: boolean;
-  mes: number;
-  anio: number;
-}) {
-  const qc = useQueryClient();
-  const [montoMensajeros, setMontoMensajeros] = useState("");
-  const [montoAlistamiento, setMontoAlistamiento] = useState("");
-  const [observaciones, setObservaciones] = useState("");
-  const [fechaPagoId, setFechaPagoId] = useState<number | null>(null);
-  const [fechaPagoVal, setFechaPagoVal] = useState(HOY.toISOString().split("T")[0]);
-  const [saved, setSaved] = useState(false);
-
-  const fechaVencimiento = calcFechaVencimiento(mes, anio);
-
-  const upsert = useMutation({
-    mutationFn: (data: Parameters<typeof nominaApi.upsertPago>[0]) => nominaApi.upsertPago(data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["nomina-pagos"] });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
-    },
-  });
-
-  const marcar = useMutation({
-    mutationFn: ({ id, fecha }: { id: number; fecha: string }) =>
-      nominaApi.marcarPagado(id, fecha),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["nomina-pagos"] });
-      setFechaPagoId(null);
-    },
-  });
-
-  async function handleRegistrar(e: React.FormEvent) {
-    e.preventDefault();
-    const ops = [];
-    if (montoMensajeros && parseFloat(montoMensajeros) > 0) {
-      ops.push(upsert.mutateAsync({
-        tipo: "mensajeros",
-        periodo_mes: mes,
-        periodo_anio: anio,
-        monto_total: parseFloat(montoMensajeros),
-        fecha_vencimiento: fechaVencimiento,
-        observaciones: observaciones || null,
-      }));
-    }
-    if (montoAlistamiento && parseFloat(montoAlistamiento) > 0) {
-      ops.push(upsert.mutateAsync({
-        tipo: "alistamiento",
-        periodo_mes: mes,
-        periodo_anio: anio,
-        monto_total: parseFloat(montoAlistamiento),
-        fecha_vencimiento: fechaVencimiento,
-        observaciones: observaciones || null,
-      }));
-    }
-    await Promise.all(ops);
-    setMontoMensajeros("");
-    setMontoAlistamiento("");
-    setObservaciones("");
-  }
-
-  const hoy = HOY.toISOString().split("T")[0];
-  const totalPendiente = pagos.filter((p) => p.estado === "pendiente").reduce((s, p) => s + p.monto_total, 0);
-  const totalPagado = pagos.filter((p) => p.estado === "pagado").reduce((s, p) => s + p.monto_total, 0);
-
-  function estadoPago(p: PagoOperativo) {
-    if (p.estado === "pagado") return "pagado";
-    if (p.fecha_vencimiento && p.fecha_vencimiento < hoy) return "vencido";
-    return "pendiente";
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* Formulario de registro */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <h3 className="text-sm font-semibold text-gray-800 mb-4">
-          Registrar pago — {MESES[mes - 1]} {anio}
-          <span className="ml-2 text-xs font-normal text-gray-500">
-            Vence: {fechaVencimiento}
-          </span>
-        </h3>
-        <form onSubmit={handleRegistrar} className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Mensajeros ($)</label>
-            <input
-              type="number"
-              min={0}
-              step="1"
-              value={montoMensajeros}
-              onChange={(e) => setMontoMensajeros(e.target.value)}
-              placeholder="0"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Alistamiento ($)</label>
-            <input
-              type="number"
-              min={0}
-              step="1"
-              value={montoAlistamiento}
-              onChange={(e) => setMontoAlistamiento(e.target.value)}
-              placeholder="0"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-            />
-          </div>
-          <div className="col-span-2">
-            <label className="block text-xs font-medium text-gray-700 mb-1">Observaciones</label>
-            <textarea
-              value={observaciones}
-              onChange={(e) => setObservaciones(e.target.value)}
-              rows={2}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none"
-            />
-          </div>
-          <div className="col-span-2 flex items-center gap-3">
-            <button
-              type="submit"
-              disabled={upsert.isPending || (!montoMensajeros && !montoAlistamiento)}
-              className="bg-primary hover:bg-primary-hover text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-60"
-            >
-              {upsert.isPending ? "Guardando..." : "Registrar"}
-            </button>
-            {saved && (
-              <span className="text-green-600 text-sm flex items-center gap-1">
-                <CheckCircle size={14} /> Guardado
-              </span>
-            )}
-          </div>
-        </form>
-      </div>
-
-      {/* Métricas resumen */}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-          <p className="text-xs text-amber-700 uppercase tracking-wide font-medium">Total pendiente</p>
-          <p className="text-xl font-semibold text-amber-900 mt-1">${fmt.format(totalPendiente)}</p>
-        </div>
-        <div className="bg-green-50 border border-green-200 rounded-xl p-4">
-          <p className="text-xs text-green-700 uppercase tracking-wide font-medium">Total pagado</p>
-          <p className="text-xl font-semibold text-green-900 mt-1">${fmt.format(totalPagado)}</p>
-        </div>
-      </div>
-
-      {/* Lista de pagos */}
-      {loading ? (
-        <div className="text-center py-8 text-gray-500">Cargando...</div>
-      ) : pagos.length === 0 ? (
-        <div className="text-center py-8 text-gray-400">Sin pagos registrados para {MESES[mes - 1]} {anio}</div>
-      ) : (
-        <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
-          {pagos.map((p) => {
-            const estado = estadoPago(p);
-            return (
-              <div key={p.id} className="px-5 py-4 flex items-center justify-between gap-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-gray-900 capitalize">{p.tipo}</span>
-                    <span className="text-xs text-gray-500">
-                      {MESES[p.periodo_mes - 1]} {p.periodo_anio}
-                    </span>
-                    {estado === "pagado" && (
-                      <span className="inline-flex items-center gap-1 text-xs text-green-700 bg-green-50 px-2 py-0.5 rounded-full">
-                        <CheckCircle size={11} /> Pagado {p.fecha_pago}
-                      </span>
-                    )}
-                    {estado === "vencido" && (
-                      <span className="inline-flex items-center gap-1 text-xs text-red-700 bg-red-50 px-2 py-0.5 rounded-full">
-                        <AlertTriangle size={11} /> Vencido
-                      </span>
-                    )}
-                    {estado === "pendiente" && (
-                      <span className="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
-                        <Clock size={11} /> Vence {p.fecha_vencimiento}
-                      </span>
-                    )}
-                  </div>
-                  {p.observaciones && (
-                    <p className="text-xs text-gray-500 mt-0.5">{p.observaciones}</p>
-                  )}
-                </div>
-                <div className="text-right">
-                  <p className="font-semibold text-gray-900">${fmt.format(p.monto_total)}</p>
-                  {p.estado === "pendiente" && (
-                    <div className="mt-1">
-                      {fechaPagoId === p.id ? (
-                        <div className="flex items-center gap-2 justify-end">
-                          <input
-                            type="date"
-                            value={fechaPagoVal}
-                            onChange={(e) => setFechaPagoVal(e.target.value)}
-                            className="border border-gray-300 rounded px-2 py-1 text-xs"
-                          />
-                          <button
-                            onClick={() => marcar.mutate({ id: p.id, fecha: fechaPagoVal })}
-                            disabled={marcar.isPending}
-                            className="text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded disabled:opacity-60"
-                          >
-                            Confirmar
-                          </button>
-                          <button
-                            onClick={() => setFechaPagoId(null)}
-                            className="text-xs text-gray-500"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => { setFechaPagoId(p.id); setFechaPagoVal(hoy); }}
-                          className="text-xs text-green-700 hover:text-green-900 underline"
-                        >
-                          Marcar pagado
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
         </div>
       )}
     </div>

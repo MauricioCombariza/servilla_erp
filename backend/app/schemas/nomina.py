@@ -93,27 +93,6 @@ class NominaParametroUpdate(BaseModel):
     activo: bool | None = None
 
 
-class PagoOperativoCreate(BaseModel):
-    tipo: str
-    periodo_mes: int
-    periodo_anio: int
-    monto_total: float
-    fecha_vencimiento: date | None = None
-    observaciones: str | None = None
-
-
-class PagoOperativoRead(PagoOperativoCreate):
-    model_config = ConfigDict(from_attributes=True)
-    id: int
-    estado: str
-    fecha_pago: date | None = None
-    created_at: datetime | None = None
-
-
-class MarcarPagadoRequest(BaseModel):
-    fecha_pago: date
-
-
 class EmpleadoResumen(BaseModel):
     id: int
     nombre_completo: str
