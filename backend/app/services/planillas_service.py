@@ -340,7 +340,7 @@ async def cambiar_precio_courier(
             text("""
                 WITH updated AS (
                     UPDATE seriales_gestion
-                    SET precio_mensajero = CASE ambito WHEN 'bogota' THEN :pl::numeric ELSE :pn::numeric END,
+                    SET precio_mensajero = CASE ambito WHEN 'bogota' THEN CAST(:pl AS NUMERIC) ELSE CAST(:pn AS NUMERIC) END,
                         editado_manualmente = TRUE
                     WHERE planilla = :planilla
                     RETURNING ambito
@@ -350,7 +350,10 @@ async def cambiar_precio_courier(
                     SUM(CASE WHEN ambito = 'bogota' THEN 1 ELSE 0 END) AS bogota,
                     SUM(CASE WHEN ambito != 'bogota' THEN 1 ELSE 0 END) AS nacional
                 FROM updated
-            """),
+            """).bindparams(
+                bindparam("pl", type_=Numeric),
+                bindparam("pn", type_=Numeric),
+            ),
             {"pl": req.precio_local, "pn": req.precio_nacional, "planilla": planilla},
         )
     ).mappings().one()

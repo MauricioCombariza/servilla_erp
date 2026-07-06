@@ -285,7 +285,18 @@ async def procesar_csv(
             nombre = (nombre or "").strip()
             if not nombre:
                 return ""
-            pid = personal_by_name.get(_normalizar_nombre(nombre))
+            norm = _normalizar_nombre(nombre)
+            pid = personal_by_name.get(norm)
+            if pid is None:
+                # Imile a veces envía el DA sin el segundo apellido (ej. "Mariela
+                # Pabon" vs "Mariela Pabón Gomez" en personal). Si el nombre del DA
+                # es prefijo exacto de un único nombre en personal, se usa ese match.
+                candidatos = {
+                    v for k, v in personal_by_name.items()
+                    if k == norm or k.startswith(norm + " ")
+                }
+                if len(candidatos) == 1:
+                    pid = next(iter(candidatos))
             cod = id_to_codigo.get(pid) if pid else None
             if cod:
                 return cod
