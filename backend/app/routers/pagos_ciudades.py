@@ -179,6 +179,8 @@ async def crear_prefactura(
         valor_total=sum(float(r["valor_total"]) for r in rows),
         estado="borrador",
         notas=body.notas,
+        valor_ajustado=body.valor_ajustado,
+        notas_ajuste=body.notas_ajuste,
     )
     db.add(prefactura)
     await db.flush()

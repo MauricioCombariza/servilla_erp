@@ -274,6 +274,31 @@ async def test_flujo_aprobar_facturar_pagar(client, auth_headers, pc_data):
 
 
 @pytest.mark.asyncio
+async def test_crear_prefactura_con_ajuste_inicial(client, auth_headers, pc_data):
+    r = await client.post(
+        "/api/pagos-ciudades/prefacturas",
+        json={
+            "cod_mensajero": pc_data["cod_mensajero"],
+            "periodo_desde": "2026-06-01",
+            "periodo_hasta": "2026-06-30",
+            "planillas": [pc_data["planilla_b"]],
+            "valor_ajustado": 900.0,
+            "notas_ajuste": "Ajuste definido al generar",
+        },
+        headers=auth_headers,
+    )
+    assert r.status_code == 201, r.text
+    data = r.json()
+    assert data["valor_total"] == 1000.0
+    assert data["valor_ajustado"] == 900.0
+    assert data["valor_a_pagar"] == 900.0
+    assert data["notas_ajuste"] == "Ajuste definido al generar"
+
+    r2 = await client.delete(f"/api/pagos-ciudades/prefacturas/{data['id']}", headers=auth_headers)
+    assert r2.status_code == 204
+
+
+@pytest.mark.asyncio
 async def test_eliminar_prefactura_no_borrador_falla(client, auth_headers, pc_data):
     # La prefactura del test anterior ya está "facturada"
     r = await client.delete(f"/api/pagos-ciudades/prefacturas/{pc_data['prefactura_id']}", headers=auth_headers)

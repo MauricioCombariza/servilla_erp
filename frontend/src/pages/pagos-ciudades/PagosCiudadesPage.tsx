@@ -282,12 +282,14 @@ function PlanillasTab({ qc, onCreated }: { qc: ReturnType<typeof useQueryClient>
           saving={crear.isPending}
           error={crear.isError ? (crear.error as any)?.response?.data?.detail ?? "Error al crear la prefactura" : null}
           onClose={() => setShowConfirm(false)}
-          onConfirm={(notas) => crear.mutate({
+          onConfirm={(notas, montoAjustado, notasAjuste) => crear.mutate({
             cod_mensajero: codMensajero,
             periodo_desde: desde,
             periodo_hasta: hasta,
             planillas: Array.from(seleccionadas),
             notas: notas || null,
+            valor_ajustado: montoAjustado,
+            notas_ajuste: notasAjuste,
           })}
         />
       )}
@@ -299,9 +301,19 @@ function ConfirmarPrefacturaModal({
   codMensajero, planillas, totalValor, saving, error, onClose, onConfirm,
 }: {
   codMensajero: string; desde: string; hasta: string; planillas: string[]; totalValor: number;
-  saving: boolean; error: string | null; onClose: () => void; onConfirm: (notas: string) => void;
+  saving: boolean; error: string | null; onClose: () => void;
+  onConfirm: (notas: string, montoAjustado: number | null, notasAjuste: string | null) => void;
 }) {
   const [notas, setNotas] = useState("");
+  const [montoPagar, setMontoPagar] = useState(String(totalValor));
+  const [notasAjuste, setNotasAjuste] = useState("");
+
+  const montoNum = montoPagar === "" ? totalValor : +montoPagar;
+  const ajustado = montoNum !== totalValor;
+
+  function handleConfirm() {
+    onConfirm(notas, ajustado ? montoNum : null, ajustado ? (notasAjuste || null) : null);
+  }
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -310,7 +322,7 @@ function ConfirmarPrefacturaModal({
           <div>
             <h2 className="text-base font-semibold">Generar prefactura</h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              Courier {codMensajero} · {planillas.length} planilla(s) · ${fmt.format(totalValor)}
+              Courier {codMensajero} · {planillas.length} planilla(s) · Calculado: ${fmt.format(totalValor)}
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
@@ -318,13 +330,30 @@ function ConfirmarPrefacturaModal({
         <div className="px-6 py-4 space-y-4">
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Monto a pagar</label>
+            <input type="number" min={0} value={montoPagar}
+              onChange={(e) => setMontoPagar(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+            {ajustado && (
+              <p className="text-xs text-amber-600 mt-1">Ajustado respecto al calculado (${fmt.format(totalValor)})</p>
+            )}
+          </div>
+          {ajustado && (
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Motivo del ajuste</label>
+              <input value={notasAjuste} onChange={(e) => setNotasAjuste(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                placeholder="Opcional" />
+            </div>
+          )}
+          <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">Notas (opcional)</label>
             <textarea value={notas} onChange={(e) => setNotas(e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" rows={3} />
           </div>
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg">Cancelar</button>
-            <button type="button" disabled={saving} onClick={() => onConfirm(notas)}
+            <button type="button" disabled={saving} onClick={handleConfirm}
               className="px-4 py-2 text-sm bg-primary hover:bg-primary-hover text-white rounded-lg disabled:opacity-60">
               {saving ? "Guardando..." : "Generar prefactura"}
             </button>

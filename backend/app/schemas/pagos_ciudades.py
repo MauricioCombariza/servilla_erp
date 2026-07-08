@@ -24,6 +24,8 @@ class PrefacturaCourierCreate(BaseModel):
     periodo_hasta: date
     planillas: list[str]
     notas: str | None = None
+    valor_ajustado: float | None = None
+    notas_ajuste: str | None = None
 
 
 class PrefacturaPlanillaRead(BaseModel):
