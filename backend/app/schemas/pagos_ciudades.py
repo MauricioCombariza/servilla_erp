@@ -56,8 +56,16 @@ class PrefacturaCourierRead(BaseModel):
     valor_total: float
     estado: str
     notas: str | None
+    valor_ajustado: float | None = None
+    notas_ajuste: str | None = None
+    valor_a_pagar: float
     created_at: datetime | None
     planillas: list[PrefacturaPlanillaRead] = []
+
+
+class AjustarMontoRequest(BaseModel):
+    valor_ajustado: float | None = None
+    notas_ajuste: str | None = None
 
 
 class RegistrarFacturaRequest(BaseModel):

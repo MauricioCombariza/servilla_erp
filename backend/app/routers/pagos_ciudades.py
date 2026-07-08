@@ -9,6 +9,7 @@ from app.database import get_db
 from app.models.pagos_ciudades import FacturaCourierCxp, PrefacturaCourier, PrefacturaPlanilla
 from app.models.personal import Personal
 from app.schemas.pagos_ciudades import (
+    AjustarMontoRequest,
     FacturaCourierCxpRead,
     FacturaCourierCxpUpdate,
     PagarCxpRequest,
@@ -73,6 +74,7 @@ async def _nombres_mensajeros(db: AsyncSession, codigos: set[str]) -> dict[str, 
 
 
 def _prefactura_to_read(pf: PrefacturaCourier, nombre: str | None) -> PrefacturaCourierRead:
+    valor_ajustado = float(pf.valor_ajustado) if pf.valor_ajustado is not None else None
     return PrefacturaCourierRead(
         id=pf.id,
         cod_mensajero=pf.cod_mensajero,
@@ -88,6 +90,9 @@ def _prefactura_to_read(pf: PrefacturaCourier, nombre: str | None) -> Prefactura
         valor_total=float(pf.valor_total),
         estado=pf.estado,
         notas=pf.notas,
+        valor_ajustado=valor_ajustado,
+        notas_ajuste=pf.notas_ajuste,
+        valor_a_pagar=valor_ajustado if valor_ajustado is not None else float(pf.valor_total),
         created_at=pf.created_at,
         planillas=list(pf.planillas),
     )
@@ -236,6 +241,24 @@ async def aprobar_prefactura(
     if pf.estado != "borrador":
         raise HTTPException(status_code=400, detail="Solo se pueden aprobar prefacturas en borrador")
     pf.estado = "aprobada"
+    await db.commit()
+    await db.refresh(pf)
+    nombres = await _nombres_mensajeros(db, {pf.cod_mensajero})
+    return _prefactura_to_read(pf, nombres.get(pf.cod_mensajero))
+
+
+@router.put("/prefacturas/{prefactura_id}/ajuste", response_model=PrefacturaCourierRead)
+async def ajustar_monto_prefactura(
+    prefactura_id: int,
+    body: AjustarMontoRequest,
+    db: AsyncSession = Depends(get_db),
+    _=_auth_admin,
+):
+    pf = await _get_prefactura_or_404(db, prefactura_id)
+    if pf.estado != "borrador":
+        raise HTTPException(status_code=400, detail="Solo se puede ajustar el monto de prefacturas en borrador")
+    pf.valor_ajustado = body.valor_ajustado
+    pf.notas_ajuste = body.notas_ajuste
     await db.commit()
     await db.refresh(pf)
     nombres = await _nombres_mensajeros(db, {pf.cod_mensajero})

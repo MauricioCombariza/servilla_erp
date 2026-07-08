@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { DollarSign, Pencil, Trash2, CheckCircle2, X, ChevronDown, ChevronRight } from "lucide-react";
+import { DollarSign, Pencil, Trash2, CheckCircle2, X, ChevronDown, ChevronRight, SlidersHorizontal } from "lucide-react";
 import api from "@/api/client";
 import { personalApi } from "@/api/personal";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
@@ -53,6 +53,9 @@ interface PrefacturaCourier {
   valor_total: number;
   estado: "borrador" | "aprobada" | "facturada";
   notas: string | null;
+  valor_ajustado: number | null;
+  notas_ajuste: string | null;
+  valor_a_pagar: number;
   created_at: string | null;
   planillas: PrefacturaPlanilla[];
 }
@@ -78,6 +81,8 @@ const pagosApi = {
   crearPrefactura: (data: object) => api.post<PrefacturaCourier>("/pagos-ciudades/prefacturas", data),
   listarPrefacturas: (params?: object) => api.get<PrefacturaCourier[]>("/pagos-ciudades/prefacturas", { params }),
   aprobarPrefactura: (id: number) => api.post<PrefacturaCourier>(`/pagos-ciudades/prefacturas/${id}/aprobar`),
+  ajustarMonto: (id: number, data: { valor_ajustado: number | null; notas_ajuste: string | null }) =>
+    api.put<PrefacturaCourier>(`/pagos-ciudades/prefacturas/${id}/ajuste`, data),
   eliminarPrefactura: (id: number) => api.delete(`/pagos-ciudades/prefacturas/${id}`),
   registrarFactura: (id: number, data: object) =>
     api.post<FacturaCourierCxp>(`/pagos-ciudades/prefacturas/${id}/registrar-factura`, data),
@@ -336,6 +341,7 @@ function PrefacturasTab({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
   const [estado, setEstado] = useState<string>("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [facturando, setFacturando] = useState<PrefacturaCourier | null>(null);
+  const [ajustando, setAjustando] = useState<PrefacturaCourier | null>(null);
 
   const { data: prefacturas = [], isLoading } = useQuery({
     queryKey: ["pc-prefacturas", estado],
@@ -373,7 +379,7 @@ function PrefacturasTab({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                {["", "Courier", "Generada", "Período", "Planillas", "Valor total", "Estado", ""].map((h, i) => (
+                {["", "Courier", "Generada", "Período", "Planillas", "Valor calculado", "Monto a pagar", "Estado", ""].map((h, i) => (
                   <th key={i} className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -394,7 +400,15 @@ function PrefacturasTab({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
                     <td className="px-4 py-3 text-gray-600 text-xs">{p.fecha_generacion}</td>
                     <td className="px-4 py-3 text-gray-600 text-xs">{p.periodo_desde} — {p.periodo_hasta}</td>
                     <td className="px-4 py-3 text-gray-600">{p.cantidad_planillas}</td>
-                    <td className="px-4 py-3 font-semibold text-gray-900"><CurrencyCell value={p.valor_total} /></td>
+                    <td className="px-4 py-3 text-gray-500">
+                      <span className={p.valor_ajustado != null ? "line-through" : ""}><CurrencyCell value={p.valor_total} /></span>
+                    </td>
+                    <td className="px-4 py-3 font-semibold text-gray-900">
+                      <CurrencyCell value={p.valor_a_pagar} />
+                      {p.valor_ajustado != null && (
+                        <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 align-middle">ajustado</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-0.5 rounded text-xs font-medium ${ESTADO_PREFACTURA_STYLE[p.estado]}`}>{p.estado}</span>
                     </td>
@@ -402,6 +416,9 @@ function PrefacturasTab({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
                       <div className="flex items-center gap-2">
                         {p.estado === "borrador" && (
                           <>
+                            <button onClick={() => setAjustando(p)} className="text-gray-400 hover:text-amber-600" title="Ajustar monto">
+                              <SlidersHorizontal size={14} />
+                            </button>
                             <button onClick={() => aprobar.mutate(p.id)} className="text-gray-400 hover:text-blue-600" title="Aprobar">
                               <CheckCircle2 size={14} />
                             </button>
@@ -421,7 +438,7 @@ function PrefacturasTab({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
                   </tr>
                   {expandedId === p.id && (
                     <tr key={`det-${p.id}`}>
-                      <td colSpan={8} className="bg-blue-50 px-6 py-4 border-b border-gray-200">
+                      <td colSpan={9} className="bg-blue-50 px-6 py-4 border-b border-gray-200">
                         <table className="w-full text-xs">
                           <thead>
                             <tr className="text-gray-500">
@@ -465,6 +482,105 @@ function PrefacturasTab({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
           }}
         />
       )}
+      {ajustando && (
+        <AjustarMontoModal
+          prefactura={ajustando}
+          onClose={() => setAjustando(null)}
+          onSaved={() => {
+            qc.invalidateQueries({ queryKey: ["pc-prefacturas"] });
+            setAjustando(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function AjustarMontoModal({
+  prefactura, onClose, onSaved,
+}: {
+  prefactura: PrefacturaCourier; onClose: () => void; onSaved: () => void;
+}) {
+  const [valorAjustado, setValorAjustado] = useState<string>(
+    prefactura.valor_ajustado != null ? String(prefactura.valor_ajustado) : String(prefactura.valor_total)
+  );
+  const [notasAjuste, setNotasAjuste] = useState(prefactura.notas_ajuste ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      await pagosApi.ajustarMonto(prefactura.id, {
+        valor_ajustado: valorAjustado === "" ? null : +valorAjustado,
+        notas_ajuste: notasAjuste || null,
+      });
+      onSaved();
+    } catch (err: any) {
+      setError(err?.response?.data?.detail ?? "Error al ajustar el monto");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRevertir() {
+    setSaving(true);
+    setError("");
+    try {
+      await pagosApi.ajustarMonto(prefactura.id, { valor_ajustado: null, notas_ajuste: null });
+      onSaved();
+    } catch (err: any) {
+      setError(err?.response?.data?.detail ?? "Error al revertir el ajuste");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
+        <div className="px-6 py-4 border-b flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Ajustar monto a pagar</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {prefactura.mensajero_nombre ?? prefactura.cod_mensajero} · Calculado: ${fmt.format(prefactura.valor_total)}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Monto real a pagar *</label>
+            <input type="number" required min={0} value={valorAjustado}
+              onChange={(e) => setValorAjustado(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Notas del ajuste</label>
+            <textarea value={notasAjuste} onChange={(e) => setNotasAjuste(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" rows={3}
+              placeholder="Motivo del ajuste (opcional)" />
+          </div>
+          <div className="flex justify-between gap-3 pt-2">
+            {prefactura.valor_ajustado != null ? (
+              <button type="button" disabled={saving} onClick={handleRevertir}
+                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-60">
+                Revertir a calculado
+              </button>
+            ) : <span />}
+            <div className="flex gap-3">
+              <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg">Cancelar</button>
+              <button type="submit" disabled={saving}
+                className="px-4 py-2 text-sm bg-primary hover:bg-primary-hover text-white rounded-lg disabled:opacity-60">
+                {saving ? "Guardando..." : "Guardar ajuste"}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
@@ -478,7 +594,7 @@ function RegistrarFacturaModal({
     numero_factura: "",
     fecha_emision: HOY_STR,
     fecha_vencimiento: new Date(HOY.getTime() + 30 * 86400000).toISOString().slice(0, 10),
-    valor_total: prefactura.valor_total,
+    valor_total: prefactura.valor_a_pagar,
     notas: "",
   });
   const [saving, setSaving] = useState(false);

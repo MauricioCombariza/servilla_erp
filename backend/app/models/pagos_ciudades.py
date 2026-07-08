@@ -25,6 +25,8 @@ class PrefacturaCourier(Base):
     valor_total: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
     estado: Mapped[str] = mapped_column(String(10), default="borrador")
     notas: Mapped[str | None] = mapped_column(Text)
+    valor_ajustado: Mapped[float | None] = mapped_column(Numeric(15, 2))
+    notas_ajuste: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime | None] = mapped_column(_ts)
 
     planillas: Mapped[list["PrefacturaPlanilla"]] = relationship(

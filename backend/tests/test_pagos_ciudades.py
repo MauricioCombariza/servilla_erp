@@ -46,6 +46,9 @@ async def pc_data():
 
     async def _cleanup(db):
         await db.execute(
+            text("DELETE FROM facturas_courier_cxp WHERE cod_mensajero = :c"), {"c": COD}
+        )
+        await db.execute(
             text("""
                 DELETE FROM prefactura_planillas WHERE planilla IN (:a, :b)
             """),
@@ -175,6 +178,38 @@ async def test_crear_prefactura_y_marca_planillas_incluidas(client, auth_headers
 
 
 @pytest.mark.asyncio
+async def test_ajustar_monto_prefactura(client, auth_headers, pc_data):
+    prefactura_id = pc_data["prefactura_id"]
+
+    r = await client.put(
+        f"/api/pagos-ciudades/prefacturas/{prefactura_id}/ajuste",
+        json={"valor_ajustado": 1100.0, "notas_ajuste": "Descuento acordado con el proveedor"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["valor_total"] == 1300.0  # el calculado no cambia
+    assert data["valor_ajustado"] == 1100.0
+    assert data["valor_a_pagar"] == 1100.0
+    assert data["notas_ajuste"] == "Descuento acordado con el proveedor"
+
+    # Se refleja en el listado
+    r2 = await client.get("/api/pagos-ciudades/prefacturas", params={"cod_mensajero": pc_data["cod_mensajero"]}, headers=auth_headers)
+    fila = next(p for p in r2.json() if p["id"] == prefactura_id)
+    assert fila["valor_a_pagar"] == 1100.0
+
+    # Revertir al monto calculado
+    r3 = await client.put(
+        f"/api/pagos-ciudades/prefacturas/{prefactura_id}/ajuste",
+        json={"valor_ajustado": None, "notas_ajuste": None},
+        headers=auth_headers,
+    )
+    assert r3.status_code == 200
+    assert r3.json()["valor_ajustado"] is None
+    assert r3.json()["valor_a_pagar"] == 1300.0
+
+
+@pytest.mark.asyncio
 async def test_flujo_aprobar_facturar_pagar(client, auth_headers, pc_data):
     prefactura_id = pc_data["prefactura_id"]
 
@@ -186,6 +221,14 @@ async def test_flujo_aprobar_facturar_pagar(client, auth_headers, pc_data):
     # Aprobar de nuevo -> 400
     r_dup = await client.post(f"/api/pagos-ciudades/prefacturas/{prefactura_id}/aprobar", headers=auth_headers)
     assert r_dup.status_code == 400
+
+    # Ya aprobada -> ya no se puede ajustar el monto
+    r_ajuste = await client.put(
+        f"/api/pagos-ciudades/prefacturas/{prefactura_id}/ajuste",
+        json={"valor_ajustado": 999.0, "notas_ajuste": None},
+        headers=auth_headers,
+    )
+    assert r_ajuste.status_code == 400
 
     vencida = (date.today() - timedelta(days=1)).isoformat()
     r2 = await client.post(
