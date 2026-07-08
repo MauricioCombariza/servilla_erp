@@ -21,6 +21,7 @@ import { CuentasCobrarPage } from "@/pages/facturacion/CuentasCobrarPage";
 import { CuentasPagarPage } from "@/pages/facturacion/CuentasPagarPage";
 import { LiquidacionesPage } from "@/pages/pagos/LiquidacionesPage";
 import { FacturasTransportePage } from "@/pages/transporte/FacturasTransportePage";
+import { PagosCiudadesPage } from "@/pages/pagos-ciudades/PagosCiudadesPage";
 import { BuscarPaquetePage } from "@/pages/buscar/BuscarPaquetePage";
 import { Placeholder } from "@/pages/Placeholder";
 
@@ -60,6 +61,7 @@ export default function App() {
             <Route path="/labores" element={<LaboresPage />} />
             <Route path="/pagos-mensajeros" element={<LiquidacionesPage />} />
             <Route path="/facturas-transporte" element={<FacturasTransportePage />} />
+            <Route path="/pagos-ciudades" element={<PagosCiudadesPage />} />
             <Route path="/gastos" element={<GastosPage />} />
             <Route path="/flujo-caja" element={<FlujoCajaPage />} />
             <Route path="/nomina" element={<NominaPage />} />

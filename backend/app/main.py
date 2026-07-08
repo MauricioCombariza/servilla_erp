@@ -11,6 +11,7 @@ from app.routers.flujo import router as flujo_router
 from app.routers.gastos import router as gastos_router
 from app.routers.liquidaciones import router as liquidaciones_router
 from app.routers.transporte import router as transporte_router
+from app.routers.pagos_ciudades import router as pagos_ciudades_router
 from app.routers.gestiones import router as gestiones_router
 from app.routers.labores import router as labores_router
 from app.routers.nomina import router as nomina_router
@@ -51,6 +52,7 @@ app.include_router(reportes_router)
 app.include_router(gastos_router)
 app.include_router(liquidaciones_router)
 app.include_router(transporte_router)
+app.include_router(pagos_ciudades_router)
 app.include_router(nomina_router)
 app.include_router(labores_router)
 app.include_router(buscar_router)
