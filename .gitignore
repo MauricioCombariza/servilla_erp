@@ -16,6 +16,7 @@ build/
 node_modules/
 frontend/dist/
 frontend/.next/
+frontend/tsconfig.tsbuildinfo
 
 # IDE
 .vscode/
