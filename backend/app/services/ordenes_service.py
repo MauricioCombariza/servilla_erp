@@ -240,12 +240,15 @@ async def procesar_csv(
         )
 
     # ── Normalizar valores internos ───────────────────────────────────────────
-    df["_orden"]         = df["orden"].str.strip().str.replace(r"\.0$", "", regex=True)
+    # Con dtype=str una celda ausente queda como NaN (float), que es *truthy*: sin
+    # .fillna("") un str(NaN) termina guardando el literal 'nan' en columnas como
+    # planilla/cod_men (ver bug histórico de planilla='nan' en seriales_gestion).
+    df["_orden"]         = df["orden"].str.strip().str.replace(r"\.0$", "", regex=True).fillna("")
     df["_tipo_servicio"] = df["tipo_servicio"].str.lower().str.strip()
     df["_es_local"]      = df["ambito"].str.lower().str.strip().str.contains("bog", na=False)
-    df["_planilla_col"]  = df["planilla"].str.strip() if "planilla" in df.columns else ""
-    df["_lot_esc_col"]   = df["lot_esc"].str.strip()  if "lot_esc"  in df.columns else ""
-    df["_cod_men"]       = df["cod_men"].str.strip().str.upper() if "cod_men" in df.columns else ""
+    df["_planilla_col"]  = df["planilla"].str.strip().fillna("") if "planilla" in df.columns else ""
+    df["_lot_esc_col"]   = df["lot_esc"].str.strip().fillna("")  if "lot_esc"  in df.columns else ""
+    df["_cod_men"]       = df["cod_men"].str.strip().str.upper().fillna("") if "cod_men" in df.columns else ""
 
     _PENDIENTE = {"0", "lleva mensajero", "lleva ciudad", "pendiente"}
 
