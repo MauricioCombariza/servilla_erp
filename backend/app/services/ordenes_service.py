@@ -24,12 +24,19 @@ Reglas comunes:
   - Solo se procesan filas con fecha >= 2026-01-01.
   - Serial nuevo → INSERT; existente con estado='pendiente' → UPDATE; otro estado → no-op.
   - Al finalizar seriales, upsert en ordenes agrupando por número de orden.
+
+El archivo se procesa **por chunks**: el dashboard diario puede traer cientos de miles
+de filas y materializar el DataFrame completo agotaba la memoria del contenedor
+(OOM kill de uvicorn). Con chunksize + usecols el pico de memoria es constante y no
+depende del tamaño del archivo.
 """
 from __future__ import annotations
 
 import io
 import logging
 import unicodedata
+from collections import Counter
+from collections.abc import Iterator
 from datetime import date
 
 import pandas as pd
@@ -45,6 +52,25 @@ logger = logging.getLogger(__name__)
 DATE_CORTE = date(2026, 1, 1)
 _CLIENTE_IMILE = "imile sas"
 _COURIERS_EXCLUIDOS = {"LECTA", "PRINDEL"}
+
+# Filas por chunk de lectura y params por sentencia enviada a Postgres.
+CHUNK_FILAS = 50_000
+LOTE_UPSERT = 10_000
+MAX_ERRORES = 50
+
+# Únicas columnas que el servicio lee. El dashboard trae ~30 columnas y descartar
+# las demás en el parser (usecols) reduce la memoria del chunk unas 2.5x.
+_COLUMNAS_UTILES = frozenset({
+    "serial", "orden", "fecha_recepcion", "f_emi",
+    "nombre_cliente", "no_entidad", "tipo_servicio", "ambito",
+    "colum_ciudad", "ciudad1", "estado", "planilla", "lot_esc", "cod_men",
+    "courrier", "courier",
+    "waybill no.", "scan time", "da",
+})
+
+
+def _es_columna_util(nombre: str) -> bool:
+    return nombre.strip().lower() in _COLUMNAS_UTILES
 
 
 def _normalizar_nombre(s: str) -> str:
@@ -143,6 +169,20 @@ def _parse_date(val: str) -> date | None:
     return None
 
 
+def _parse_fechas(serie: pd.Series) -> pd.Series:
+    """Serie de texto → datetime64 (NaT si no parsea).
+
+    El formato ISO cubre prácticamente todo el volumen del dashboard, así que se
+    vectoriza; solo los valores que no encajan caen al parser multi-formato.
+    """
+    s = serie.fillna("").astype(str).str.strip()
+    fechas = pd.to_datetime(s, format="%Y-%m-%d", errors="coerce")
+    resto = fechas.isna() & (s != "")
+    if resto.any():
+        fechas.loc[resto] = pd.to_datetime(s[resto].map(_parse_date), errors="coerce")
+    return fechas
+
+
 _SERIAL_UPSERT = text("""
     INSERT INTO seriales_gestion
         (serial, orden, planilla, f_emi, f_esc, cod_men, mensajero_id,
@@ -178,255 +218,311 @@ _ORDEN_EXISTS = (
 )
 
 
-async def procesar_csv(
-    contenido: bytes,
-    db: AsyncSession,
-    filename: str = "",
-) -> CargaMasivaResult:
-    # ── Leer archivo (CSV o XLSX) ─────────────────────────────────────────────
-    try:
-        if filename.endswith(".xlsx"):
-            df = pd.read_excel(io.BytesIO(contenido), dtype=str).dropna(how="all")
-        else:
-            df = pd.read_csv(io.BytesIO(contenido), dtype=str, low_memory=False).dropna(how="all")
-    except Exception as e:
-        return CargaMasivaResult(
-            total_filas=0, filas_ignoradas=0, seriales_nuevos=0, seriales_actualizados=0,
-            ordenes_nuevas=0, ordenes_actualizadas=0, errores=[f"Error leyendo archivo: {e}"]
-        )
+def _iter_chunks(origen: bytes | str, filename: str) -> Iterator[pd.DataFrame]:
+    """Itera el archivo en DataFrames de CHUNK_FILAS filas.
 
-    # ── Excluir couriers no permitidos (Lecta/Prindel) ───────────────────────
-    errores: list[str] = []
-    for col_name in df.columns:
-        if col_name.strip().lower() in ("courrier", "courier"):
-            mask = df[col_name].str.strip().str.upper().isin(_COURIERS_EXCLUIDOS)
-            n_excluidos = int(mask.sum())
-            if n_excluidos:
-                errores.append(f"{n_excluidos} filas excluidas: courier no permitido (Lecta/Prindel)")
-                df = df[~mask].copy()
-            break
+    `origen` puede ser el contenido en memoria (archivos chicos, tests) o la ruta
+    del temporal que escribió el endpoint.
+    """
+    fuente: io.BytesIO | str = io.BytesIO(origen) if isinstance(origen, bytes) else origen
 
-    # ── Detectar flujo y normalizar columnas ──────────────────────────────────
-    es_imile = _es_flujo_imile(df)
+    if filename.endswith(".xlsx"):
+        # pandas no soporta lectura por chunks en Excel; los .xlsx de este flujo
+        # son manuales y pequeños.
+        yield pd.read_excel(fuente, dtype=str)
+        return
+
+    with pd.read_csv(
+        fuente, dtype=str, usecols=_es_columna_util, chunksize=CHUNK_FILAS
+    ) as reader:
+        yield from reader
+
+
+def _preparar_columnas(df: pd.DataFrame, es_imile: bool) -> pd.DataFrame:
+    """Lleva las columnas de origen a los nombres canónicos y deriva las ausentes."""
     if es_imile:
-        df = _transformar_imile(df)
-    else:
-        if "fecha_recepcion" not in df.columns and "f_emi" in df.columns:
-            df = df.rename(columns={"f_emi": "fecha_recepcion"})
-        if "nombre_cliente" not in df.columns and "no_entidad" in df.columns:
-            df = df.rename(columns={"no_entidad": "nombre_cliente"})
-        if "tipo_servicio" not in df.columns:
-            df["tipo_servicio"] = "sobre"
-        if "ambito" not in df.columns:
-            if "colum_ciudad" in df.columns:
-                df["ambito"] = df["colum_ciudad"].str.strip().str.lower().apply(
-                    lambda v: "bogota" if v == "local" else "nacional"
-                )
-            elif "ciudad1" in df.columns:
-                df["ambito"] = df["ciudad1"].str.strip().str.lower().apply(
-                    lambda v: "bogota" if "bog" in str(v) else "nacional"
-                )
-            else:
-                df["ambito"] = "nacional"
+        return _transformar_imile(df)
 
-    # ── Validar columnas mínimas ──────────────────────────────────────────────
-    cols = set(df.columns)
-    faltantes = {"serial", "orden", "fecha_recepcion", "nombre_cliente"} - cols
-    if faltantes:
-        return CargaMasivaResult(
-            total_filas=len(df), filas_ignoradas=0, seriales_nuevos=0, seriales_actualizados=0,
-            ordenes_nuevas=0, ordenes_actualizadas=0,
-            errores=[f"Columnas faltantes: {', '.join(sorted(faltantes))}"],
-        )
+    df = df.copy()
+    if "fecha_recepcion" not in df.columns and "f_emi" in df.columns:
+        df = df.rename(columns={"f_emi": "fecha_recepcion"})
+    if "nombre_cliente" not in df.columns and "no_entidad" in df.columns:
+        df = df.rename(columns={"no_entidad": "nombre_cliente"})
+    if "tipo_servicio" not in df.columns:
+        df["tipo_servicio"] = "sobre"
+    if "ambito" not in df.columns:
+        if "colum_ciudad" in df.columns:
+            df["ambito"] = df["colum_ciudad"].str.strip().str.lower().apply(
+                lambda v: "bogota" if v == "local" else "nacional"
+            )
+        elif "ciudad1" in df.columns:
+            df["ambito"] = df["ciudad1"].str.strip().str.lower().apply(
+                lambda v: "bogota" if "bog" in str(v) else "nacional"
+            )
+        else:
+            df["ambito"] = "nacional"
+    return df
 
-    # ── Normalizar valores internos ───────────────────────────────────────────
+
+_PENDIENTE = {"0", "lleva mensajero", "lleva ciudad", "pendiente"}
+_ESTADOS_ENTREGA = _PENDIENTE | {"entrega", "entregado"}
+
+
+def _derivar_valores(df: pd.DataFrame, es_imile: bool) -> pd.DataFrame:
+    """Agrega las columnas de trabajo `k_*` que consume el armado de params.
+
+    El prefijo es `k_` y no `_` a propósito: itertuples() renombra a posicional
+    (`_3`, `_4`, …) cualquier columna cuyo nombre no sea un identificador válido
+    de namedtuple, y los nombres con guion bajo inicial no lo son.
+    """
     # Con dtype=str una celda ausente queda como NaN (float), que es *truthy*: sin
     # .fillna("") un str(NaN) termina guardando el literal 'nan' en columnas como
     # planilla/cod_men (ver bug histórico de planilla='nan' en seriales_gestion).
-    df["_orden"]         = df["orden"].str.strip().str.replace(r"\.0$", "", regex=True).fillna("")
-    df["_tipo_servicio"] = df["tipo_servicio"].str.lower().str.strip()
-    df["_es_local"]      = df["ambito"].str.lower().str.strip().str.contains("bog", na=False)
-    df["_planilla_col"]  = df["planilla"].str.strip().fillna("") if "planilla" in df.columns else ""
-    df["_lot_esc_col"]   = df["lot_esc"].str.strip().fillna("")  if "lot_esc"  in df.columns else ""
-    df["_cod_men"]       = df["cod_men"].str.strip().str.upper().fillna("") if "cod_men" in df.columns else ""
+    df["k_orden"]         = df["orden"].str.strip().str.replace(r"\.0$", "", regex=True).fillna("")
+    df["k_tipo_servicio"] = df["tipo_servicio"].str.lower().str.strip()
+    df["k_es_local"]      = df["ambito"].str.lower().str.strip().str.contains("bog", na=False)
+    df["k_planilla"]      = df["planilla"].str.strip().fillna("") if "planilla" in df.columns else ""
+    df["k_lot_esc"]       = df["lot_esc"].str.strip().fillna("")  if "lot_esc"  in df.columns else ""
+    df["k_cod_men"]       = df["cod_men"].str.strip().str.upper().fillna("") if "cod_men" in df.columns else ""
 
-    _PENDIENTE = {"0", "lleva mensajero", "lleva ciudad", "pendiente"}
-
-    def _mapear_estado(v: str) -> tuple[str, str]:
-        v = (v if isinstance(v, str) else "").strip().lower()
-        if v in _PENDIENTE or v in {"entrega", "entregado"}:
-            return ("pendiente", "Entrega")
-        return ("pendiente", "Devolucion")
-
-    if es_imile:
-        df["_db_estado"]    = "pendiente"
-        df["_tipo_gestion"] = "Entrega"
-    elif "estado" in df.columns:
-        mapped = df["estado"].apply(_mapear_estado)
-        df["_db_estado"]    = mapped.apply(lambda t: t[0])
-        df["_tipo_gestion"] = mapped.apply(lambda t: t[1])
+    # Todas las filas entran como 'pendiente'; el estado del CSV solo decide si la
+    # gestión es Entrega o Devolución.
+    df["k_db_estado"] = "pendiente"
+    if es_imile or "estado" not in df.columns:
+        df["k_tipo_gestion"] = "Entrega"
     else:
-        df["_db_estado"]    = "pendiente"
-        df["_tipo_gestion"] = "Entrega"
+        es_entrega = df["estado"].fillna("").str.strip().str.lower().isin(_ESTADOS_ENTREGA)
+        df["k_tipo_gestion"] = "Devolucion"
+        df.loc[es_entrega, "k_tipo_gestion"] = "Entrega"
+    return df
 
-    # ── Filtro de fecha de corte ──────────────────────────────────────────────
-    df["_fecha_parsed"] = df["fecha_recepcion"].apply(lambda x: _parse_date(str(x).strip()))
-    total_filas = len(df)
-    df = df[df["_fecha_parsed"].apply(lambda d: d is not None and d >= DATE_CORTE)].copy()
-    filas_ignoradas = total_filas - len(df)
 
-    clientes_by_name, precios_cli, precios_men, personal_by_code, personal_by_name = (
-        await _cargar_maestros(db)
-    )
+def _resolver_cod_men_imile(
+    df: pd.DataFrame,
+    personal_by_code: dict,
+    personal_by_name: dict,
+    da_no_resueltos: Counter,
+) -> pd.Series:
+    """DA (nombre del mensajero iMile) → código de personal."""
+    id_to_codigo = {info['id']: cod for cod, info in personal_by_code.items()}
 
-    # ── Resolver DA → cod_men para filas iMile ────────────────────────────────
-    if es_imile and "_da_nombre" in df.columns:
-        id_to_codigo = {info['id']: cod for cod, info in personal_by_code.items()}
-        da_no_resueltos: dict[str, int] = {}
+    def _resolver(nombre: str) -> str:
+        nombre = (nombre or "").strip()
+        if not nombre:
+            return ""
+        norm = _normalizar_nombre(nombre)
+        pid = personal_by_name.get(norm)
+        if pid is None:
+            # Imile a veces envía el DA sin el segundo apellido (ej. "Mariela
+            # Pabon" vs "Mariela Pabón Gomez" en personal). Si el nombre del DA
+            # es prefijo exacto de un único nombre en personal, se usa ese match.
+            candidatos = {
+                v for k, v in personal_by_name.items()
+                if k == norm or k.startswith(norm + " ")
+            }
+            if len(candidatos) == 1:
+                pid = next(iter(candidatos))
+        cod = id_to_codigo.get(pid) if pid else None
+        if cod:
+            return cod
+        da_no_resueltos[nombre] += 1
+        return ""  # DA no encontrado → sin código asignado
 
-        def _resolver_da(nombre: str) -> str:
-            nombre = (nombre or "").strip()
-            if not nombre:
-                return ""
-            norm = _normalizar_nombre(nombre)
-            pid = personal_by_name.get(norm)
-            if pid is None:
-                # Imile a veces envía el DA sin el segundo apellido (ej. "Mariela
-                # Pabon" vs "Mariela Pabón Gomez" en personal). Si el nombre del DA
-                # es prefijo exacto de un único nombre en personal, se usa ese match.
-                candidatos = {
-                    v for k, v in personal_by_name.items()
-                    if k == norm or k.startswith(norm + " ")
-                }
-                if len(candidatos) == 1:
-                    pid = next(iter(candidatos))
-            cod = id_to_codigo.get(pid) if pid else None
-            if cod:
-                return cod
-            da_no_resueltos[nombre] = da_no_resueltos.get(nombre, 0) + 1
-            return ""  # DA no encontrado → sin código asignado
+    return df["_da_nombre"].apply(_resolver)
 
-        df["_cod_men"] = df["_da_nombre"].apply(_resolver_da)
 
-        if da_no_resueltos:
-            detalle = ", ".join(f"'{n}' ({c})" for n, c in sorted(da_no_resueltos.items()))
-            errores.append(
-                f"{sum(da_no_resueltos.values())} filas de Imile con DA no reconocido en personal "
-                f"(quedaron sin código asignado, revisar nombre exacto): {detalle}"
-            )
+async def procesar_csv(
+    origen: bytes | str,
+    db: AsyncSession,
+    filename: str = "",
+) -> CargaMasivaResult:
+    """Procesa el archivo por chunks. `origen` = contenido en bytes o ruta en disco."""
+    errores: list[str] = []
+    total_filas = 0
+    filas_ignoradas = 0
+    n_excluidos_courier = 0
+    sg_nuevos = sg_actualizados = sg_bloqueados = 0
+    clientes_no_encontrados: Counter[str] = Counter()
+    da_no_resueltos: Counter[str] = Counter()
+    # (numero_orden, fecha, nombre_cliente, tipo_servicio) → [cant_local, cant_nacional]
+    ordenes_acum: dict[tuple[str, date, str, str], list[int]] = {}
 
-    # ── Paso 1: construir params en Python (sin DB) ───────────────────────────
-    all_serial_params: list[dict] = []
+    (
+        clientes_by_name, precios_cli, precios_men, personal_by_code, personal_by_name
+    ) = await _cargar_maestros(db)
 
-    for i, fila in df.iterrows():
-        cliente_nom = str(fila["nombre_cliente"]).strip()
-        id_cliente = clientes_by_name.get(cliente_nom.lower())
-        if not id_cliente:
-            errores.append(f"Fila {int(i)+2}: cliente '{cliente_nom}' no encontrado")  # type: ignore[arg-type]
+    es_imile: bool | None = None
+    chunks = _iter_chunks(origen, filename)
+
+    while True:
+        try:
+            chunk = next(chunks)
+        except StopIteration:
+            break
+        except Exception as e:
+            errores.append(f"Error leyendo archivo: {e}")
+            break
+
+        chunk = chunk.dropna(how="all")
+
+        # ── Excluir couriers no permitidos (Lecta/Prindel) ────────────────────
+        for col_name in chunk.columns:
+            if col_name.strip().lower() in ("courrier", "courier"):
+                mask = chunk[col_name].str.strip().str.upper().isin(_COURIERS_EXCLUIDOS)
+                n_excluidos = int(mask.sum())
+                if n_excluidos:
+                    n_excluidos_courier += n_excluidos
+                    chunk = chunk[~mask].copy()
+                break
+
+        # ── Detectar flujo (las columnas son idénticas en todos los chunks) ───
+        if es_imile is None:
+            es_imile = _es_flujo_imile(chunk)
+        df = _preparar_columnas(chunk, es_imile)
+
+        # ── Validar columnas mínimas ──────────────────────────────────────────
+        faltantes = {"serial", "orden", "fecha_recepcion", "nombre_cliente"} - set(df.columns)
+        if faltantes:
+            errores.append(f"Columnas faltantes: {', '.join(sorted(faltantes))}")
+            break
+
+        total_filas += len(df)
+        df = _derivar_valores(df, es_imile)
+
+        # ── Filtro de fecha de corte ──────────────────────────────────────────
+        fechas = _parse_fechas(df["fecha_recepcion"])
+        vigentes = fechas.notna() & (fechas >= pd.Timestamp(DATE_CORTE))
+        filas_ignoradas += int((~vigentes).sum())
+        df = df[vigentes].copy()
+        if df.empty:
             continue
+        df["k_fecha"] = fechas[vigentes].dt.date
 
-        serial           = str(fila["serial"]).strip()
-        num_orden        = str(fila["_orden"])
-        fecha_parsed: date = fila["_fecha_parsed"]
-        tipo_ser         = str(fila["_tipo_servicio"])
-        ambito_val       = "bogota" if fila["_es_local"] else "nacional"
-        cod_men_val      = (str(fila["_cod_men"]) if fila["_cod_men"] else "").zfill(4)[:4]
-        tipo_gestion_val = str(fila["_tipo_gestion"])
-        db_estado_val    = str(fila["_db_estado"])
-
-        precio_cli   = precios_cli.get((id_cliente, tipo_ser, ambito_val), 0.0)
-        precio_men   = precios_men.get((id_cliente, tipo_ser, ambito_val), 0.0)
-        men_info     = personal_by_code.get(cod_men_val) if cod_men_val else None
-        mensajero_id = men_info['id'] if men_info else None
-        tipo_men     = men_info['tipo_personal'] if men_info else 'mensajero'
-        if tipo_men == 'courier_externo' and men_info:
-            precio_men = (
-                men_info['precio_local'] if ambito_val == 'bogota'
-                else men_info['precio_nacional']
+        # ── Resolver DA → cod_men para filas iMile ────────────────────────────
+        if es_imile and "_da_nombre" in df.columns:
+            df["k_cod_men"] = _resolver_cod_men_imile(
+                df, personal_by_code, personal_by_name, da_no_resueltos
             )
-        if tipo_men == 'courier_externo':
-            planilla_val = str(fila["_planilla_col"]) if fila["_planilla_col"] else ""
-        else:
-            planilla_val = (str(fila["_lot_esc_col"]) if fila["_lot_esc_col"] else "") or \
-                           (str(fila["_planilla_col"]) if fila["_planilla_col"] else "")
 
-        all_serial_params.append({
-            "serial": serial, "orden": num_orden, "planilla": planilla_val,
-            "fecha": fecha_parsed, "cod_men": cod_men_val, "mensajero_id": mensajero_id,
-            "cliente_id": id_cliente, "tipo_gestion": tipo_gestion_val,
-            "tipo_envio": tipo_ser, "ambito": ambito_val,
-            "precio_cli": precio_cli, "precio_men": precio_men,
-            "db_estado": db_estado_val,
-        })
+        # ── Params de seriales ────────────────────────────────────────────────
+        params: list[dict] = []
+        for fila in df.itertuples(index=False):
+            cliente_nom = str(fila.nombre_cliente).strip()
+            id_cliente = clientes_by_name.get(cliente_nom.lower())
+            if not id_cliente:
+                clientes_no_encontrados[cliente_nom] += 1
+                continue
 
-    # ── Paso 1b: resolver nuevos vs actualizados (1 query) ────────────────────
-    sg_nuevos = 0
-    sg_actualizados = 0
-    sg_bloqueados = 0
+            ambito_val  = "bogota" if fila.k_es_local else "nacional"
+            tipo_ser    = str(fila.k_tipo_servicio)
+            cod_men_val = (str(fila.k_cod_men) if fila.k_cod_men else "").zfill(4)[:4]
 
-    if all_serial_params:
-        incoming_serials = [p["serial"] for p in all_serial_params]
-        rows = (await db.execute(_SERIAL_EXISTS, {"serials": incoming_serials})).fetchall()
-        existing_map = {r[0]: (r[1], r[2]) for r in rows}  # serial → (estado, editado_manualmente)
+            precio_cli   = precios_cli.get((id_cliente, tipo_ser, ambito_val), 0.0)
+            precio_men   = precios_men.get((id_cliente, tipo_ser, ambito_val), 0.0)
+            men_info     = personal_by_code.get(cod_men_val) if cod_men_val else None
+            mensajero_id = men_info['id'] if men_info else None
+            tipo_men     = men_info['tipo_personal'] if men_info else 'mensajero'
+            if tipo_men == 'courier_externo' and men_info:
+                precio_men = (
+                    men_info['precio_local'] if ambito_val == 'bogota'
+                    else men_info['precio_nacional']
+                )
+            if tipo_men == 'courier_externo':
+                planilla_val = str(fila.k_planilla) if fila.k_planilla else ""
+            else:
+                planilla_val = (str(fila.k_lot_esc) if fila.k_lot_esc else "") or \
+                               (str(fila.k_planilla) if fila.k_planilla else "")
 
-        params_to_process: list[dict] = []
-        for p in all_serial_params:
-            s = p["serial"]
-            if s not in existing_map:
-                sg_nuevos += 1
-                params_to_process.append(p)
-            elif existing_map[s][0] == "pendiente" and not existing_map[s][1]:
-                sg_actualizados += 1
-                params_to_process.append(p)
-            elif existing_map[s][1]:  # editado_manualmente=True → planilla fija, no se toca
-                sg_bloqueados += 1
-            # else: estado != pendiente → no-op silencioso
+            params.append({
+                "serial": str(fila.serial).strip(), "orden": str(fila.k_orden),
+                "planilla": planilla_val, "fecha": fila.k_fecha,
+                "cod_men": cod_men_val, "mensajero_id": mensajero_id,
+                "cliente_id": id_cliente, "tipo_gestion": str(fila.k_tipo_gestion),
+                "tipo_envio": tipo_ser, "ambito": ambito_val,
+                "precio_cli": precio_cli, "precio_men": precio_men,
+                "db_estado": str(fila.k_db_estado),
+            })
 
-        # ── Paso 1c: batch upsert seriales (1 round-trip) ─────────────────────
-        if params_to_process:
-            try:
-                await db.execute(text("SAVEPOINT sp_batch_serial"))
-                await db.execute(_SERIAL_UPSERT, params_to_process)
-                await db.execute(text("RELEASE SAVEPOINT sp_batch_serial"))
-            except Exception as e:
-                await db.execute(text("ROLLBACK TO SAVEPOINT sp_batch_serial"))
-                logger.error("Error en batch seriales: %s", e)
-                errores.append(f"Error en batch seriales: {e}")
+        # ── Upsert de seriales en lotes ───────────────────────────────────────
+        for i in range(0, len(params), LOTE_UPSERT):
+            lote = params[i:i + LOTE_UPSERT]
+            rows = (
+                await db.execute(_SERIAL_EXISTS, {"serials": [p["serial"] for p in lote]})
+            ).fetchall()
+            existing_map = {r[0]: (r[1], r[2]) for r in rows}  # serial → (estado, editado_manualmente)
 
-    # ── Paso 2: ordenes (agrupar por número de orden) ─────────────────────────
-    resumen = (
-        df.groupby(["_orden", "fecha_recepcion", "nombre_cliente", "_tipo_servicio"])
-        .agg(
-            cant_local=("_es_local", "sum"),
-            cant_nac=("_es_local", lambda x: (~x.astype(bool)).sum()),
+            a_procesar: list[dict] = []
+            for p in lote:
+                estado_actual = existing_map.get(p["serial"])
+                if estado_actual is None:
+                    sg_nuevos += 1
+                    a_procesar.append(p)
+                elif estado_actual[0] == "pendiente" and not estado_actual[1]:
+                    sg_actualizados += 1
+                    a_procesar.append(p)
+                elif estado_actual[1]:  # editado_manualmente=True → planilla fija, no se toca
+                    sg_bloqueados += 1
+                # else: estado != pendiente → no-op silencioso
+
+            if a_procesar:
+                try:
+                    await db.execute(text("SAVEPOINT sp_batch_serial"))
+                    await db.execute(_SERIAL_UPSERT, a_procesar)
+                    await db.execute(text("RELEASE SAVEPOINT sp_batch_serial"))
+                except Exception as e:
+                    await db.execute(text("ROLLBACK TO SAVEPOINT sp_batch_serial"))
+                    logger.error("Error en batch seriales: %s", e)
+                    if len(errores) < MAX_ERRORES:
+                        errores.append(f"Error en batch seriales: {e}")
+
+        # ── Acumular el resumen de órdenes entre chunks ───────────────────────
+        resumen = (
+            df.groupby(["k_orden", "k_fecha", "nombre_cliente", "k_tipo_servicio"])
+            .agg(
+                cant_local=("k_es_local", "sum"),
+                cant_nac=("k_es_local", lambda x: (~x.astype(bool)).sum()),
+            )
+            .reset_index()
         )
-        .reset_index()
-    )
+        for g in resumen.itertuples(index=False):
+            key = (str(g.k_orden), g.k_fecha, str(g.nombre_cliente).strip(), str(g.k_tipo_servicio))
+            acum = ordenes_acum.setdefault(key, [0, 0])
+            acum[0] += int(g.cant_local)
+            acum[1] += int(g.cant_nac)
 
+        # Commit por chunk: el upsert es idempotente, así que un fallo a mitad de
+        # archivo deja lo ya procesado consistente y reintentar es inocuo.
+        await db.commit()
+
+    # ── Ordenes: un solo upsert al final con el acumulado ─────────────────────
     ordenes_nuevas = 0
     ordenes_actualizadas = 0
 
-    orden_rows: list[dict] = []
-    for _, grp in resumen.iterrows():
-        cliente_nom = str(grp["nombre_cliente"]).strip()
+    # El acumulado se agrupa por (orden, fecha, cliente, tipo) porque el precio
+    # depende del tipo de servicio, pero ordenes.numero_orden es UNIQUE: un mismo
+    # número que aparezca con varias fechas o tipos debe consolidarse en una fila,
+    # o el INSERT del lote entero falla por duplicate key y no se crea ninguna orden.
+    por_numero: dict[str, dict] = {}
+    for (num_orden, fecha_parsed, cliente_nom, tipo_ser), (c_local, c_nac) in ordenes_acum.items():
         id_cliente = clientes_by_name.get(cliente_nom.lower())
         if not id_cliente:
             continue
-        num_orden    = str(grp["_orden"])
-        fecha_parsed = _parse_date(str(grp["fecha_recepcion"]).strip())
-        if not fecha_parsed:
-            continue
-        tipo_ser = str(grp["_tipo_servicio"])
-        c_local  = int(grp["cant_local"])
-        c_nac    = int(grp["cant_nac"])
-        c_total  = c_local + c_nac
-        p_local  = precios_cli.get((id_cliente, tipo_ser, "bogota"),   0.0)
-        p_nac    = precios_cli.get((id_cliente, tipo_ser, "nacional"), 0.0)
-        v_total  = (c_local * p_local) + (c_nac * p_nac)
-        orden_rows.append({
-            "num": num_orden, "cli": id_cliente, "fecha": fecha_parsed,
-            "tipo": tipo_ser, "total": c_total, "valor": v_total,
-        })
+        p_local = precios_cli.get((id_cliente, tipo_ser, "bogota"),   0.0)
+        p_nac   = precios_cli.get((id_cliente, tipo_ser, "nacional"), 0.0)
+        valor   = (c_local * p_local) + (c_nac * p_nac)
+
+        fila = por_numero.get(num_orden)
+        if fila is None:
+            por_numero[num_orden] = {
+                "num": num_orden, "cli": id_cliente, "fecha": fecha_parsed,
+                "tipo": tipo_ser, "total": c_local + c_nac, "valor": valor,
+            }
+        else:
+            fila["total"] += c_local + c_nac
+            fila["valor"] += valor
+            fila["fecha"] = min(fila["fecha"], fecha_parsed)
+
+    orden_rows = list(por_numero.values())
 
     if orden_rows:
         # 1 query para saber cuáles ya existen
@@ -472,6 +568,25 @@ async def procesar_csv(
                 errores.append(f"Error en batch ordenes actualizadas: {e}")
 
     await db.commit()
+
+    # ── Errores agregados ─────────────────────────────────────────────────────
+    # Se reportan por causa y no por fila: un dashboard con cientos de miles de
+    # filas sin cliente generaba una lista de igual tamaño antes de recortarla.
+    if clientes_no_encontrados:
+        errores.insert(0, _resumen_conteo(
+            clientes_no_encontrados, "filas con cliente no encontrado"
+        ))
+    if da_no_resueltos:
+        errores.append(_resumen_conteo(
+            da_no_resueltos,
+            "filas de Imile con DA no reconocido en personal "
+            "(quedaron sin código asignado, revisar nombre exacto)",
+        ))
+    if n_excluidos_courier:
+        errores.append(
+            f"{n_excluidos_courier} filas excluidas: courier no permitido (Lecta/Prindel)"
+        )
+
     logger.info(
         "Carga masiva: órdenes_nuevas=%d actualizadas=%d "
         "seriales_nuevos=%d actualizados=%d bloqueados=%d ignoradas=%d errores=%d",
@@ -486,5 +601,12 @@ async def procesar_csv(
         seriales_bloqueados=sg_bloqueados,
         ordenes_nuevas=ordenes_nuevas,
         ordenes_actualizadas=ordenes_actualizadas,
-        errores=errores[:50],
+        errores=errores[:MAX_ERRORES],
     )
+
+
+def _resumen_conteo(conteo: Counter[str], descripcion: str, tope: int = 15) -> str:
+    detalle = ", ".join(f"'{k}' ({v})" for k, v in conteo.most_common(tope))
+    if len(conteo) > tope:
+        detalle += f", … (+{len(conteo) - tope} más)"
+    return f"{sum(conteo.values())} {descripcion}: {detalle}"

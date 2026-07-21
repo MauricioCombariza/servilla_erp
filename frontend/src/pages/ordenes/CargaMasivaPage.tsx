@@ -3,6 +3,16 @@ import { useNavigate } from "react-router-dom";
 import { Upload, ArrowLeft, CheckCircle, AlertCircle, FileText } from "lucide-react";
 import { ordenesApi, type CargaMasivaResult } from "@/api/ordenes";
 
+// Debe coincidir con MAX_UPLOAD_BYTES en backend/app/routers/ordenes.py
+const MAX_MB = 150;
+const MAX_BYTES = MAX_MB * 1024 * 1024;
+
+function formatSize(bytes: number) {
+  return bytes >= 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    : `${(bytes / 1024).toFixed(1)} KB`;
+}
+
 export function CargaMasivaPage() {
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -13,6 +23,13 @@ export function CargaMasivaPage() {
 
   async function handleUpload() {
     if (!file) return;
+    if (file.size > MAX_BYTES) {
+      setError(
+        `El archivo pesa ${formatSize(file.size)} y el máximo son ${MAX_MB} MB. ` +
+          "Genera el dashboard con una ventana de fechas más corta (updateDashboard.py --dias 60).",
+      );
+      return;
+    }
     setLoading(true);
     setResult(null);
     setError("");
@@ -73,13 +90,13 @@ export function CargaMasivaPage() {
           <div className="flex flex-col items-center gap-2">
             <FileText size={32} className="text-primary" />
             <p className="font-medium text-gray-900">{file.name}</p>
-            <p className="text-sm text-gray-500">{(file.size / 1024).toFixed(1)} KB</p>
+            <p className="text-sm text-gray-500">{formatSize(file.size)}</p>
           </div>
         ) : (
           <div className="flex flex-col items-center gap-2">
             <Upload size={32} className="text-gray-400" />
             <p className="font-medium text-gray-700">Arrastra el archivo aquí o haz clic para seleccionar</p>
-            <p className="text-xs text-gray-400">CSV o Excel (.xlsx) · máx 10 MB</p>
+            <p className="text-xs text-gray-400">CSV o Excel (.xlsx) · máx {MAX_MB} MB</p>
           </div>
         )}
       </div>

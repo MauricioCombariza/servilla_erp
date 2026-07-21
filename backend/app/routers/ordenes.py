@@ -1,3 +1,6 @@
+import os
+import tempfile
+
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +13,12 @@ from app.services.ordenes_service import procesar_csv
 
 router = APIRouter(prefix="/api/ordenes", tags=["ordenes"])
 _auth = Depends(require_role("administrador", "logistica"))
+
+# El procesamiento es por chunks, así que la memoria no depende del tamaño del
+# archivo; el tope existe por tiempo: más de esto no alcanza a terminar dentro del
+# proxy_read_timeout de nginx (600s).
+MAX_UPLOAD_BYTES = 150 * 1024 * 1024
+BLOQUE_LECTURA = 1024 * 1024
 
 
 @router.get("/", response_model=list[OrdenRead])
@@ -92,7 +101,28 @@ async def carga_masiva(
     fname = (file.filename or "").lower()
     if not fname.endswith((".csv", ".xlsx")):
         raise HTTPException(status_code=400, detail="Solo se aceptan archivos CSV o Excel (.xlsx)")
-    contenido = await file.read()
-    if len(contenido) > 450 * 1024 * 1024:  # 450 MB max
-        raise HTTPException(status_code=413, detail="Archivo demasiado grande (max 450 MB)")
-    return await procesar_csv(contenido, db, filename=fname)
+
+    # El archivo se vuelca a disco en bloques en lugar de a memoria: un dashboard
+    # completo (300 MB) leído con file.read() tumbaba el contenedor por OOM antes
+    # de llegar a validar el tamaño.
+    ext = ".xlsx" if fname.endswith(".xlsx") else ".csv"
+    tmp = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+    subido = 0
+    try:
+        while bloque := await file.read(BLOQUE_LECTURA):
+            subido += len(bloque)
+            if subido > MAX_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=(
+                        f"Archivo demasiado grande (máximo {MAX_UPLOAD_BYTES // (1024 * 1024)} MB). "
+                        "Genera el dashboard con una ventana de fechas más corta "
+                        "(updateDashboard.py --dias 60)."
+                    ),
+                )
+            tmp.write(bloque)
+        tmp.close()
+        return await procesar_csv(tmp.name, db, filename=fname)
+    finally:
+        tmp.close()
+        os.unlink(tmp.name)

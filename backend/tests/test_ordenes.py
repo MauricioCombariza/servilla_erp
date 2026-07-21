@@ -195,6 +195,61 @@ async def test_carga_masiva_excluye_couriers_lecta_prindel(client, headers, setu
 
 
 @pytest.mark.asyncio
+async def test_carga_masiva_agrega_entre_chunks(client, headers, setup_maestros, monkeypatch):
+    """El archivo se lee por chunks: una orden repartida en varios debe quedar completa.
+
+    Con CHUNK_FILAS reducido a 100, las 250 filas de ORD-CHUNK-001 caen en 3 chunks
+    distintos; si el resumen de órdenes no se acumulara entre chunks, cantidad_total
+    quedaría en 50 (el último chunk) en vez de 250.
+    """
+    from sqlalchemy import text as sqltext
+
+    from app.database import AsyncSessionLocal
+    from app.services import ordenes_service
+
+    monkeypatch.setattr(ordenes_service, "CHUNK_FILAS", 100)
+    filas = 250
+
+    csv_content = (
+        "orden,serial,fecha_recepcion,nombre_cliente,tipo_servicio,ambito\n"
+        + "".join(
+            f"ORD-CHUNK-001,SER-CHUNK-{i:05d},2026-06-02,Cliente Ordenes Test,sobre,bogota\n"
+            for i in range(filas)
+        )
+    )
+    try:
+        r = await client.post(
+            "/api/ordenes/carga-masiva",
+            files={"file": ("chunks.csv", io.BytesIO(csv_content.encode()), "text/csv")},
+            headers=headers,
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total_filas"] == filas
+        assert data["seriales_nuevos"] == filas
+        assert data["filas_ignoradas"] == 0
+
+        async with AsyncSessionLocal() as db:
+            total = (
+                await db.execute(
+                    sqltext("SELECT cantidad_total FROM ordenes WHERE numero_orden = 'ORD-CHUNK-001'")
+                )
+            ).scalar_one()
+            n_seriales = (
+                await db.execute(
+                    sqltext("SELECT count(*) FROM seriales_gestion WHERE serial LIKE 'SER-CHUNK-%'")
+                )
+            ).scalar_one()
+        assert total == filas, "la orden debe sumar las filas de todos los chunks"
+        assert n_seriales == filas
+    finally:
+        async with AsyncSessionLocal() as db:
+            await db.execute(sqltext("DELETE FROM seriales_gestion WHERE serial LIKE 'SER-CHUNK-%'"))
+            await db.execute(sqltext("DELETE FROM ordenes WHERE numero_orden = 'ORD-CHUNK-001'"))
+            await db.commit()
+
+
+@pytest.mark.asyncio
 async def test_carga_masiva_no_csv(client, headers):
     r = await client.post(
         "/api/ordenes/carga-masiva",
