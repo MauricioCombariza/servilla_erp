@@ -267,6 +267,21 @@ def _preparar_columnas(df: pd.DataFrame, es_imile: bool) -> pd.DataFrame:
 _PENDIENTE = {"0", "lleva mensajero", "lleva ciudad", "pendiente"}
 _ESTADOS_ENTREGA = _PENDIENTE | {"entrega", "entregado"}
 
+# Variantes de texto que un CSV puede traer para representar "sin dato": el NaN
+# real de pandas (celda ausente) o el texto literal "na"/"n/a"/"nan"
+# (case-insensitive). Un simple .fillna("") solo cubre el primer caso: si el CSV
+# trae la celda con el texto literal "NaN"/"NA" ya escrito, pasa intacto y
+# termina guardándose tal cual en columnas como planilla (bug histórico de
+# planilla='nan' en seriales_gestion, ver commit d92993a — esta es la variante
+# de ese mismo bug que ese fix no cubría).
+_TEXTOS_VACIOS = {"na", "n/a", "nan"}
+
+
+def _limpiar_texto(serie: pd.Series) -> pd.Series:
+    """NaN de pandas y variantes de texto "vacío" (na/n.a/nan) → ""."""
+    limpio = serie.fillna("").astype(str).str.strip()
+    return limpio.mask(limpio.str.lower().isin(_TEXTOS_VACIOS), "")
+
 
 def _derivar_valores(df: pd.DataFrame, es_imile: bool) -> pd.DataFrame:
     """Agrega las columnas de trabajo `k_*` que consume el armado de params.
@@ -275,15 +290,14 @@ def _derivar_valores(df: pd.DataFrame, es_imile: bool) -> pd.DataFrame:
     (`_3`, `_4`, …) cualquier columna cuyo nombre no sea un identificador válido
     de namedtuple, y los nombres con guion bajo inicial no lo son.
     """
-    # Con dtype=str una celda ausente queda como NaN (float), que es *truthy*: sin
-    # .fillna("") un str(NaN) termina guardando el literal 'nan' en columnas como
-    # planilla/cod_men (ver bug histórico de planilla='nan' en seriales_gestion).
-    df["k_orden"]         = df["orden"].str.strip().str.replace(r"\.0$", "", regex=True).fillna("")
+    df["k_orden"]         = _limpiar_texto(
+        df["orden"].str.strip().str.replace(r"\.0$", "", regex=True)
+    )
     df["k_tipo_servicio"] = df["tipo_servicio"].str.lower().str.strip()
     df["k_es_local"]      = df["ambito"].str.lower().str.strip().str.contains("bog", na=False)
-    df["k_planilla"]      = df["planilla"].str.strip().fillna("") if "planilla" in df.columns else ""
-    df["k_lot_esc"]       = df["lot_esc"].str.strip().fillna("")  if "lot_esc"  in df.columns else ""
-    df["k_cod_men"]       = df["cod_men"].str.strip().str.upper().fillna("") if "cod_men" in df.columns else ""
+    df["k_planilla"]      = _limpiar_texto(df["planilla"]) if "planilla" in df.columns else ""
+    df["k_lot_esc"]       = _limpiar_texto(df["lot_esc"])  if "lot_esc"  in df.columns else ""
+    df["k_cod_men"]       = _limpiar_texto(df["cod_men"]).str.upper() if "cod_men" in df.columns else ""
 
     # Todas las filas entran como 'pendiente'; el estado del CSV solo decide si la
     # gestión es Entrega o Devolución.

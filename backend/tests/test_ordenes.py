@@ -250,6 +250,52 @@ async def test_carga_masiva_agrega_entre_chunks(client, headers, setup_maestros,
 
 
 @pytest.mark.asyncio
+async def test_carga_masiva_planilla_texto_nan_no_se_guarda(client, headers, setup_maestros):
+    """planilla='nan'/'NA' (texto literal, no celda vacía) no debe guardarse tal cual.
+
+    Regresión: el .fillna("") de _derivar_valores solo cubre NaN real de pandas
+    (celda ausente); un CSV que trae el texto literal "nan"/"NA" ya escrito pasaba
+    intacto y quedaba guardado como planilla en seriales_gestion.
+    """
+    from sqlalchemy import text as sqltext
+
+    from app.database import AsyncSessionLocal
+
+    csv_content = (
+        "orden,serial,fecha_recepcion,nombre_cliente,tipo_servicio,ambito,planilla\n"
+        "ORD-NAN-001,SER-NAN-001,2026-06-01,Cliente Ordenes Test,sobre,bogota,nan\n"
+        "ORD-NAN-002,SER-NAN-002,2026-06-01,Cliente Ordenes Test,sobre,bogota,NA\n"
+    )
+    try:
+        r = await client.post(
+            "/api/ordenes/carga-masiva",
+            files={"file": ("nan.csv", io.BytesIO(csv_content.encode()), "text/csv")},
+            headers=headers,
+        )
+        assert r.status_code == 200
+
+        async with AsyncSessionLocal() as db:
+            rows = (
+                await db.execute(
+                    sqltext(
+                        "SELECT serial, planilla FROM seriales_gestion "
+                        "WHERE serial IN ('SER-NAN-001', 'SER-NAN-002')"
+                    )
+                )
+            ).fetchall()
+        assert len(rows) == 2
+        for _, planilla in rows:
+            assert planilla == "", f"planilla debía quedar vacía, quedó {planilla!r}"
+    finally:
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                sqltext("DELETE FROM seriales_gestion WHERE serial IN ('SER-NAN-001', 'SER-NAN-002')")
+            )
+            await db.execute(sqltext("DELETE FROM ordenes WHERE numero_orden LIKE 'ORD-NAN-%'"))
+            await db.commit()
+
+
+@pytest.mark.asyncio
 async def test_carga_masiva_no_csv(client, headers):
     r = await client.post(
         "/api/ordenes/carga-masiva",
