@@ -24,7 +24,22 @@ _auth = Depends(require_role("administrador", "contabilidad", "operaciones"))
 _auth_admin = Depends(require_role("administrador", "contabilidad"))
 
 
-_PLANILLAS_SQL = """
+_PLANILLAS_EN_RANGO_SQL = """
+    SELECT DISTINCT sg.planilla
+    FROM seriales_gestion sg
+    JOIN personal p ON p.codigo = sg.cod_men
+    WHERE sg.cod_men = :cod_mensajero
+      AND p.tipo_personal IN ('courier_externo', 'transportadora')
+      AND sg.estado != 'anulado'
+      AND sg.f_esc BETWEEN :desde AND :hasta
+"""
+
+# Agrega TODOS los seriales de las planillas indicadas (sin acotar por fecha):
+# una planilla puede tener seriales con f_esc fuera del rango usado para
+# descubrirla (reintentos/devoluciones en otra fecha), y esta es la misma
+# agregación que se usa al facturar (crear_prefactura), así la vista previa
+# siempre coincide con lo que termina facturado.
+_PLANILLAS_BASE_SQL = """
     SELECT
         sg.planilla,
         sg.cod_men                                                             AS cod_mensajero,
@@ -41,15 +56,10 @@ _PLANILLAS_SQL = """
     WHERE sg.cod_men = :cod_mensajero
       AND p.tipo_personal IN ('courier_externo', 'transportadora')
       AND sg.estado != 'anulado'
-      AND sg.f_esc BETWEEN :desde AND :hasta
+      AND sg.planilla = ANY(:planillas)
     GROUP BY sg.planilla, sg.cod_men
     ORDER BY MIN(sg.f_esc)
 """
-
-_PLANILLAS_POR_LISTA_SQL = _PLANILLAS_SQL.replace(
-    "AND sg.f_esc BETWEEN :desde AND :hasta",
-    "AND sg.planilla = ANY(:planillas)",
-)
 
 
 async def _planillas_ya_incluidas(db: AsyncSession, planillas: list[str]) -> dict[str, int]:
@@ -125,8 +135,16 @@ async def planillas_disponibles(
     db: AsyncSession = Depends(get_db),
     _=_auth,
 ):
+    planillas_en_rango = (
+        await db.execute(text(_PLANILLAS_EN_RANGO_SQL), {"cod_mensajero": cod_mensajero, "desde": desde, "hasta": hasta})
+    ).scalars().all()
+    if not planillas_en_rango:
+        return []
     rows = (
-        await db.execute(text(_PLANILLAS_SQL), {"cod_mensajero": cod_mensajero, "desde": desde, "hasta": hasta})
+        await db.execute(
+            text(_PLANILLAS_BASE_SQL),
+            {"cod_mensajero": cod_mensajero, "planillas": list(planillas_en_rango)},
+        )
     ).mappings().all()
     incluidas = await _planillas_ya_incluidas(db, [r["planilla"] for r in rows])
     return [
@@ -159,7 +177,7 @@ async def crear_prefactura(
 
     rows = (
         await db.execute(
-            text(_PLANILLAS_POR_LISTA_SQL),
+            text(_PLANILLAS_BASE_SQL),
             {"cod_mensajero": body.cod_mensajero, "planillas": body.planillas},
         )
     ).mappings().all()
