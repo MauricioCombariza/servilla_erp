@@ -174,7 +174,7 @@ async def get_mensajeros(
             )
             SELECT
                 COALESCE(m.mensajero_id, a.personal_id)   AS personal_id,
-                COALESCE(m.cod_men, p.codigo)              AS cod_men,
+                COALESCE(p.codigo, m.cod_men)              AS cod_men,
                 p.nombre_completo                          AS nombre,
                 COALESCE(m.planillas,       0)             AS planillas,
                 COALESCE(m.total_seriales,  0)             AS total_seriales,

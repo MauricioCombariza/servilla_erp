@@ -40,7 +40,7 @@ async def pendientes_pago(
                    COUNT(sg.id)              AS total_seriales,
                    SUM(sg.precio_mensajero)  AS total_mensajero
             FROM personal p
-            JOIN seriales_gestion sg ON sg.cod_men = p.codigo
+            JOIN seriales_gestion sg ON sg.mensajero_id = p.id
             WHERE sg.estado = 'pendiente'
               AND EXTRACT(MONTH FROM sg.f_esc) = :mes
               AND EXTRACT(YEAR  FROM sg.f_esc) = :anio
@@ -164,12 +164,12 @@ async def generar_liquidacion(
     sql_ser = text("""
         SELECT COUNT(*) AS cant, COALESCE(SUM(precio_mensajero), 0) AS total
         FROM seriales_gestion
-        WHERE cod_men = :codigo AND estado = 'pendiente'
+        WHERE mensajero_id = :pid AND estado = 'pendiente'
           AND EXTRACT(MONTH FROM f_esc) = :mes
           AND EXTRACT(YEAR  FROM f_esc) = :anio
     """)
     r_ser = (await db.execute(sql_ser, {
-        "codigo": personal.codigo, "mes": body.periodo_mes, "anio": body.periodo_anio
+        "pid": body.personal_id, "mes": body.periodo_mes, "anio": body.periodo_anio
     })).mappings().one()
 
     # Totales de horas
@@ -245,10 +245,10 @@ async def generar_liquidacion(
     await db.execute(text("""
         UPDATE seriales_gestion
         SET estado = 'liquidado', liquidacion_id = :lid
-        WHERE cod_men = :codigo AND estado IN ('pendiente','liquidado')
+        WHERE mensajero_id = :pid AND estado IN ('pendiente','liquidado')
           AND EXTRACT(MONTH FROM f_esc) = :mes
           AND EXTRACT(YEAR  FROM f_esc) = :anio
-    """), {"lid": liq.id, "codigo": personal.codigo,
+    """), {"lid": liq.id, "pid": body.personal_id,
            "mes": body.periodo_mes, "anio": body.periodo_anio})
 
     await db.execute(text("""
