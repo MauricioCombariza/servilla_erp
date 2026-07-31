@@ -294,6 +294,16 @@ export interface RosterEntry {
   empleado: NominaEmpleado;
 }
 
+export interface PagoNomina {
+  id: number;
+  periodo_mes: number;
+  periodo_anio: number;
+  monto_pagado: number;
+  fecha_pago: string;
+  observaciones: string | null;
+  created_at: string | null;
+}
+
 export interface NominaResumenPeriodo {
   anio: number;
   mes: number | null;

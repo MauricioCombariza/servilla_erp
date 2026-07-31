@@ -421,10 +421,42 @@ function ProvisionesTab({
   const [showHistorico, setShowHistorico] = useState(false);
   const [selectedToAdd, setSelectedToAdd] = useState<number | "">("");
   const [rosterError, setRosterError] = useState<string | null>(null);
+  const [showPagoForm, setShowPagoForm] = useState(false);
+  const [fechaPago, setFechaPago] = useState(() => new Date().toISOString().slice(0, 10));
+  const [montoPago, setMontoPago] = useState<number | "">("");
 
   const { data: roster = [], isLoading: loadingRoster } = useQuery({
     queryKey: ["nomina-roster", mes, anio],
     queryFn: () => nominaApi.getRoster(mes, anio).then((r) => r.data),
+  });
+
+  const { data: pagos = [] } = useQuery({
+    queryKey: ["nomina-pagos"],
+    queryFn: () => nominaApi.listPagos().then((r) => r.data),
+  });
+
+  const { data: totalPeriodo } = useQuery({
+    queryKey: ["nomina-provisiones-total", mes, anio],
+    queryFn: () => nominaApi.getProvisionesTotal(anio, mes).then((r) => r.data),
+  });
+
+  const pagoPeriodo = pagos.find((p) => p.periodo_mes === mes && p.periodo_anio === anio);
+
+  const registrarPago = useMutation({
+    mutationFn: () =>
+      nominaApi.registrarPago({
+        periodo_mes: mes,
+        periodo_anio: anio,
+        monto_pagado: montoPago === "" ? (totalPeriodo?.costo_total ?? 0) : montoPago,
+        fecha_pago: fechaPago,
+        observaciones: null,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["nomina-pagos"] });
+      qc.invalidateQueries({ queryKey: ["cuentas-pagar"] });
+      setShowPagoForm(false);
+      setMontoPago("");
+    },
   });
 
   const invalidateRoster = () => qc.invalidateQueries({ queryKey: ["nomina-roster", mes, anio] });
@@ -581,7 +613,21 @@ function ProvisionesTab({
               </div>
             ))}
           </div>
-          <div className="flex justify-end mb-4">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              {pagoPeriodo ? (
+                <span className="text-xs text-green-700 bg-green-50 border border-green-200 px-3 py-1.5 rounded-lg">
+                  Pago registrado el {pagoPeriodo.fecha_pago} — ${fmt.format(pagoPeriodo.monto_pagado)}
+                </span>
+              ) : (
+                <button
+                  onClick={() => setShowPagoForm((v) => !v)}
+                  className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  Registrar pago del período
+                </button>
+              )}
+            </div>
             <button
               onClick={onBorrarPeriodo}
               disabled={borrando}
@@ -590,6 +636,42 @@ function ProvisionesTab({
               <Trash2 size={13} /> {borrando ? "Borrando..." : "Borrar período"}
             </button>
           </div>
+
+          {showPagoForm && !pagoPeriodo && (
+            <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4 flex items-end gap-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Fecha de pago</label>
+                <input
+                  type="date"
+                  value={fechaPago}
+                  onChange={(e) => setFechaPago(e.target.value)}
+                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Monto pagado</label>
+                <input
+                  type="number"
+                  value={montoPago === "" ? (totalPeriodo?.costo_total ?? "") : montoPago}
+                  onChange={(e) => setMontoPago(e.target.value === "" ? "" : +e.target.value)}
+                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-40"
+                />
+              </div>
+              <button
+                onClick={() => registrarPago.mutate()}
+                disabled={registrarPago.isPending}
+                className="text-sm bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded-lg disabled:opacity-60 transition-colors"
+              >
+                {registrarPago.isPending ? "Guardando..." : "Confirmar pago"}
+              </button>
+              <button
+                onClick={() => setShowPagoForm(false)}
+                className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1.5"
+              >
+                Cancelar
+              </button>
+            </div>
+          )}
           <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto mb-6">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">

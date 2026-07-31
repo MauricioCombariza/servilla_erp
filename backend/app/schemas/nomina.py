@@ -147,6 +147,20 @@ class NominaResumenPeriodo(BaseModel):
     costo_total: float
 
 
+class PagoNominaCreate(BaseModel):
+    periodo_mes: int
+    periodo_anio: int
+    monto_pagado: float
+    fecha_pago: date
+    observaciones: str | None = None
+
+
+class PagoNominaRead(PagoNominaCreate):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    created_at: datetime | None = None
+
+
 class RosterAddRequest(BaseModel):
     empleado_id: int
     mes: int

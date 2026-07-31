@@ -59,6 +59,21 @@ class NominaParametro(Base):
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
+class PagoNomina(Base):
+    __tablename__ = "pagos_nomina"
+    __table_args__ = (
+        UniqueConstraint("periodo_mes", "periodo_anio"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    periodo_mes: Mapped[int] = mapped_column(nullable=False)
+    periodo_anio: Mapped[int] = mapped_column(nullable=False)
+    monto_pagado: Mapped[float] = mapped_column(Numeric(15, 2), nullable=False)
+    fecha_pago: Mapped[date] = mapped_column(nullable=False)
+    observaciones: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime | None] = mapped_column(_ts, server_default=func.now())
+
+
 class NominaEmpleadoPeriodo(Base):
     __tablename__ = "nomina_empleados_periodo"
     __table_args__ = (

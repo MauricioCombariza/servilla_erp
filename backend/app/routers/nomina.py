@@ -6,13 +6,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_role
 from app.database import get_db
-from app.models.nomina import NominaEmpleado, NominaEmpleadoPeriodo, NominaParametro, NominaProvision
+from app.models.nomina import (
+    NominaEmpleado, NominaEmpleadoPeriodo, NominaParametro, NominaProvision, PagoNomina,
+)
 from app.schemas.nomina import (
     CalcularProvisionesRequest,
     EmpleadoResumen,
     NominaEmpleadoCreate, NominaEmpleadoRead, NominaEmpleadoUpdate,
     NominaParametroCreate, NominaParametroRead, NominaParametroUpdate,
-    NominaProvisionRead, NominaResumenPeriodo, PeriodoHistorico, ResumenNomina, ResumenNominaDetallado,
+    NominaProvisionRead, NominaResumenPeriodo, PagoNominaCreate, PagoNominaRead,
+    PeriodoHistorico, ResumenNomina, ResumenNominaDetallado,
     RosterAddRequest, RosterEntryRead,
 )
 
@@ -422,6 +425,35 @@ async def delete_provisiones_periodo(
         )
     )
     await db.commit()
+
+
+@router.post("/provisiones/pago", response_model=PagoNominaRead, status_code=status.HTTP_201_CREATED)
+async def registrar_pago_nomina(
+    body: PagoNominaCreate, db: AsyncSession = Depends(get_db), _=_auth
+):
+    existing = (
+        await db.execute(
+            select(PagoNomina.id).where(
+                PagoNomina.periodo_mes == body.periodo_mes,
+                PagoNomina.periodo_anio == body.periodo_anio,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Ya hay un pago registrado para este período")
+    p = PagoNomina(**body.model_dump())
+    db.add(p)
+    await db.commit()
+    await db.refresh(p)
+    return p
+
+
+@router.get("/provisiones/pagos", response_model=list[PagoNominaRead])
+async def list_pagos_nomina(db: AsyncSession = Depends(get_db), _=_auth):
+    result = await db.execute(
+        select(PagoNomina).order_by(PagoNomina.periodo_anio.desc(), PagoNomina.periodo_mes.desc())
+    )
+    return result.scalars().all()
 
 
 @router.delete("/empleados/{empleado_id}", status_code=status.HTTP_204_NO_CONTENT)

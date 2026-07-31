@@ -4,6 +4,7 @@ import type {
   NominaParametro,
   NominaProvision,
   NominaResumenPeriodo,
+  PagoNomina,
   PeriodoHistorico,
   ResumenNomina,
   ResumenNominaDetallado,
@@ -68,4 +69,10 @@ export const nominaApi = {
     api.get<NominaResumenPeriodo>("/nomina/provisiones/total", {
       params: mes !== undefined ? { anio, mes } : { anio },
     }),
+
+  registrarPago: (data: Omit<PagoNomina, "id" | "created_at">) =>
+    api.post<PagoNomina>("/nomina/provisiones/pago", data),
+
+  listPagos: () =>
+    api.get<PagoNomina[]>("/nomina/provisiones/pagos"),
 };
