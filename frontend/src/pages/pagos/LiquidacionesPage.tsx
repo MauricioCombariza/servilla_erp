@@ -844,6 +844,11 @@ export function GenerarLiquidacionModal({ pendiente, mes, anio, onClose, onSaved
             <div className="flex justify-between"><span className="text-gray-600">Subsidio transporte</span><span>${fmt.format(pendiente.total_subsidio ?? 0)}</span></div>
             <div className="flex justify-between border-t pt-1 mt-1 font-semibold"><span>Subtotal</span><span>${fmt.format(pendiente.total_pendiente)}</span></div>
           </div>
+          {pendiente.total_sin_aprobar > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+              ⚠ ${fmt.format(pendiente.total_sin_aprobar)} en horas/labores sin aprobar no se incluirán en este pago. Apruébalas en Registro Horas/Labores antes de liquidar.
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Bonificación</label>

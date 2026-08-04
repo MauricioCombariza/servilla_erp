@@ -514,19 +514,23 @@ async def resumen_labores(
             COALESCE(l.total_labores_monto, 0)  AS total_labores_monto,
             COALESCE(sub.total_subsidio, 0)     AS total_subsidio,
             COALESCE(h.total_horas_monto, 0) + COALESCE(l.total_labores_monto, 0)
-              + COALESCE(sub.total_subsidio, 0) AS total_general
+              + COALESCE(sub.total_subsidio, 0) AS total_general,
+            COALESCE(h.total_horas_sin_aprobar_monto, 0) + COALESCE(l.total_labores_sin_aprobar_monto, 0)
+              AS total_sin_aprobar
         FROM personal p
         LEFT JOIN (
             SELECT personal_id,
                    SUM(horas_trabajadas)              AS total_horas,
-                   SUM(horas_trabajadas * tarifa_hora) AS total_horas_monto
+                   SUM(horas_trabajadas * tarifa_hora) AS total_horas_monto,
+                   SUM(horas_trabajadas * tarifa_hora) FILTER (WHERE NOT aprobado) AS total_horas_sin_aprobar_monto
             FROM registro_horas r WHERE 1=1 {mes_filter} {anio_filter}
             GROUP BY personal_id
         ) h ON p.id = h.personal_id
         LEFT JOIN (
             SELECT personal_id,
                    SUM(cantidad)                   AS total_labores,
-                   SUM(cantidad * tarifa_unitaria)  AS total_labores_monto
+                   SUM(cantidad * tarifa_unitaria)  AS total_labores_monto,
+                   SUM(cantidad * tarifa_unitaria) FILTER (WHERE NOT aprobado) AS total_labores_sin_aprobar_monto
             FROM registro_labores r WHERE 1=1 {mes_filter} {anio_filter}
             GROUP BY personal_id
         ) l ON p.id = l.personal_id

@@ -87,4 +87,5 @@ class ResumenPendientePago(BaseModel):
     total_labores_monto: float
     total_subsidio: float
     total_pendiente: float
+    total_sin_aprobar: float
     ya_liquidado: bool

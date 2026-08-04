@@ -357,6 +357,7 @@ export interface ResumenLabores {
   total_labores_monto: number;
   total_subsidio: number;
   total_general: number;
+  total_sin_aprobar: number;
 }
 
 // ── Flujo de caja ─────────────────────────────────────────────────────────────

@@ -79,9 +79,24 @@ async def pendientes_pago(
               AND EXTRACT(YEAR  FROM fecha) = :anio
               AND liquidado = FALSE
             GROUP BY personal_id
+        ),
+        sin_aprobar AS (
+            -- Horas/labores del período que aún no se pueden liquidar por falta de aprobación.
+            SELECT personal_id, SUM(monto) AS total_sin_aprobar FROM (
+                SELECT personal_id, horas_trabajadas * tarifa_hora AS monto
+                FROM registro_horas
+                WHERE EXTRACT(MONTH FROM fecha) = :mes AND EXTRACT(YEAR FROM fecha) = :anio
+                  AND aprobado = FALSE AND liquidado = FALSE
+                UNION ALL
+                SELECT personal_id, cantidad * tarifa_unitaria AS monto
+                FROM registro_labores
+                WHERE EXTRACT(MONTH FROM fecha) = :mes AND EXTRACT(YEAR FROM fecha) = :anio
+                  AND aprobado = FALSE AND liquidado = FALSE
+            ) x
+            GROUP BY personal_id
         )
         SELECT
-            COALESCE(s.personal_id, h.personal_id, l.personal_id, sub.personal_id) AS personal_id,
+            COALESCE(s.personal_id, h.personal_id, l.personal_id, sub.personal_id, sa.personal_id) AS personal_id,
             COALESCE(s.codigo, p2.codigo)                         AS codigo,
             COALESCE(s.nombre_completo, p2.nombre_completo)       AS nombre_completo,
             COALESCE(s.tipo_personal, p2.tipo_personal)           AS tipo_personal,
@@ -96,12 +111,14 @@ async def pendientes_pago(
               + COALESCE(h.total_horas_monto, 0)
               + COALESCE(l.total_labores_monto, 0)
               + COALESCE(sub.total_subsidio, 0) AS total_pendiente,
-            (COALESCE(s.personal_id, h.personal_id, l.personal_id, sub.personal_id) IN (SELECT personal_id FROM ya_liq)) AS ya_liquidado
+            COALESCE(sa.total_sin_aprobar, 0) AS total_sin_aprobar,
+            (COALESCE(s.personal_id, h.personal_id, l.personal_id, sub.personal_id, sa.personal_id) IN (SELECT personal_id FROM ya_liq)) AS ya_liquidado
         FROM seriales s
         FULL OUTER JOIN horas    h   ON s.personal_id = h.personal_id
         FULL OUTER JOIN labores  l   ON COALESCE(s.personal_id, h.personal_id) = l.personal_id
         FULL OUTER JOIN subsidio sub ON COALESCE(s.personal_id, h.personal_id, l.personal_id) = sub.personal_id
-        LEFT JOIN personal p2 ON p2.id = COALESCE(s.personal_id, h.personal_id, l.personal_id, sub.personal_id)
+        FULL OUTER JOIN sin_aprobar sa ON COALESCE(s.personal_id, h.personal_id, l.personal_id, sub.personal_id) = sa.personal_id
+        LEFT JOIN personal p2 ON p2.id = COALESCE(s.personal_id, h.personal_id, l.personal_id, sub.personal_id, sa.personal_id)
         ORDER BY codigo ASC
     """)
     rows = (await db.execute(sql, {"mes": mes, "anio": anio})).mappings().all()

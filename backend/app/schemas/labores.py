@@ -97,6 +97,7 @@ class ResumenLabores(BaseModel):
     total_labores_monto: float
     total_subsidio: float
     total_general: float
+    total_sin_aprobar: float
 
 
 class ResumenDiario(BaseModel):

@@ -601,7 +601,14 @@ function PersonaMesRow({ r, mes, anio, pendiente, onLiquidar }: {
         <td className="px-4 py-3 text-gray-600">{r.total_labores}</td>
         <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_labores_monto} /></td>
         <td className="px-4 py-3 text-gray-700"><CurrencyCell value={r.total_subsidio} /></td>
-        <td className="px-4 py-3 font-semibold text-gray-900"><CurrencyCell value={r.total_general} /></td>
+        <td className="px-4 py-3 font-semibold text-gray-900">
+          <CurrencyCell value={r.total_general} />
+          {r.total_sin_aprobar > 0 && (
+            <p className="text-xs font-normal text-amber-600 mt-0.5" title="Este monto no se incluirá al liquidar hasta que se apruebe en Registro Horas/Labores">
+              ⚠ ${fmt.format(r.total_sin_aprobar)} sin aprobar
+            </p>
+          )}
+        </td>
         <td className="px-4 py-3">
           {pendiente?.ya_liquidado ? (
             <span className="px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">Liquidado</span>

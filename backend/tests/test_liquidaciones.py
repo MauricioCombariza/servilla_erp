@@ -347,3 +347,53 @@ async def test_eliminar_liquidacion_revierte_solo_el_subconjunto_seleccionado(cl
     fechas_pendientes = {row["fecha"] for row in r2.json()}
     assert liq_data["dia_1"] in fechas_pendientes
     assert liq_data["dia_2"] in fechas_pendientes
+
+
+@pytest.mark.asyncio
+async def test_pendientes_reporta_monto_sin_aprobar_y_lo_excluye_del_subtotal(client, auth_headers):
+    """Horas/labores sin aprobar no deben poder liquidarse, pero /pendientes debe
+    reportar cuánto quedó excluido (total_sin_aprobar) para que la UI pueda advertirlo
+    en vez de mostrar un subtotal bajo sin explicación."""
+    from app.database import AsyncSessionLocal
+    from sqlalchemy import text
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(text("DELETE FROM registro_horas WHERE personal_id IN "
+                               "(SELECT id FROM personal WHERE codigo = 'LQ04')"))
+        await db.execute(text("DELETE FROM registro_labores WHERE personal_id IN "
+                               "(SELECT id FROM personal WHERE codigo = 'LQ04')"))
+        await db.execute(text("DELETE FROM personal WHERE codigo = 'LQ04'"))
+        r = await db.execute(text("""
+            INSERT INTO personal (codigo, nombre_completo, identificacion, tipo_personal, activo)
+            VALUES ('LQ04', 'Alistamiento Sin Aprobar Liq Test', '777704TEST', 'alistamiento', TRUE)
+            RETURNING id
+        """))
+        pid = r.scalar_one()
+        await db.execute(text("""
+            INSERT INTO registro_horas (personal_id, fecha, horas_trabajadas, tarifa_hora, tipo_trabajo, aprobado)
+            VALUES (:pid, '2026-05-05', 4, 2000, 'alistamiento_sobres', FALSE)
+        """), {"pid": pid})
+        await db.execute(text("""
+            INSERT INTO registro_labores (personal_id, fecha, tipo_labor, cantidad, tarifa_unitaria, aprobado)
+            VALUES (:pid, '2026-05-05', 'pegado_guia', 5, 100, FALSE)
+        """), {"pid": pid})
+        await db.commit()
+
+    try:
+        r = await client.get(
+            "/api/liquidaciones/pendientes",
+            params={"mes": 5, "anio": 2026},
+            headers=auth_headers,
+        )
+        assert r.status_code == 200, r.text
+        row = next(row for row in r.json() if row["personal_id"] == pid)
+        assert row["total_horas_monto"] == 0.0
+        assert row["total_labores_monto"] == 0.0
+        assert row["total_pendiente"] == 0.0
+        assert row["total_sin_aprobar"] == 8500.0  # 4*2000 + 5*100
+    finally:
+        async with AsyncSessionLocal() as db:
+            await db.execute(text("DELETE FROM registro_horas WHERE personal_id = :pid"), {"pid": pid})
+            await db.execute(text("DELETE FROM registro_labores WHERE personal_id = :pid"), {"pid": pid})
+            await db.execute(text("DELETE FROM personal WHERE id = :pid"), {"pid": pid})
+            await db.commit()

@@ -241,6 +241,58 @@ async def test_resumen_orden_descendente(client, headers, personal_id):
     assert totales == sorted(totales, reverse=True)
 
 
+@pytest.mark.asyncio
+async def test_resumen_labores_reporta_monto_sin_aprobar(client, headers):
+    """El total del roster debe seguir sumando horas/labores sin aprobar (total_general),
+    pero también debe exponer cuánto de eso no se podrá liquidar todavía (total_sin_aprobar),
+    para que la UI pueda advertirlo antes de generar la liquidación."""
+    from app.database import AsyncSessionLocal
+    from sqlalchemy import text
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(text("DELETE FROM registro_horas WHERE personal_id IN "
+                               "(SELECT id FROM personal WHERE codigo = 'T997')"))
+        await db.execute(text("DELETE FROM registro_labores WHERE personal_id IN "
+                               "(SELECT id FROM personal WHERE codigo = 'T997')"))
+        await db.execute(text("DELETE FROM personal WHERE codigo = 'T997'"))
+        r = await db.execute(text("""
+            INSERT INTO personal (codigo, nombre_completo, identificacion, tipo_personal, activo)
+            VALUES ('T997', 'Alistador Sin Aprobar Test', '88001197', 'alistamiento', TRUE)
+            RETURNING id
+        """))
+        pid = r.scalar_one()
+        await db.execute(text("""
+            INSERT INTO registro_horas (personal_id, fecha, horas_trabajadas, tarifa_hora, tipo_trabajo, aprobado)
+            VALUES (:pid, '2026-05-05', 4, 2000, 'alistamiento_sobres', TRUE)
+        """), {"pid": pid})
+        await db.execute(text("""
+            INSERT INTO registro_horas (personal_id, fecha, horas_trabajadas, tarifa_hora, tipo_trabajo, aprobado)
+            VALUES (:pid, '2026-05-06', 3, 2000, 'alistamiento_sobres', FALSE)
+        """), {"pid": pid})
+        await db.execute(text("""
+            INSERT INTO registro_labores (personal_id, fecha, tipo_labor, cantidad, tarifa_unitaria, aprobado)
+            VALUES (:pid, '2026-05-06', 'pegado_guia', 10, 100, FALSE)
+        """), {"pid": pid})
+        await db.commit()
+
+    try:
+        r = await client.get("/api/labores/resumen", params={"mes": 5, "anio": 2026}, headers=headers)
+        assert r.status_code == 200
+        row = next(row for row in r.json() if row["personal_id"] == pid)
+        # total_horas_monto/total_labores_monto/total_general suman TODO (aprobado o no);
+        # total_sin_aprobar aisla la porción sin aprobar (6000 horas + 1000 labores).
+        assert row["total_horas_monto"] == 14000.0  # 4*2000 aprobado + 3*2000 sin aprobar
+        assert row["total_labores_monto"] == 1000.0  # 10*100 sin aprobar
+        assert row["total_general"] == 15000.0
+        assert row["total_sin_aprobar"] == 7000.0
+    finally:
+        async with AsyncSessionLocal() as db:
+            await db.execute(text("DELETE FROM registro_horas WHERE personal_id = :pid"), {"pid": pid})
+            await db.execute(text("DELETE FROM registro_labores WHERE personal_id = :pid"), {"pid": pid})
+            await db.execute(text("DELETE FROM personal WHERE id = :pid"), {"pid": pid})
+            await db.commit()
+
+
 # ── Sin autenticación ─────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
