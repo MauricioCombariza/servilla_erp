@@ -60,8 +60,9 @@ export function CargaMasivaPage() {
           <code className="bg-gray-100 px-1 rounded text-xs">orden, serial, fecha_recepcion, nombre_cliente, tipo_servicio, ambito</code>
         </p>
         <p><span className="font-medium">iMile histórico:</span>{" "}
-          <code className="bg-gray-100 px-1 rounded text-xs">orden, serial, f_emi, no_entidad, ciudad1</code>
-          {" "}— tipo_servicio='sobre', ambito derivado de ciudad1
+          <code className="bg-gray-100 px-1 rounded text-xs">orden, serial, f_esc, f_emi, no_entidad, ciudad1</code>
+          {" "}— tipo_servicio='sobre', ambito derivado de ciudad1. f_esc (fecha real de escáner)
+          se usa si viene; si no, se aproxima con f_emi
         </p>
         <p><span className="font-medium">iMile escáner:</span>{" "}
           <code className="bg-gray-100 px-1 rounded text-xs">orden, serial, f_emi, no_entidad</code>

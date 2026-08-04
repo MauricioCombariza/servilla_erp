@@ -296,6 +296,95 @@ async def test_carga_masiva_planilla_texto_nan_no_se_guarda(client, headers, set
 
 
 @pytest.mark.asyncio
+async def test_carga_masiva_historico_f_esc_independiente_de_f_emi(client, headers, setup_maestros):
+    """Flujo iMile histórico (dashboard.csv): cuando el archivo trae f_esc, esa es
+    la que debe quedar en seriales_gestion.f_esc (fecha real de escáner), y f_emi
+    debe guardarse aparte con su propio valor — no deben quedar conflados en el
+    mismo valor derivado, como pasaba antes de este fix."""
+    from sqlalchemy import text as sqltext
+
+    from app.database import AsyncSessionLocal
+
+    csv_content = (
+        "orden,serial,f_esc,f_emi,no_entidad,ciudad1\n"
+        "ORD-HIST-001,SER-HIST-001,2026-07-08,2026-06-09,Cliente Ordenes Test,Bogota\n"
+    )
+    try:
+        r = await client.post(
+            "/api/ordenes/carga-masiva",
+            files={"file": ("historico.csv", io.BytesIO(csv_content.encode()), "text/csv")},
+            headers=headers,
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["filas_ignoradas"] == 0
+        assert data["seriales_nuevos"] == 1
+
+        async with AsyncSessionLocal() as db:
+            row = (
+                await db.execute(
+                    sqltext("SELECT f_esc, f_emi FROM seriales_gestion WHERE serial = 'SER-HIST-001'")
+                )
+            ).one()
+            orden_row = (
+                await db.execute(
+                    sqltext("SELECT fecha_recepcion, f_esc FROM ordenes WHERE numero_orden = 'ORD-HIST-001'")
+                )
+            ).one()
+        f_esc, f_emi = row
+        assert str(f_esc) == "2026-07-08"
+        assert str(f_emi) == "2026-06-09"
+        orden_fecha_recepcion, orden_f_esc = orden_row
+        assert str(orden_fecha_recepcion) == "2026-07-08"
+        assert str(orden_f_esc) == "2026-07-08"
+    finally:
+        async with AsyncSessionLocal() as db:
+            await db.execute(sqltext("DELETE FROM seriales_gestion WHERE serial = 'SER-HIST-001'"))
+            await db.execute(sqltext("DELETE FROM ordenes WHERE numero_orden = 'ORD-HIST-001'"))
+            await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_carga_masiva_historico_sin_f_esc_cae_a_f_emi(client, headers, setup_maestros):
+    """Compat con archivos del formato viejo, sin columna f_esc: sigue aproximando
+    fecha_recepcion (y por tanto f_esc) con f_emi, igual que antes de este fix —
+    en ese caso f_esc y f_emi quedan con el mismo valor."""
+    from sqlalchemy import text as sqltext
+
+    from app.database import AsyncSessionLocal
+
+    csv_content = (
+        "orden,serial,f_emi,no_entidad,ciudad1\n"
+        "ORD-HIST-002,SER-HIST-002,2026-06-09,Cliente Ordenes Test,Bogota\n"
+    )
+    try:
+        r = await client.post(
+            "/api/ordenes/carga-masiva",
+            files={"file": ("historico_viejo.csv", io.BytesIO(csv_content.encode()), "text/csv")},
+            headers=headers,
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["filas_ignoradas"] == 0
+        assert data["seriales_nuevos"] == 1
+
+        async with AsyncSessionLocal() as db:
+            row = (
+                await db.execute(
+                    sqltext("SELECT f_esc, f_emi FROM seriales_gestion WHERE serial = 'SER-HIST-002'")
+                )
+            ).one()
+        f_esc, f_emi = row
+        assert str(f_esc) == "2026-06-09"
+        assert str(f_emi) == "2026-06-09"
+    finally:
+        async with AsyncSessionLocal() as db:
+            await db.execute(sqltext("DELETE FROM seriales_gestion WHERE serial = 'SER-HIST-002'"))
+            await db.execute(sqltext("DELETE FROM ordenes WHERE numero_orden = 'ORD-HIST-002'"))
+            await db.commit()
+
+
+@pytest.mark.asyncio
 async def test_carga_masiva_no_csv(client, headers):
     r = await client.post(
         "/api/ordenes/carga-masiva",

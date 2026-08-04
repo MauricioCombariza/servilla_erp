@@ -60,6 +60,7 @@ class OrdenRead(BaseModel):
     ciudad_destino_id: int | None
     ciudad_destino: CiudadResumen | None
     fecha_recepcion: date
+    f_esc: date | None
     tipo_servicio: str
     cantidad_total: int
     cantidad_recibido: int

@@ -17,6 +17,7 @@ class Orden(Base):
     cliente_id: Mapped[int] = mapped_column(ForeignKey("clientes.id"), nullable=False)
     ciudad_destino_id: Mapped[int | None] = mapped_column(ForeignKey("ciudades.id", ondelete="SET NULL"))
     fecha_recepcion: Mapped[date] = mapped_column(nullable=False)
+    f_esc: Mapped[date | None] = mapped_column()
     tipo_servicio: Mapped[str] = mapped_column(String(8), nullable=False)
 
     cantidad_total: Mapped[int] = mapped_column(default=0)

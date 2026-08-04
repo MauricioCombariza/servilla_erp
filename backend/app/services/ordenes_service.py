@@ -1,7 +1,7 @@
 """
 Lógica de negocio para carga masiva de órdenes desde CSV.
 
-Soporta dos formatos de origen:
+Soporta tres formatos de origen:
 
   Flujo 1 — CSV manual:
     Columnas: orden, serial, fecha_recepcion, nombre_cliente, tipo_servicio, ambito
@@ -9,10 +9,11 @@ Soporta dos formatos de origen:
     Opcionales: planilla, cod_men
 
   Flujo 2 — iMile escáner (detectado por columna 'Waybill No.'):
-    Columnas origen: 'Scan time', 'Waybill No.', 'DA'
+    Columnas origen: 'Scan time', 'Waybill No.', 'DA', opcionalmente f_emi
     Transformaciones:
       - serial          = Waybill No.
-      - fecha_recepcion = fecha de Scan time
+      - fecha_recepcion = fecha de Scan time  (→ f_esc)
+      - f_emi           = columna f_emi del archivo si viene; si no, = f_esc
       - orden           = "IM" + YYYYMMDD  (generado desde Scan time)
       - planilla        = mismo valor que orden
       - nombre_cliente  = 'Imile SAS' (fijo)
@@ -20,10 +21,25 @@ Soporta dos formatos de origen:
       - ambito          = 'bogota' (fijo)
       - cod_men         = resuelto desde DA vía tabla personal (por nombre)
 
+  Flujo 3 — iMile histórico (dashboard.csv generado por updateDashboard.py):
+    Columnas origen: orden, serial, f_esc (preferida) o f_emi (compat con
+    archivos sin f_esc), no_entidad, ciudad1
+    Transformaciones:
+      - fecha_recepcion = f_esc si viene (→ f_esc real de escáner); si no,
+                          f_emi (compat, y en ese caso f_emi == f_esc)
+      - f_emi           = valor real de f_emi del archivo, independiente de
+                          fecha_recepcion/f_esc, cuando ambos vienen
+      - nombre_cliente  = no_entidad
+      - tipo_servicio   = 'sobre' (fijo)
+      - ambito          = derivado de ciudad1
+
 Reglas comunes:
-  - Solo se procesan filas con fecha >= 2026-01-01.
+  - Solo se procesan filas con fecha (fecha_recepcion/f_esc) >= 2026-01-01.
   - Serial nuevo → INSERT; existente con estado='pendiente' → UPDATE; otro estado → no-op.
   - Al finalizar seriales, upsert en ordenes agrupando por número de orden.
+  - f_emi y f_esc se guardan como columnas independientes (no se duplica un
+    mismo valor derivado en ambas), salvo cuando el archivo de origen no trae
+    una de las dos — ver detalle de cada flujo arriba.
 
 El archivo se procesa **por chunks**: el dashboard diario puede traer cientos de miles
 de filas y materializar el DataFrame completo agotaba la memoria del contenedor
@@ -61,7 +77,7 @@ MAX_ERRORES = 50
 # Únicas columnas que el servicio lee. El dashboard trae ~30 columnas y descartar
 # las demás en el parser (usecols) reduce la memoria del chunk unas 2.5x.
 _COLUMNAS_UTILES = frozenset({
-    "serial", "orden", "fecha_recepcion", "f_emi",
+    "serial", "orden", "fecha_recepcion", "f_emi", "f_esc",
     "nombre_cliente", "no_entidad", "tipo_servicio", "ambito",
     "colum_ciudad", "ciudad1", "estado", "planilla", "lot_esc", "cod_men",
     "courrier", "courier",
@@ -189,12 +205,13 @@ _SERIAL_UPSERT = text("""
          cliente_id, tipo_gestion, tipo_envio, ambito,
          precio_cliente, precio_mensajero, estado, origen)
     VALUES
-        (:serial, :orden, :planilla, :fecha, :fecha, :cod_men, :mensajero_id,
+        (:serial, :orden, :planilla, :f_emi, :f_esc, :cod_men, :mensajero_id,
          :cliente_id, :tipo_gestion, :tipo_envio, :ambito,
          :precio_cli, :precio_men, :db_estado, 'manual')
     ON CONFLICT (serial) DO UPDATE SET
         orden            = EXCLUDED.orden,
         planilla         = EXCLUDED.planilla,
+        f_emi            = EXCLUDED.f_emi,
         f_esc            = EXCLUDED.f_esc,
         cod_men          = EXCLUDED.cod_men,
         mensajero_id     = EXCLUDED.mensajero_id,
@@ -239,13 +256,33 @@ def _iter_chunks(origen: bytes | str, filename: str) -> Iterator[pd.DataFrame]:
 
 
 def _preparar_columnas(df: pd.DataFrame, es_imile: bool) -> pd.DataFrame:
-    """Lleva las columnas de origen a los nombres canónicos y deriva las ausentes."""
+    """Lleva las columnas de origen a los nombres canónicos y deriva las ausentes.
+
+    `f_emi` (fecha de emisión) se copia a la columna de trabajo `_f_emi_raw`
+    ANTES de cualquier rename, para que sobreviva de forma independiente del
+    valor que termine en `fecha_recepcion` (y por tanto en f_esc). Sin esto,
+    el flujo iMile histórico (y el de iMile escáner, que también puede traer
+    f_emi) perdía el valor real de emisión al reusarlo como fecha_recepcion.
+    """
+    if "f_emi" in df.columns:
+        df = df.copy()
+        df["_f_emi_raw"] = df["f_emi"]
+
     if es_imile:
         return _transformar_imile(df)
 
     df = df.copy()
-    if "fecha_recepcion" not in df.columns and "f_emi" in df.columns:
-        df = df.rename(columns={"f_emi": "fecha_recepcion"})
+    if "fecha_recepcion" not in df.columns:
+        if "f_esc" in df.columns:
+            # iMile histórico (dashboard.csv): f_esc es la fecha real de
+            # escáner → determina el período de costo (precios_cliente).
+            df = df.rename(columns={"f_esc": "fecha_recepcion"})
+        elif "f_emi" in df.columns:
+            # Compat con archivos sin columna f_esc: se aproxima
+            # fecha_recepcion con f_emi, como antes de este fix. En ese caso
+            # k_f_emi == k_fecha, es decir f_emi == f_esc en seriales_gestion
+            # — mismo comportamiento de facto que existía antes.
+            df = df.rename(columns={"f_emi": "fecha_recepcion"})
     if "nombre_cliente" not in df.columns and "no_entidad" in df.columns:
         df = df.rename(columns={"no_entidad": "nombre_cliente"})
     if "tipo_servicio" not in df.columns:
@@ -412,6 +449,17 @@ async def procesar_csv(
             continue
         df["k_fecha"] = fechas[vigentes].dt.date
 
+        # f_emi es independiente de f_esc (que alimenta k_fecha y el corte
+        # DATE_CORTE, ligado a fecha_recepcion/escáner). Sin columna f_emi
+        # propia en el archivo (CSV manual, o formatos viejos sin ella) se
+        # cae a k_fecha — mismo comportamiento de facto que existía antes de
+        # este fix, para no regresionar esos flujos.
+        if "_f_emi_raw" in df.columns:
+            df["k_f_emi"] = _parse_fechas(df["_f_emi_raw"]).dt.date
+            df["k_f_emi"] = df["k_f_emi"].fillna(df["k_fecha"])
+        else:
+            df["k_f_emi"] = df["k_fecha"]
+
         # ── Resolver DA → cod_men para filas iMile ────────────────────────────
         if es_imile and "_da_nombre" in df.columns:
             df["k_cod_men"] = _resolver_cod_men_imile(
@@ -449,7 +497,7 @@ async def procesar_csv(
 
             params.append({
                 "serial": str(fila.serial).strip(), "orden": str(fila.k_orden),
-                "planilla": planilla_val, "fecha": fila.k_fecha,
+                "planilla": planilla_val, "f_emi": fila.k_f_emi, "f_esc": fila.k_fecha,
                 "cod_men": cod_men_val, "mensajero_id": mensajero_id,
                 "cliente_id": id_cliente, "tipo_gestion": str(fila.k_tipo_gestion),
                 "tipo_envio": tipo_ser, "ambito": ambito_val,
@@ -555,9 +603,9 @@ async def procesar_csv(
                 await db.execute(
                     text("""
                         INSERT INTO ordenes
-                            (numero_orden, cliente_id, fecha_recepcion, tipo_servicio,
+                            (numero_orden, cliente_id, fecha_recepcion, f_esc, tipo_servicio,
                              cantidad_total, cantidad_recibido, valor_total, estado)
-                        VALUES (:num, :cli, :fecha, :tipo, :total, :total, :valor, 'activa')
+                        VALUES (:num, :cli, :fecha, :fecha, :tipo, :total, :total, :valor, 'activa')
                     """),
                     new_orden_params,
                 )
