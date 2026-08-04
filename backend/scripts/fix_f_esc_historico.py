@@ -5,11 +5,19 @@ derivado (fecha de emisión) para ambas columnas en vez de la fecha real de esc�
 (ver ordenes_service.py, _SERIAL_UPSERT, antes de este fix).
 
 Alcance (a propósito, NO se corrige nada fuera de esto):
-  - Solo filas con f_esc >= 2026-07-01 (columna DATE nativa en Postgres,
-    comparación directa segura). Períodos anteriores pueden estar ya
-    liquidados/facturados y quedan fuera de este backfill.
-  - Solo filas con editado_manualmente = FALSE (mismo guard que usa el propio
-    upsert de carga masiva — no se tocan ediciones manuales).
+  - Candidatos: filas con f_esc = f_emi (huella del bug: ordenes_service escribía
+    el mismo valor derivado en ambas columnas para el flujo histórico). Por
+    defecto solo editado_manualmente=FALSE; con --incluir-bloqueados-pendientes
+    también entran las bloqueadas (editado_manualmente=TRUE) que sigan
+    estado='pendiente' (bloqueada ≠ pagada — bloquear una planilla es una acción
+    de revisión, no de liquidación). No se filtra por la fecha ACTUAL de f_esc,
+    porque esa fecha puede estar mal — el corte de 2026-07-01 se aplica sobre el
+    f_esc REAL (de histo), no sobre el valor actual (ver "Si el f_esc real..."
+    abajo).
+  - Las filas con estado='liquidado' (ya pagadas) NUNCA se tocan, sin importar
+    los flags — es un backstop tanto en la consulta de candidatos como en el
+    propio UPDATE. Requieren revisión humana aparte (el script reporta cuántas
+    tienen la huella del bug, sin decidir nada por ellas).
   - Solo filas cuyo serial existe en bases_web.histo, fuente real de f_esc/f_emi
     para el flujo histórico. Seriales de origen iMile-escáner o CSV-manual no
     están en histo y quedan naturalmente fuera de este backfill (no-op
@@ -19,6 +27,11 @@ Alcance (a propósito, NO se corrige nada fuera de esto):
   - Si el f_esc real (de histo) resulta ser ANTERIOR al 2026-07-01, la fila NO
     se corrige — queda con su f_esc actual tal cual, aunque sea incorrecto
     (decisión explícita: no se retrocede a un período anterior).
+  - Tras corregir seriales_gestion, también se resincroniza ordenes.f_esc
+    (MIN(f_esc) de los seriales de esa orden ya corregidos) para las órdenes
+    afectadas — es una columna independiente que se llenó con el mismo valor
+    erróneo. ordenes.fecha_recepcion NO se toca (cambio de mayor riesgo, fuera
+    de alcance de este backfill).
 
 Money-safety: este script NUNCA toca precio_cliente ni precio_mensajero. Solo
 reporta (no aplica) los casos donde el f_esc corregido caería en un período de
@@ -35,6 +48,7 @@ Uso:
     MYSQL_PASSWORD_BW="..." \
     python scripts/fix_f_esc_historico.py                          # solo reporta
     python scripts/fix_f_esc_historico.py --apply                  # aplica los UPDATE
+    python scripts/fix_f_esc_historico.py --incluir-bloqueados-pendientes --apply
     python scripts/fix_f_esc_historico.py --out-vigencia-impacto impacto.csv
 """
 
@@ -104,12 +118,31 @@ def _chunked(seq, n):
 
 # ── Paso 1: candidatos en Postgres ──────────────────────────────────────────
 
-def cargar_candidatos_pg(cur) -> dict:
-    cur.execute("""
-        SELECT id, serial, f_esc, f_emi, cliente_id, tipo_envio, ambito
+def cargar_candidatos_pg(cur, incluir_bloqueados_pendientes: bool, incluir_liquidados: bool) -> dict:
+    """Candidatos: f_esc = f_emi es la huella del bug original (ordenes_service
+    escribía el mismo valor derivado en ambas columnas para el flujo histórico).
+    No se filtra por fecha aquí — el corte de 2026-07-01 se aplica más adelante
+    sobre el f_esc REAL (de histo), no sobre el actual, porque el actual puede
+    estar mal (ej. mostrar junio cuando el escaneo real fue en julio).
+
+    Por defecto solo editado_manualmente=FALSE. Con incluir_bloqueados_pendientes,
+    también entran las filas bloqueadas (editado_manualmente=TRUE) que sigan
+    'pendiente' de liquidar. Con incluir_liquidados, también entran las filas
+    'liquidado' (ya pagadas) — money-safety extra para este caso: en el paso de
+    aplicar, cualquier fila 'liquidado' cuyo período de vigencia de tarifa
+    cambiaría con la fecha corregida se salta SIEMPRE (nunca se aplica), sin
+    importar el flag — ver aplicar_correcciones()."""
+    condiciones = ["editado_manualmente = FALSE"]
+    if incluir_bloqueados_pendientes:
+        condiciones.append("(editado_manualmente = TRUE AND estado = 'pendiente')")
+    if incluir_liquidados:
+        condiciones.append("estado = 'liquidado'")
+    condicion = "(" + " OR ".join(condiciones) + ")"
+    cur.execute(f"""
+        SELECT id, serial, orden, f_esc, f_emi, cliente_id, tipo_envio, ambito, estado
         FROM seriales_gestion
-        WHERE f_esc >= %s AND editado_manualmente = FALSE
-    """, (FECHA_LIMITE,))
+        WHERE f_esc = f_emi AND {condicion}
+    """)
     return {r["serial"]: r for r in cur.fetchall()}
 
 
@@ -162,7 +195,7 @@ def comparar(pg: dict, histo: dict) -> tuple[list, int]:
         if v["f_esc"] == row["f_esc"] and v["f_emi"] == row["f_emi"]:
             continue  # ya correcto
         corregir.append({
-            "id": row["id"], "serial": serial,
+            "id": row["id"], "serial": serial, "orden": row["orden"], "estado": row["estado"],
             "f_esc_actual": row["f_esc"], "f_esc_correcto": v["f_esc"],
             "f_emi_actual": row["f_emi"], "f_emi_correcto": v["f_emi"],
             "cliente_id": row["cliente_id"], "tipo_envio": row["tipo_envio"], "ambito": row["ambito"],
@@ -206,6 +239,13 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true",
                      help="Aplica los UPDATE de f_esc/f_emi (por defecto solo reporta)")
+    ap.add_argument("--incluir-bloqueados-pendientes", action="store_true",
+                     help="Incluye filas bloqueadas (editado_manualmente=TRUE) que sigan "
+                          "estado='pendiente'.")
+    ap.add_argument("--incluir-liquidados", action="store_true",
+                     help="Incluye filas ya 'liquidado' (pagadas). Nunca se aplica un cambio si "
+                          "la fecha corregida movería el período de vigencia de tarifa — esas se "
+                          "saltan siempre y se reportan aparte, sin importar este flag.")
     ap.add_argument("--out-vigencia-impacto", help="Ruta CSV opcional con el detalle de filas cuyo período de tarifa cambiaría")
     args = ap.parse_args()
 
@@ -218,8 +258,21 @@ def main() -> None:
         sys.exit(1)
 
     with pg_conn(db_url.replace("+asyncpg", "")) as (conn, cur):
-        pg = cargar_candidatos_pg(cur)
-        print(f"Candidatos en Postgres (f_esc >= {FECHA_LIMITE}, editado_manualmente=FALSE): {len(pg):,}")
+        cur.execute("SELECT count(*) AS c FROM seriales_gestion WHERE f_esc = f_emi AND estado = 'liquidado'")
+        n_liquidado_bug = cur.fetchone()["c"]
+        if n_liquidado_bug:
+            aviso = ("entran a revisión con --incluir-liquidados (las con impacto de tarifa se saltan igual)"
+                      if args.incluir_liquidados else
+                      "NUNCA se tocan sin --incluir-liquidados")
+            print(f"⚠ {n_liquidado_bug:,} filas YA LIQUIDADAS tienen la huella del bug (f_esc = f_emi) — {aviso}.")
+
+        pg = cargar_candidatos_pg(cur, args.incluir_bloqueados_pendientes, args.incluir_liquidados)
+        alcance = "editado_manualmente=FALSE"
+        if args.incluir_bloqueados_pendientes:
+            alcance += " + bloqueadas pendientes"
+        if args.incluir_liquidados:
+            alcance += " + liquidadas"
+        print(f"Candidatos en Postgres (f_esc = f_emi, {alcance}): {len(pg):,}")
         if not pg:
             print("Nada que revisar.")
             return
@@ -252,16 +305,57 @@ def main() -> None:
             print("\n(reporte only — no se aplicó ningún cambio; pasar --apply para aplicar)")
             return
 
+        impacto_ids = {c["id"] for c in con_impacto}
+
         total = 0
+        saltadas_liquidado_impacto = 0
+        ordenes_afectadas: set = set()
         for c in corregir:
+            if c["estado"] == "liquidado" and c["id"] in impacto_ids:
+                # Backstop duro: una fila ya pagada cuyo período de tarifa cambiaría
+                # con la fecha corregida NUNCA se toca automáticamente, sin importar
+                # los flags — requiere decisión caso a caso (ver reporte de arriba).
+                saltadas_liquidado_impacto += 1
+                continue
+            if c["estado"] == "liquidado" and not args.incluir_liquidados:
+                # Backstop además del filtro de candidatos: sin --incluir-liquidados
+                # este script jamás toca una fila ya pagada.
+                continue
             cur.execute("""
                 UPDATE seriales_gestion
                 SET f_esc = %s, f_emi = %s
-                WHERE id = %s AND editado_manualmente = FALSE
+                WHERE id = %s
             """, (c["f_esc_correcto"], c["f_emi_correcto"], c["id"]))
             total += cur.rowcount
-        conn.commit()
+            if c["orden"]:
+                ordenes_afectadas.add(c["orden"])
         print(f"\nActualizados: {total:,} seriales (f_esc/f_emi únicamente; precios NO tocados)")
+        if saltadas_liquidado_impacto:
+            print(f"  ⚠ {saltadas_liquidado_impacto:,} filas liquidadas se saltaron por cambio de "
+                  f"vigencia de tarifa (ver detalle arriba / CSV) — requieren decisión manual.")
+
+        # ordenes.f_esc no se corrige solo — es una columna independiente que se
+        # llenó en su momento con el mismo valor erróneo. La resincronizamos con
+        # el MIN(f_esc) de sus seriales YA corregidos (mismo criterio que usa
+        # ordenes_service al insertar una orden nueva).
+        ordenes_actualizadas = 0
+        if ordenes_afectadas:
+            cur.execute("""
+                UPDATE ordenes o
+                SET f_esc = sub.min_f_esc
+                FROM (
+                    SELECT orden, MIN(f_esc) AS min_f_esc
+                    FROM seriales_gestion
+                    WHERE orden = ANY(%s)
+                    GROUP BY orden
+                ) sub
+                WHERE o.numero_orden = sub.orden
+                  AND o.f_esc IS DISTINCT FROM sub.min_f_esc
+            """, (list(ordenes_afectadas),))
+            ordenes_actualizadas = cur.rowcount
+        conn.commit()
+        print(f"Actualizadas: {ordenes_actualizadas:,} órdenes (ordenes.f_esc resincronizado; "
+              f"fecha_recepcion NO se toca)")
 
 
 if __name__ == "__main__":
