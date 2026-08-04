@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle, DollarSign, Trash2, Plus, Rows3 } from "lucide-react";
+import { CheckCircle, DollarSign, Trash2, Plus, Rows3, SlidersHorizontal, X } from "lucide-react";
 import { gestionesApi } from "@/api/gestiones";
 import { laboresApi } from "@/api/labores";
+import { personalApi } from "@/api/personal";
 import { liqApi, type Pendiente, type Liquidacion } from "@/api/liquidaciones";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
 import type { PlanillaResumen, ResumenLabores } from "@/types/domain";
@@ -40,7 +41,13 @@ function rangoMes(mes: number, anio: number): { desde: string; hasta: string } {
   };
 }
 
-type Tab = "pendientes" | "liquidaciones";
+type Tab = "seleccionar" | "pendientes" | "liquidaciones";
+
+const TAB_LABEL: Record<Tab, string> = {
+  seleccionar: "Seleccionar",
+  pendientes: "Pendientes de liquidar",
+  liquidaciones: "Liquidaciones generadas",
+};
 
 const ESTADO_STYLE: Record<string, string> = {
   generada:  "bg-yellow-50 text-yellow-700",
@@ -76,9 +83,10 @@ export function LiquidacionesPage() {
 
 export function LiquidacionesPanel({ mes, anio, soloSeriales = false }: { mes: number; anio: number; soloSeriales?: boolean }) {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<Tab>("pendientes");
+  const [tab, setTab] = useState<Tab>("seleccionar");
   const [generando, setGenerando] = useState<Pendiente | null>(null);
   const [pagando, setPagando] = useState<Liquidacion | null>(null);
+  const [ajustando, setAjustando] = useState<Liquidacion | null>(null);
 
   const { data: pendientes = [], isLoading: loadPend } = useQuery({
     queryKey: ["liq-pendientes", mes, anio],
@@ -120,15 +128,26 @@ export function LiquidacionesPanel({ mes, anio, soloSeriales = false }: { mes: n
         </p>
       )}
       <div className="flex border-b border-gray-200 mb-4">
-        {(["pendientes", "liquidaciones"] as Tab[]).map((t) => (
+        {(["seleccionar", "pendientes", "liquidaciones"] as Tab[]).map((t) => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               tab === t ? "border-primary text-primary" : "border-transparent text-gray-500 hover:text-gray-700"
             }`}>
-            {t === "pendientes" ? "Pendientes de liquidar" : "Liquidaciones generadas"}
+            {TAB_LABEL[t]}
           </button>
         ))}
       </div>
+
+      {tab === "seleccionar" && (
+        <SeleccionarTab
+          mes={mes} anio={anio} soloSeriales={soloSeriales}
+          onGenerado={() => {
+            qc.invalidateQueries({ queryKey: ["liq-pendientes"] });
+            qc.invalidateQueries({ queryKey: ["liquidaciones"] });
+            setTab("liquidaciones");
+          }}
+        />
+      )}
 
       {tab === "pendientes" && (
         <>
@@ -141,7 +160,7 @@ export function LiquidacionesPanel({ mes, anio, soloSeriales = false }: { mes: n
                   <tr>
                     {(soloSeriales
                       ? ["Personal","Seriales","Monto seriales","Total","Estado","",""]
-                      : ["Personal","Seriales","Monto seriales","Horas","Labores","Total","Estado","",""]
+                      : ["Personal","Seriales","Monto seriales","Horas","Labores","Subsidio","Total","Estado","",""]
                     ).map((h, i) => (
                       <th key={i} className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
                     ))}
@@ -185,7 +204,17 @@ export function LiquidacionesPanel({ mes, anio, soloSeriales = false }: { mes: n
                         <td className="px-4 py-3 text-gray-600"><CurrencyCell value={l.total_horas} /></td>
                       )}
                       <td className="px-4 py-3 text-gray-600">+<CurrencyCell value={l.bonificaciones} /> -<CurrencyCell value={l.descuentos} /></td>
-                      <td className="px-4 py-3 font-semibold text-gray-900"><CurrencyCell value={l.total_a_pagar} /></td>
+                      <td className="px-4 py-3 font-semibold text-gray-900">
+                        {l.valor_ajustado != null ? (
+                          <>
+                            <span className="text-gray-400 line-through font-normal text-xs mr-1"><CurrencyCell value={l.total_a_pagar} /></span>
+                            <CurrencyCell value={l.valor_a_pagar} />
+                            <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 align-middle">ajustado</span>
+                          </>
+                        ) : (
+                          <CurrencyCell value={l.total_a_pagar} />
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <span className={`px-2 py-0.5 rounded text-xs font-medium ${ESTADO_STYLE[l.estado] ?? ""}`}>{l.estado}</span>
                       </td>
@@ -194,6 +223,12 @@ export function LiquidacionesPanel({ mes, anio, soloSeriales = false }: { mes: n
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
+                          {l.estado === "generada" && (
+                            <button onClick={() => setAjustando(l)}
+                              className="text-gray-400 hover:text-amber-600" title="Ajustar monto">
+                              <SlidersHorizontal size={14} />
+                            </button>
+                          )}
                           {l.estado === "generada" && (
                             <button onClick={() => aprobar.mutate(l.id)}
                               className="text-gray-400 hover:text-blue-600" title="Aprobar">
@@ -242,6 +277,373 @@ export function LiquidacionesPanel({ mes, anio, soloSeriales = false }: { mes: n
           onSaved={() => { qc.invalidateQueries({ queryKey: ["liquidaciones"] }); setPagando(null); }}
         />
       )}
+      {ajustando && (
+        <AjustarLiquidacionModal
+          liquidacion={ajustando}
+          onClose={() => setAjustando(null)}
+          onSaved={() => { qc.invalidateQueries({ queryKey: ["liquidaciones"] }); setAjustando(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Tab: Seleccionar (planillas + días de alistamiento con checkboxes) ─────────
+
+function SeleccionarTab({ mes, anio, soloSeriales, onGenerado }: {
+  mes: number; anio: number; soloSeriales: boolean; onGenerado: () => void;
+}) {
+  const [personalId, setPersonalId] = useState<number | "">("");
+  const [planillasSel, setPlanillasSel] = useState<Set<string>>(new Set());
+  const [fechasSel, setFechasSel] = useState<Set<string>>(new Set());
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  const { data: personas = [] } = useQuery({
+    queryKey: ["personal-liquidables"],
+    queryFn: () => personalApi.list({ activo: true }).then((r) =>
+      r.data.filter((p) => p.tipo_personal !== "courier_externo" && p.tipo_personal !== "transportadora")
+    ),
+  });
+
+  const { data: planillas = [], isLoading: loadPlanillas } = useQuery({
+    queryKey: ["sel-planillas", personalId, mes, anio],
+    queryFn: () => liqApi.planillasPendientes(personalId as number, mes, anio).then((r) => r.data),
+    enabled: personalId !== "",
+  });
+
+  const { data: dias = [], isLoading: loadDias } = useQuery({
+    queryKey: ["sel-dias", personalId, mes, anio],
+    queryFn: () => laboresApi.resumenDiario({ personal_id: personalId as number, mes, anio, aprobado: true, liquidado: false }).then((r) => r.data),
+    enabled: personalId !== "" && !soloSeriales,
+  });
+
+  function togglePlanilla(planilla: string) {
+    setPlanillasSel((prev) => {
+      const next = new Set(prev);
+      if (next.has(planilla)) next.delete(planilla); else next.add(planilla);
+      return next;
+    });
+  }
+
+  function toggleFecha(fecha: string) {
+    setFechasSel((prev) => {
+      const next = new Set(prev);
+      if (next.has(fecha)) next.delete(fecha); else next.add(fecha);
+      return next;
+    });
+  }
+
+  function cambiarPersona(id: number | "") {
+    setPersonalId(id);
+    setPlanillasSel(new Set());
+    setFechasSel(new Set());
+  }
+
+  const totalPlanillas = planillas.filter((p) => planillasSel.has(p.planilla)).reduce((s, p) => s + p.total_mensajero, 0);
+  const totalDias = dias.filter((d) => fechasSel.has(d.fecha)).reduce((s, d) => s + d.total_general, 0);
+  const totalSeleccion = totalPlanillas + totalDias;
+  const haySeleccion = planillasSel.size > 0 || fechasSel.size > 0;
+
+  return (
+    <div>
+      <div className="mb-4">
+        <select value={personalId} onChange={(e) => cambiarPersona(e.target.value ? +e.target.value : "")}
+          className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-72">
+          <option value="">Seleccione una persona...</option>
+          {personas.map((p) => (
+            <option key={p.id} value={p.id}>{p.nombre_completo} ({p.codigo}) — {TIPO_LABEL[p.tipo_personal] ?? p.tipo_personal}</option>
+          ))}
+        </select>
+      </div>
+
+      {personalId === "" ? (
+        <div className="text-center py-16 text-gray-400">Seleccione una persona para ver sus pendientes</div>
+      ) : (
+        <>
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-4">
+            <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 text-xs font-medium text-gray-600 uppercase tracking-wide">
+              Planillas pendientes
+            </div>
+            {loadPlanillas ? (
+              <div className="text-center py-8 text-gray-500 text-sm">Cargando...</div>
+            ) : planillas.length === 0 ? (
+              <div className="text-center py-8 text-gray-400 text-sm">Sin planillas pendientes en este período</div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    {["", "Planilla", "Fecha", "Seriales", "Valor"].map((h) => (
+                      <th key={h} className="text-left px-4 py-2 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {planillas.map((p) => (
+                    <tr key={p.planilla} className="hover:bg-gray-50">
+                      <td className="px-4 py-2">
+                        <input type="checkbox" checked={planillasSel.has(p.planilla)} onChange={() => togglePlanilla(p.planilla)} />
+                      </td>
+                      <td className="px-4 py-2 font-mono text-xs text-gray-700">{p.planilla}</td>
+                      <td className="px-4 py-2 text-gray-600 text-xs">{p.fecha_escaner ?? "—"}</td>
+                      <td className="px-4 py-2 text-gray-600">{p.total_seriales}</td>
+                      <td className="px-4 py-2 font-semibold text-gray-900"><CurrencyCell value={p.total_mensajero} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {!soloSeriales && (
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-4">
+              <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 text-xs font-medium text-gray-600 uppercase tracking-wide">
+                Días de alistamiento pendientes
+              </div>
+              {loadDias ? (
+                <div className="text-center py-8 text-gray-500 text-sm">Cargando...</div>
+              ) : dias.length === 0 ? (
+                <div className="text-center py-8 text-gray-400 text-sm">Sin horas/labores aprobadas pendientes en este período</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      {["", "Fecha", "Horas", "Monto horas", "Labores", "Monto labores", "Subsidio", "Total"].map((h) => (
+                        <th key={h} className="text-left px-4 py-2 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {dias.map((d) => (
+                      <tr key={d.fecha} className="hover:bg-gray-50">
+                        <td className="px-4 py-2">
+                          <input type="checkbox" checked={fechasSel.has(d.fecha)} onChange={() => toggleFecha(d.fecha)} />
+                        </td>
+                        <td className="px-4 py-2 text-gray-700">{d.fecha}</td>
+                        <td className="px-4 py-2 text-gray-600">{fmt.format(d.total_horas)}h</td>
+                        <td className="px-4 py-2 text-gray-600"><CurrencyCell value={d.total_horas_monto} /></td>
+                        <td className="px-4 py-2 text-gray-600">{d.total_labores}</td>
+                        <td className="px-4 py-2 text-gray-600"><CurrencyCell value={d.total_labores_monto} /></td>
+                        <td className="px-4 py-2 text-gray-600"><CurrencyCell value={d.total_subsidio} /></td>
+                        <td className="px-4 py-2 font-semibold text-gray-900"><CurrencyCell value={d.total_general} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between bg-white rounded-xl border border-gray-200 px-4 py-3">
+            <div className="text-sm text-gray-600">
+              {planillasSel.size} planilla(s) · {fechasSel.size} día(s) seleccionados
+              {" · "}Total: <span className="font-semibold text-gray-900">${fmt.format(totalSeleccion)}</span>
+            </div>
+            <button
+              disabled={!haySeleccion}
+              onClick={() => setShowConfirm(true)}
+              className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+            >
+              <Plus size={16} /> Generar liquidación
+            </button>
+          </div>
+        </>
+      )}
+
+      {showConfirm && personalId !== "" && (
+        <ConfirmarLiquidacionModal
+          personalId={personalId}
+          mes={mes} anio={anio}
+          planillas={Array.from(planillasSel)}
+          fechasAlistamiento={Array.from(fechasSel)}
+          totalCalculado={totalSeleccion}
+          onClose={() => setShowConfirm(false)}
+          onSaved={() => {
+            setPlanillasSel(new Set());
+            setFechasSel(new Set());
+            setShowConfirm(false);
+            onGenerado();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ConfirmarLiquidacionModal({ personalId, mes, anio, planillas, fechasAlistamiento, totalCalculado, onClose, onSaved }: {
+  personalId: number; mes: number; anio: number; planillas: string[]; fechasAlistamiento: string[];
+  totalCalculado: number; onClose: () => void; onSaved: () => void;
+}) {
+  const hoy = new Date();
+  const diasPago = new Date(hoy.getFullYear(), hoy.getMonth(), 8).toISOString().slice(0, 10);
+  const [fechaPago, setFechaPago] = useState(diasPago);
+  const [montoPagar, setMontoPagar] = useState(String(totalCalculado));
+  const [notasAjuste, setNotasAjuste] = useState("");
+  const [observaciones, setObservaciones] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const montoNum = montoPagar === "" ? totalCalculado : +montoPagar;
+  const ajustado = montoNum !== totalCalculado;
+
+  async function handleConfirm() {
+    setSaving(true);
+    setError("");
+    try {
+      await liqApi.generar({
+        personal_id: personalId,
+        periodo_mes: mes, periodo_anio: anio,
+        fecha_pago_programada: fechaPago,
+        planillas,
+        fechas_alistamiento: fechasAlistamiento,
+        valor_ajustado: ajustado ? montoNum : null,
+        notas_ajuste: ajustado ? (notasAjuste || null) : null,
+        observaciones: observaciones || null,
+      });
+      onSaved();
+    } catch (err: any) {
+      setError(err?.response?.data?.detail ?? "Error al generar la liquidación");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
+        <div className="px-6 py-4 border-b flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Generar liquidación</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {planillas.length} planilla(s) · {fechasAlistamiento.length} día(s) · Calculado: ${fmt.format(totalCalculado)}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
+        </div>
+        <div className="px-6 py-4 space-y-4">
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Monto a pagar</label>
+            <input type="number" min={0} value={montoPagar}
+              onChange={(e) => setMontoPagar(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+            {ajustado && (
+              <p className="text-xs text-amber-600 mt-1">Ajustado respecto al calculado (${fmt.format(totalCalculado)})</p>
+            )}
+          </div>
+          {ajustado && (
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Motivo del ajuste</label>
+              <input value={notasAjuste} onChange={(e) => setNotasAjuste(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Opcional" />
+            </div>
+          )}
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Fecha de pago programada *</label>
+            <input type="date" required value={fechaPago}
+              onChange={(e) => setFechaPago(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Notas (opcional)</label>
+            <textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" rows={2} />
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg">Cancelar</button>
+            <button type="button" disabled={saving} onClick={handleConfirm}
+              className="px-4 py-2 text-sm bg-primary hover:bg-primary-hover text-white rounded-lg disabled:opacity-60">
+              {saving ? "Generando..." : "Generar liquidación"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AjustarLiquidacionModal({ liquidacion, onClose, onSaved }: {
+  liquidacion: Liquidacion; onClose: () => void; onSaved: () => void;
+}) {
+  const [valorAjustado, setValorAjustado] = useState<string>(
+    liquidacion.valor_ajustado != null ? String(liquidacion.valor_ajustado) : String(liquidacion.total_a_pagar)
+  );
+  const [notasAjuste, setNotasAjuste] = useState(liquidacion.notas_ajuste ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      await liqApi.ajustarMonto(liquidacion.id, {
+        valor_ajustado: valorAjustado === "" ? null : +valorAjustado,
+        notas_ajuste: notasAjuste || null,
+      });
+      onSaved();
+    } catch (err: any) {
+      setError(err?.response?.data?.detail ?? "Error al ajustar el monto");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRevertir() {
+    setSaving(true);
+    setError("");
+    try {
+      await liqApi.ajustarMonto(liquidacion.id, { valor_ajustado: null, notas_ajuste: null });
+      onSaved();
+    } catch (err: any) {
+      setError(err?.response?.data?.detail ?? "Error al revertir el ajuste");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
+        <div className="px-6 py-4 border-b flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Ajustar monto a pagar</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {liquidacion.numero_liquidacion} · Calculado: ${fmt.format(liquidacion.total_a_pagar)}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Monto real a pagar *</label>
+            <input type="number" required min={0} value={valorAjustado}
+              onChange={(e) => setValorAjustado(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Notas del ajuste</label>
+            <textarea value={notasAjuste} onChange={(e) => setNotasAjuste(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" rows={3}
+              placeholder="Motivo del ajuste (opcional)" />
+          </div>
+          <div className="flex justify-between gap-3 pt-2">
+            {liquidacion.valor_ajustado != null ? (
+              <button type="button" disabled={saving} onClick={handleRevertir}
+                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-60">
+                Revertir a calculado
+              </button>
+            ) : <span />}
+            <div className="flex gap-3">
+              <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg">Cancelar</button>
+              <button type="submit" disabled={saving}
+                className="px-4 py-2 text-sm bg-primary hover:bg-primary-hover text-white rounded-lg disabled:opacity-60">
+                {saving ? "Guardando..." : "Guardar ajuste"}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
@@ -287,6 +689,7 @@ function PendienteRow({ p, mes, anio, soloSeriales, onGenerar }: {
           <>
             <td className="px-4 py-3 text-gray-600">{fmt.format(p.total_horas)}h · <CurrencyCell value={p.total_horas_monto} /></td>
             <td className="px-4 py-3 text-gray-600">{p.total_labores} · <CurrencyCell value={p.total_labores_monto} /></td>
+            <td className="px-4 py-3 text-gray-600"><CurrencyCell value={p.total_subsidio} /></td>
           </>
         )}
         <td className="px-4 py-3 font-semibold text-gray-900"><CurrencyCell value={p.total_pendiente} /></td>
@@ -317,7 +720,7 @@ function PendienteRow({ p, mes, anio, soloSeriales, onGenerar }: {
 
       {expandido && (
         <tr>
-          <td colSpan={soloSeriales ? 7 : 9} className="bg-gray-50/60 border-t border-gray-100 px-4 py-3">
+          <td colSpan={soloSeriales ? 7 : 10} className="bg-gray-50/60 border-t border-gray-100 px-4 py-3">
             {esMensajero ? (
               cargandoPlanillas ? (
                 <p className="text-xs text-gray-400">Cargando planillas…</p>

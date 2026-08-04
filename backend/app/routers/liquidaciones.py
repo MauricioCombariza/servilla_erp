@@ -9,10 +9,12 @@ from app.database import get_db
 from app.models.liquidaciones import Liquidacion
 from app.models.personal import Personal
 from app.schemas.liquidaciones import (
+    AjustarMontoLiquidacionRequest,
     GenerarLiquidacionRequest,
     LiquidacionRead,
     LiquidacionUpdate,
     PagarLiquidacionRequest,
+    PlanillaPendienteMensajero,
     ResumenPendientePago,
 )
 
@@ -106,6 +108,54 @@ async def pendientes_pago(
     return [ResumenPendientePago(**dict(r)) for r in rows]
 
 
+@router.get("/planillas/{personal_id}", response_model=list[PlanillaPendienteMensajero])
+async def planillas_pendientes_mensajero(
+    personal_id: int,
+    mes: int,
+    anio: int,
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    sql = text("""
+        SELECT
+            sg.planilla,
+            MIN(sg.f_esc) AS fecha_escaner,
+            COUNT(*) AS total_seriales,
+            COALESCE(SUM(sg.precio_mensajero), 0) AS total_mensajero
+        FROM seriales_gestion sg
+        WHERE sg.mensajero_id = :pid AND sg.estado = 'pendiente'
+          AND EXTRACT(MONTH FROM sg.f_esc) = :mes
+          AND EXTRACT(YEAR  FROM sg.f_esc) = :anio
+        GROUP BY sg.planilla
+        ORDER BY MIN(sg.f_esc)
+    """)
+    rows = (await db.execute(sql, {"pid": personal_id, "mes": mes, "anio": anio})).mappings().all()
+    return [PlanillaPendienteMensajero(**dict(r)) for r in rows]
+
+
+# ── Helpers de selección explícita (planillas / fechas) ────────────────────────
+
+def _predicado_planillas(planillas: list[str] | None, mes: int, anio: int) -> tuple[str, dict]:
+    """Predicado SQL para seriales_gestion: por planillas explícitas o por mes/año (legado)."""
+    if planillas is not None:
+        return "AND sg.planilla = ANY(:planillas)", {"planillas": planillas}
+    return (
+        "AND EXTRACT(MONTH FROM sg.f_esc) = :mes AND EXTRACT(YEAR FROM sg.f_esc) = :anio",
+        {"mes": mes, "anio": anio},
+    )
+
+
+def _predicado_fechas(fechas: list[date] | None, mes: int, anio: int, col: str = "fecha") -> tuple[str, dict]:
+    """Predicado SQL para registro_horas/registro_labores/subsidio_transporte:
+    por fechas explícitas o por mes/año (legado)."""
+    if fechas is not None:
+        return f"AND {col} = ANY(:fechas)", {"fechas": fechas}
+    return (
+        f"AND EXTRACT(MONTH FROM {col}) = :mes AND EXTRACT(YEAR FROM {col}) = :anio",
+        {"mes": mes, "anio": anio},
+    )
+
+
 # ── CRUD Liquidaciones ────────────────────────────────────────────────────────
 
 @router.get("/", response_model=list[LiquidacionRead])
@@ -139,19 +189,25 @@ async def generar_liquidacion(
     db: AsyncSession = Depends(get_db),
     _=_auth_admin,
 ):
-    # Verificar que no exista ya para este personal/período
-    exists = await db.execute(
-        select(Liquidacion).where(
-            Liquidacion.personal_id == body.personal_id,
-            Liquidacion.periodo_mes == body.periodo_mes,
-            Liquidacion.periodo_anio == body.periodo_anio,
+    seleccion_explicita = body.planillas is not None or body.fechas_alistamiento is not None
+
+    # La restricción de "una liquidación por personal/período" solo aplica al
+    # camino legado (todo el mes de una vez); con selección explícita es válido
+    # generar varias liquidaciones parciales en el mismo período — el propio
+    # filtro por estado='pendiente'/liquidado=FALSE evita pagar dos veces un ítem.
+    if not seleccion_explicita:
+        exists = await db.execute(
+            select(Liquidacion).where(
+                Liquidacion.personal_id == body.personal_id,
+                Liquidacion.periodo_mes == body.periodo_mes,
+                Liquidacion.periodo_anio == body.periodo_anio,
+            )
         )
-    )
-    if exists.scalar_one_or_none():
-        raise HTTPException(
-            status_code=400,
-            detail="Ya existe una liquidación para este mensajero en este período",
-        )
+        if exists.scalar_one_or_none():
+            raise HTTPException(
+                status_code=400,
+                detail="Ya existe una liquidación para este mensajero en este período",
+            )
 
     # Obtener código del personal para cruzar con seriales
     personal = (await db.execute(
@@ -160,63 +216,55 @@ async def generar_liquidacion(
     if personal is None:
         raise HTTPException(status_code=404, detail="Personal no encontrado")
 
+    pred_ser, params_ser = _predicado_planillas(body.planillas, body.periodo_mes, body.periodo_anio)
+    pred_fecha, params_fecha = _predicado_fechas(body.fechas_alistamiento, body.periodo_mes, body.periodo_anio)
+
     # Calcular totales desde seriales_gestion
-    sql_ser = text("""
+    sql_ser = text(f"""
         SELECT COUNT(*) AS cant, COALESCE(SUM(precio_mensajero), 0) AS total
-        FROM seriales_gestion
+        FROM seriales_gestion sg
         WHERE mensajero_id = :pid AND estado = 'pendiente'
-          AND EXTRACT(MONTH FROM f_esc) = :mes
-          AND EXTRACT(YEAR  FROM f_esc) = :anio
+          {pred_ser}
     """)
-    r_ser = (await db.execute(sql_ser, {
-        "pid": body.personal_id, "mes": body.periodo_mes, "anio": body.periodo_anio
-    })).mappings().one()
+    r_ser = (await db.execute(sql_ser, {"pid": body.personal_id, **params_ser})).mappings().one()
 
     # Totales de horas
-    sql_h = text("""
+    sql_h = text(f"""
         SELECT COUNT(*) AS cant,
                COALESCE(SUM(horas_trabajadas), 0) AS horas,
                COALESCE(SUM(horas_trabajadas * tarifa_hora), 0) AS monto
         FROM registro_horas
         WHERE personal_id = :pid AND aprobado = TRUE AND liquidado = FALSE
-          AND EXTRACT(MONTH FROM fecha) = :mes
-          AND EXTRACT(YEAR  FROM fecha) = :anio
+          {pred_fecha}
     """)
-    r_h = (await db.execute(sql_h, {
-        "pid": body.personal_id, "mes": body.periodo_mes, "anio": body.periodo_anio
-    })).mappings().one()
+    r_h = (await db.execute(sql_h, {"pid": body.personal_id, **params_fecha})).mappings().one()
 
     # Totales de labores
-    sql_l = text("""
+    sql_l = text(f"""
         SELECT COUNT(*) AS cant,
                COALESCE(SUM(cantidad * tarifa_unitaria), 0) AS monto
         FROM registro_labores
         WHERE personal_id = :pid AND aprobado = TRUE AND liquidado = FALSE
-          AND EXTRACT(MONTH FROM fecha) = :mes
-          AND EXTRACT(YEAR  FROM fecha) = :anio
+          {pred_fecha}
     """)
-    r_l = (await db.execute(sql_l, {
-        "pid": body.personal_id, "mes": body.periodo_mes, "anio": body.periodo_anio
-    })).mappings().one()
+    r_l = (await db.execute(sql_l, {"pid": body.personal_id, **params_fecha})).mappings().one()
 
     # Total de subsidio de transporte (sin filtrar por aprobado — ver nota en pendientes_pago)
-    sql_sub = text("""
+    sql_sub = text(f"""
         SELECT COALESCE(SUM(tarifa), 0) AS monto
         FROM subsidio_transporte
         WHERE personal_id = :pid AND liquidado = FALSE
-          AND EXTRACT(MONTH FROM fecha) = :mes
-          AND EXTRACT(YEAR  FROM fecha) = :anio
+          {pred_fecha}
     """)
-    r_sub = (await db.execute(sql_sub, {
-        "pid": body.personal_id, "mes": body.periodo_mes, "anio": body.periodo_anio
-    })).mappings().one()
+    r_sub = (await db.execute(sql_sub, {"pid": body.personal_id, **params_fecha})).mappings().one()
 
     total = (
         float(r_ser["total"]) + float(r_h["monto"]) + float(r_l["monto"]) + float(r_sub["monto"])
         + body.bonificaciones - body.descuentos
     )
 
-    num = f"LIQ-{body.periodo_anio}{body.periodo_mes:02d}-{personal.codigo}"
+    num = f"LIQ-{body.periodo_anio}{body.periodo_mes:02d}-{personal.codigo}-{datetime.now(timezone.utc).strftime('%H%M%S%f')}" \
+        if seleccion_explicita else f"LIQ-{body.periodo_anio}{body.periodo_mes:02d}-{personal.codigo}"
     liq = Liquidacion(
         numero_liquidacion=num,
         personal_id=body.personal_id,
@@ -234,6 +282,8 @@ async def generar_liquidacion(
         bonificaciones=body.bonificaciones,
         descuentos=body.descuentos,
         total_a_pagar=round(total, 2),
+        valor_ajustado=body.valor_ajustado,
+        notas_ajuste=body.notas_ajuste,
         estado="generada",
         observaciones=body.observaciones,
     )
@@ -241,36 +291,33 @@ async def generar_liquidacion(
 
     await db.flush()
 
-    # Actualizar liquidacion_id en seriales y estado en horas/labores
-    await db.execute(text("""
-        UPDATE seriales_gestion
+    # Actualizar liquidacion_id en seriales y estado en horas/labores — mismo
+    # predicado que el SELECT correspondiente, para no dejar ítems sumados en
+    # el total pero sin marcar como liquidados.
+    await db.execute(text(f"""
+        UPDATE seriales_gestion sg
         SET estado = 'liquidado', liquidacion_id = :lid
         WHERE mensajero_id = :pid AND estado IN ('pendiente','liquidado')
-          AND EXTRACT(MONTH FROM f_esc) = :mes
-          AND EXTRACT(YEAR  FROM f_esc) = :anio
-    """), {"lid": liq.id, "pid": body.personal_id,
-           "mes": body.periodo_mes, "anio": body.periodo_anio})
+          {pred_ser}
+    """), {"lid": liq.id, "pid": body.personal_id, **params_ser})
 
-    await db.execute(text("""
+    await db.execute(text(f"""
         UPDATE registro_horas SET liquidado = TRUE, liquidacion_id = :lid
         WHERE personal_id = :pid AND aprobado = TRUE AND liquidado = FALSE
-          AND EXTRACT(MONTH FROM fecha) = :mes AND EXTRACT(YEAR FROM fecha) = :anio
-    """), {"lid": liq.id, "pid": body.personal_id,
-           "mes": body.periodo_mes, "anio": body.periodo_anio})
+          {pred_fecha}
+    """), {"lid": liq.id, "pid": body.personal_id, **params_fecha})
 
-    await db.execute(text("""
+    await db.execute(text(f"""
         UPDATE registro_labores SET liquidado = TRUE, liquidacion_id = :lid
         WHERE personal_id = :pid AND aprobado = TRUE AND liquidado = FALSE
-          AND EXTRACT(MONTH FROM fecha) = :mes AND EXTRACT(YEAR FROM fecha) = :anio
-    """), {"lid": liq.id, "pid": body.personal_id,
-           "mes": body.periodo_mes, "anio": body.periodo_anio})
+          {pred_fecha}
+    """), {"lid": liq.id, "pid": body.personal_id, **params_fecha})
 
-    await db.execute(text("""
+    await db.execute(text(f"""
         UPDATE subsidio_transporte SET liquidado = TRUE, liquidacion_id = :lid
         WHERE personal_id = :pid AND liquidado = FALSE
-          AND EXTRACT(MONTH FROM fecha) = :mes AND EXTRACT(YEAR FROM fecha) = :anio
-    """), {"lid": liq.id, "pid": body.personal_id,
-           "mes": body.periodo_mes, "anio": body.periodo_anio})
+          {pred_fecha}
+    """), {"lid": liq.id, "pid": body.personal_id, **params_fecha})
 
     await db.commit()
     await db.refresh(liq)
@@ -294,6 +341,23 @@ async def update_liquidacion(
         liq.total_entregas + liq.total_horas + liq.total_labores + liq.total_subsidio
         + liq.bonificaciones - liq.descuentos, 2
     )
+    await db.commit()
+    await db.refresh(liq)
+    return liq
+
+
+@router.put("/{liq_id}/ajuste", response_model=LiquidacionRead)
+async def ajustar_monto_liquidacion(
+    liq_id: int, body: AjustarMontoLiquidacionRequest,
+    db: AsyncSession = Depends(get_db), _=_auth_admin,
+):
+    liq = (await db.execute(select(Liquidacion).where(Liquidacion.id == liq_id))).scalar_one_or_none()
+    if liq is None:
+        raise HTTPException(status_code=404, detail="Liquidación no encontrada")
+    if liq.estado != "generada":
+        raise HTTPException(status_code=400, detail="Solo se puede ajustar el monto de liquidaciones en estado 'generada'")
+    liq.valor_ajustado = body.valor_ajustado
+    liq.notas_ajuste = body.notas_ajuste
     await db.commit()
     await db.refresh(liq)
     return liq

@@ -13,16 +13,29 @@ export interface Liquidacion {
   fecha_pago_programada: string; total_entregas: number; cantidad_entregas: number;
   total_horas: number; total_labores: number; total_subsidio: number;
   bonificaciones: number; descuentos: number;
-  total_a_pagar: number; estado: string; fecha_pago_real: string | null;
+  total_a_pagar: number; valor_ajustado: number | null; notas_ajuste: string | null;
+  valor_a_pagar: number;
+  estado: string; fecha_pago_real: string | null;
   metodo_pago: string; referencia_pago: string | null; observaciones: string | null;
+}
+
+export interface PlanillaPendienteMensajero {
+  planilla: string;
+  fecha_escaner: string | null;
+  total_seriales: number;
+  total_mensajero: number;
 }
 
 export const liqApi = {
   pendientes: (mes: number, anio: number) =>
     api.get<Pendiente[]>("/liquidaciones/pendientes", { params: { mes, anio } }),
+  planillasPendientes: (personalId: number, mes: number, anio: number) =>
+    api.get<PlanillaPendienteMensajero[]>(`/liquidaciones/planillas/${personalId}`, { params: { mes, anio } }),
   list: (params: object) => api.get<Liquidacion[]>("/liquidaciones/", { params }),
   generar: (data: object) => api.post<Liquidacion>("/liquidaciones/generar", data),
   aprobar: (id: number) => api.post<Liquidacion>(`/liquidaciones/${id}/aprobar`),
   pagar: (id: number, data: object) => api.post<Liquidacion>(`/liquidaciones/${id}/pagar`, data),
+  ajustarMonto: (id: number, data: { valor_ajustado: number | null; notas_ajuste: string | null }) =>
+    api.put<Liquidacion>(`/liquidaciones/${id}/ajuste`, data),
   delete: (id: number) => api.delete(`/liquidaciones/${id}`),
 };

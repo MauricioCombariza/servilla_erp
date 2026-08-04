@@ -23,6 +23,9 @@ class LiquidacionRead(BaseModel):
     bonificaciones: float
     descuentos: float
     total_a_pagar: float
+    valor_ajustado: float | None = None
+    notas_ajuste: str | None = None
+    valor_a_pagar: float
     estado: str
     fecha_pago_real: date | None
     metodo_pago: str
@@ -53,6 +56,22 @@ class GenerarLiquidacionRequest(BaseModel):
     bonificaciones: float = 0
     descuentos: float = 0
     observaciones: str | None = None
+    planillas: list[str] | None = None
+    fechas_alistamiento: list[date] | None = None
+    valor_ajustado: float | None = None
+    notas_ajuste: str | None = None
+
+
+class AjustarMontoLiquidacionRequest(BaseModel):
+    valor_ajustado: float | None = None
+    notas_ajuste: str | None = None
+
+
+class PlanillaPendienteMensajero(BaseModel):
+    planilla: str
+    fecha_escaner: date | None
+    total_seriales: int
+    total_mensajero: float
 
 
 class ResumenPendientePago(BaseModel):

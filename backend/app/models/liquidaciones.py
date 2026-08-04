@@ -31,6 +31,8 @@ class Liquidacion(Base):
     bonificaciones: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     descuentos: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     total_a_pagar: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    valor_ajustado: Mapped[float | None] = mapped_column(Numeric(12, 2))
+    notas_ajuste: Mapped[str | None] = mapped_column(Text)
     estado: Mapped[str] = mapped_column(String(10), default="generada")
     fecha_pago_real: Mapped[date | None] = mapped_column()
     metodo_pago: Mapped[str] = mapped_column(String(15), default="transferencia")
@@ -43,3 +45,7 @@ class Liquidacion(Base):
         ForeignKey("usuarios.id", ondelete="SET NULL")
     )
     fecha_creacion: Mapped[datetime | None] = mapped_column(_ts)
+
+    @property
+    def valor_a_pagar(self) -> float:
+        return float(self.valor_ajustado) if self.valor_ajustado is not None else float(self.total_a_pagar)
