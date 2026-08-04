@@ -6,7 +6,7 @@ import { laboresApi } from "@/api/labores";
 import { personalApi } from "@/api/personal";
 import { liqApi, type Pendiente, type Liquidacion } from "@/api/liquidaciones";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
-import type { PlanillaResumen, ResumenLabores } from "@/types/domain";
+import type { PlanillaResumen, ResumenLabores, Personal } from "@/types/domain";
 
 const fmt = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 });
 const MESES = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
@@ -288,6 +288,72 @@ export function LiquidacionesPanel({ mes, anio, soloSeriales = false }: { mes: n
   );
 }
 
+// ── Combobox: buscar persona por nombre o código ────────────────────────────────
+
+function PersonaCombobox({ personas, value, onChange }: {
+  personas: Personal[]; value: number | ""; onChange: (id: number | "") => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+
+  const seleccionada = personas.find((p) => p.id === value);
+  const filtradas = query.trim() === "" ? personas : personas.filter((p) => {
+    const q = query.toLowerCase();
+    return p.codigo.toLowerCase().includes(q) || p.nombre_completo.toLowerCase().includes(q);
+  });
+
+  function elegir(p: Personal) {
+    onChange(p.id);
+    setQuery("");
+    setOpen(false);
+  }
+
+  if (value !== "" && !open && seleccionada) {
+    return (
+      <div className="flex items-center gap-2 border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-72">
+        <span className="flex-1 truncate">
+          {seleccionada.nombre_completo} ({seleccionada.codigo}) — {TIPO_LABEL[seleccionada.tipo_personal] ?? seleccionada.tipo_personal}
+        </span>
+        <button type="button" onClick={() => setOpen(true)} className="text-xs text-primary hover:underline shrink-0">
+          Cambiar
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative w-72">
+      <input
+        type="text"
+        autoFocus={open}
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        placeholder="Buscar por nombre o código..."
+        className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
+      />
+      {open && (
+        <div className="absolute z-10 mt-1 w-full max-h-64 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg">
+          {filtradas.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-gray-400">Sin resultados</div>
+          ) : (
+            filtradas.map((p) => (
+              <div
+                key={p.id}
+                onMouseDown={() => elegir(p)}
+                className="px-3 py-2 text-sm hover:bg-gray-50 cursor-pointer"
+              >
+                {p.nombre_completo} ({p.codigo}) — {TIPO_LABEL[p.tipo_personal] ?? p.tipo_personal}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Tab: Seleccionar (planillas + días de alistamiento con checkboxes) ─────────
 
 function SeleccionarTab({ mes, anio, soloSeriales, onGenerado }: {
@@ -339,6 +405,19 @@ function SeleccionarTab({ mes, anio, soloSeriales, onGenerado }: {
     setFechasSel(new Set());
   }
 
+  const totalItems = planillas.length + (soloSeriales ? 0 : dias.length);
+  const todoSeleccionado = totalItems > 0 && planillasSel.size + fechasSel.size === totalItems;
+
+  function toggleTodo() {
+    if (todoSeleccionado) {
+      setPlanillasSel(new Set());
+      setFechasSel(new Set());
+    } else {
+      setPlanillasSel(new Set(planillas.map((p) => p.planilla)));
+      setFechasSel(soloSeriales ? new Set() : new Set(dias.map((d) => d.fecha)));
+    }
+  }
+
   const totalPlanillas = planillas.filter((p) => planillasSel.has(p.planilla)).reduce((s, p) => s + p.total_mensajero, 0);
   const totalDias = dias.filter((d) => fechasSel.has(d.fecha)).reduce((s, d) => s + d.total_general, 0);
   const totalSeleccion = totalPlanillas + totalDias;
@@ -347,13 +426,7 @@ function SeleccionarTab({ mes, anio, soloSeriales, onGenerado }: {
   return (
     <div>
       <div className="mb-4">
-        <select value={personalId} onChange={(e) => cambiarPersona(e.target.value ? +e.target.value : "")}
-          className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-72">
-          <option value="">Seleccione una persona...</option>
-          {personas.map((p) => (
-            <option key={p.id} value={p.id}>{p.nombre_completo} ({p.codigo}) — {TIPO_LABEL[p.tipo_personal] ?? p.tipo_personal}</option>
-          ))}
-        </select>
+        <PersonaCombobox personas={personas} value={personalId} onChange={cambiarPersona} />
       </div>
 
       {personalId === "" ? (
@@ -438,13 +511,22 @@ function SeleccionarTab({ mes, anio, soloSeriales, onGenerado }: {
               {planillasSel.size} planilla(s) · {fechasSel.size} día(s) seleccionados
               {" · "}Total: <span className="font-semibold text-gray-900">${fmt.format(totalSeleccion)}</span>
             </div>
-            <button
-              disabled={!haySeleccion}
-              onClick={() => setShowConfirm(true)}
-              className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
-            >
-              <Plus size={16} /> Generar liquidación
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                disabled={totalItems === 0}
+                onClick={toggleTodo}
+                className="flex items-center gap-2 border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+              >
+                <CheckCircle size={16} /> {todoSeleccionado ? "Deseleccionar todo" : "Seleccionar todo"}
+              </button>
+              <button
+                disabled={!haySeleccion}
+                onClick={() => setShowConfirm(true)}
+                className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+              >
+                <Plus size={16} /> Generar liquidación
+              </button>
+            </div>
           </div>
         </>
       )}
