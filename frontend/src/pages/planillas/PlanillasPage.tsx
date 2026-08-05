@@ -778,11 +778,16 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
     setGuardando(true);
     setErrorGuardar("");
     try {
+      // Resolver también mensajero_id junto con cod_men: enviar solo el código
+      // deja el FK desactualizado (cod_men queda con la intención del cambio
+      // pero mensajero_id se queda con el valor viejo — la causa del bug de
+      // seriales "huérfanos" bajo un mensajero distinto al que dice cod_men).
+      const mensajeroSeleccionado = editCodMen ? personal.find((per) => per.codigo === editCodMen) : undefined;
       const items: BulkPatchItem[] = selIds.map((id) => ({
         id,
         ...(editPrecio > 0 ? { precio_mensajero: editPrecio } : {}),
         ...(editPrecioCliente > 0 ? { precio_cliente: editPrecioCliente } : {}),
-        ...(editCodMen ? { cod_men: editCodMen } : {}),
+        ...(editCodMen ? { cod_men: editCodMen, mensajero_id: mensajeroSeleccionado?.id } : {}),
       }));
       await gestionesApi.bulkPatch(items);
       setSeleccion(new Set());
