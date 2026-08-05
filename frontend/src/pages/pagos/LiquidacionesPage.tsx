@@ -113,7 +113,7 @@ export function LiquidacionesPanel({ mes, anio, soloSeriales = false }: { mes: n
   });
 
   const totalPendiente = pendientes.filter((p) => !p.ya_liquidado).reduce((s, p) => s + p.total_pendiente, 0);
-  const totalGenerado = liquidaciones.reduce((s, l) => s + l.total_a_pagar, 0);
+  const totalGenerado = liquidaciones.reduce((s, l) => s + l.valor_a_pagar, 0);
 
   return (
     <div>
