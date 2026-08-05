@@ -741,7 +741,7 @@ function PendienteRow({ p, mes, anio, soloSeriales, onGenerar }: {
 
   const { data: planillas = [], isLoading: cargandoPlanillas } = useQuery({
     queryKey: ["pago-planillas", p.codigo, mes, anio],
-    queryFn: () => gestionesApi.planillasResumen({ cod_men: p.codigo, fecha_desde: desde, fecha_hasta: hasta }).then((r) => r.data),
+    queryFn: () => gestionesApi.planillasResumen({ mensajero_id: p.personal_id, fecha_desde: desde, fecha_hasta: hasta }).then((r) => r.data),
     enabled: expandido && esMensajero,
   });
 

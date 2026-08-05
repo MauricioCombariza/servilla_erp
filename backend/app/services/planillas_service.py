@@ -35,6 +35,7 @@ async def resumen_planillas(
     fecha_hasta: date | None = None,
     cod_men: str | None = None,
     planilla: str | None = None,
+    mensajero_id: int | None = None,
 ) -> list[PlanillaResumen]:
     q = select(SerialGestion)
     if fecha_desde:
@@ -45,6 +46,8 @@ async def resumen_planillas(
         q = q.where(SerialGestion.cod_men == cod_men)
     if planilla:
         q = q.where(SerialGestion.planilla == planilla)
+    if mensajero_id is not None:
+        q = q.where(SerialGestion.mensajero_id == mensajero_id)
 
     seriales = list((await db.execute(q)).scalars().all())
 
@@ -52,12 +55,19 @@ async def resumen_planillas(
     revisadas_rows = (await db.execute(select(PlanillaRevisada.lot_esc))).scalars().all()
     revisadas: set[str] = set(revisadas_rows)
 
-    groups: dict[tuple[str, str], list[SerialGestion]] = {}
+    # Agrupar por (planilla, mensajero_id): mensajero_id es el FK autoritativo hacia
+    # personal. cod_men es un texto denormalizado que puede quedar desincronizado
+    # (ver bug histórico corregido en reportes.py/liquidaciones.py) y agrupar por él
+    # puede partir los seriales de un mismo mensajero en grupos distintos. Los
+    # seriales sin mensajero asignado se agrupan por su cod_men crudo para no
+    # perderlos ni fusionarlos incorrectamente entre sí.
+    groups: dict[tuple[str, int | str], list[SerialGestion]] = {}
     for sg in seriales:
-        groups.setdefault((sg.planilla, sg.cod_men), []).append(sg)
+        key = (sg.planilla, sg.mensajero_id if sg.mensajero_id is not None else f"__sin_id__{sg.cod_men}")
+        groups.setdefault(key, []).append(sg)
 
     result: list[PlanillaResumen] = []
-    for (plan, cmn), items in groups.items():
+    for (plan, _group_key), items in groups.items():
         total = len(items)
         entregas = sum(1 for s in items if s.tipo_gestion == "Entrega")
         devoluciones = sum(1 for s in items if s.tipo_gestion == "Devolucion")
@@ -79,6 +89,8 @@ async def resumen_planillas(
         mensajero_tipo = first.mensajero.tipo_personal if first.mensajero else None
         precio_local_men = float(first.mensajero.precio_local) if first.mensajero and first.mensajero.precio_local else None
         precio_nac_men = float(first.mensajero.precio_nacional) if first.mensajero and first.mensajero.precio_nacional else None
+        # Preferir el código autoritativo de personal sobre el cod_men denormalizado
+        cmn = first.mensajero.codigo if first.mensajero else first.cod_men
 
         result.append(
             PlanillaResumen(
@@ -180,7 +192,10 @@ async def recalcular_precios(req: RecalcularRequest, db: AsyncSession) -> Recalc
         filtros.append("sg.cliente_id = :cliente_id")
         params["cliente_id"] = req.cliente_id
     if req.cod_men:
-        filtros.append("sg.cod_men = :cod_men")
+        # Resolver contra personal.codigo en vez de comparar sg.cod_men directo:
+        # ese campo es texto denormalizado que puede estar desincronizado del
+        # mensajero_id real (ver bug histórico en reportes.py/liquidaciones.py).
+        filtros.append("sg.mensajero_id = (SELECT id FROM personal WHERE codigo = :cod_men)")
         params["cod_men"] = req.cod_men
 
     where_clause = " AND ".join(filtros)
@@ -278,7 +293,9 @@ async def recalcular_precios(req: RecalcularRequest, db: AsyncSession) -> Recalc
 
 async def bloquear_por_rango(req: BloquearRangoRequest, db: AsyncSession) -> BloquearRangoResult:
     params: dict = {"fd": req.fecha_desde, "fh": req.fecha_hasta}
-    cod_filter = "AND sg.cod_men = :cod_men" if req.cod_men else ""
+    # Resolver contra personal.codigo en vez de comparar sg.cod_men directo (ver
+    # nota en recalcular_precios sobre cod_men desincronizado).
+    cod_filter = "AND sg.mensajero_id = (SELECT id FROM personal WHERE codigo = :cod_men)" if req.cod_men else ""
     if req.cod_men:
         params["cod_men"] = req.cod_men
 

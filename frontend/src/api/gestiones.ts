@@ -103,6 +103,7 @@ export const gestionesApi = {
     fecha_hasta?: string;
     cod_men?: string;
     planilla?: string;
+    mensajero_id?: number;
   }) => api.get<PlanillaResumen[]>("/gestiones/planillas/resumen", { params }),
 
   cambiarMensajero: (planilla: string, cod_men: string, mensajero_id?: number) =>

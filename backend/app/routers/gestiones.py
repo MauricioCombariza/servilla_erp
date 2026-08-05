@@ -56,10 +56,11 @@ async def get_planillas_resumen(
     fecha_hasta: date | None = None,
     cod_men: str | None = None,
     planilla: str | None = None,
+    mensajero_id: int | None = None,
     db: AsyncSession = Depends(get_db),
     _=_auth,
 ):
-    return await resumen_planillas(db, fecha_desde, fecha_hasta, cod_men, planilla)
+    return await resumen_planillas(db, fecha_desde, fecha_hasta, cod_men, planilla, mensajero_id)
 
 
 @router.patch("/planillas/{planilla}/mensajero", response_model=PlanillaActionResult)
