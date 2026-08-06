@@ -25,8 +25,13 @@ Soporta tres formatos de origen:
     Columnas origen: orden, serial, f_esc (preferida) o f_emi (compat con
     archivos sin f_esc), no_entidad, ciudad1
     Transformaciones:
-      - fecha_recepcion = f_esc si viene (→ f_esc real de escáner); si no,
-                          f_emi (compat, y en ese caso f_emi == f_esc)
+      - fecha_recepcion = f_esc si viene (→ f_esc real de escáner); si no
+                          viene el valor —columna ausente, o presente pero
+                          vacía en esa fila puntual (pedido emitido, aún sin
+                          escanear)— cae a f_emi (y en ese caso f_emi ==
+                          f_esc para esa fila). Un cargue posterior con la
+                          f_esc real actualiza la fila vía ON CONFLICT en
+                          _SERIAL_UPSERT (estado='pendiente', no bloqueada).
       - f_emi           = valor real de f_emi del archivo, independiente de
                           fecha_recepcion/f_esc, cuando ambos vienen
       - nombre_cliente  = no_entidad
@@ -277,6 +282,15 @@ def _preparar_columnas(df: pd.DataFrame, es_imile: bool) -> pd.DataFrame:
             # iMile histórico (dashboard.csv): f_esc es la fecha real de
             # escáner → determina el período de costo (precios_cliente).
             df = df.rename(columns={"f_esc": "fecha_recepcion"})
+            if "_f_emi_raw" in df.columns:
+                # Pedido emitido pero aún no escaneado por el mensajero: la
+                # celda de f_esc viene vacía para esa fila puntual (aunque la
+                # columna sí existe en el archivo). Fallback por fila a
+                # f_emi, misma intención que el fallback por columna de
+                # abajo — si llega un cargue posterior con f_esc real, el
+                # ON CONFLICT de _SERIAL_UPSERT lo actualiza (ver docstring).
+                vacio = _limpiar_texto(df["fecha_recepcion"]) == ""
+                df.loc[vacio, "fecha_recepcion"] = df.loc[vacio, "_f_emi_raw"]
         elif "f_emi" in df.columns:
             # Compat con archivos sin columna f_esc: se aproxima
             # fecha_recepcion con f_emi, como antes de este fix. En ese caso

@@ -385,6 +385,48 @@ async def test_carga_masiva_historico_sin_f_esc_cae_a_f_emi(client, headers, set
 
 
 @pytest.mark.asyncio
+async def test_carga_masiva_historico_f_esc_vacio_en_fila_cae_a_f_emi(client, headers, setup_maestros):
+    """Pedido emitido pero aún no escaneado por el mensajero: la columna f_esc
+    existe en el archivo, pero la celda de esa fila puntual viene vacía. Antes
+    de este fix la fila se descartaba silenciosamente en el filtro de corte por
+    fecha (fecha_recepcion = f_esc = NaT); ahora debe caer a f_emi para esa fila,
+    igual que cuando la columna completa está ausente."""
+    from sqlalchemy import text as sqltext
+
+    from app.database import AsyncSessionLocal
+
+    csv_content = (
+        "orden,serial,f_esc,f_emi,no_entidad,ciudad1\n"
+        "ORD-HIST-003,SER-HIST-003,,2026-08-05,Cliente Ordenes Test,Bogota\n"
+    )
+    try:
+        r = await client.post(
+            "/api/ordenes/carga-masiva",
+            files={"file": ("historico_sin_escanear.csv", io.BytesIO(csv_content.encode()), "text/csv")},
+            headers=headers,
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["filas_ignoradas"] == 0
+        assert data["seriales_nuevos"] == 1
+
+        async with AsyncSessionLocal() as db:
+            row = (
+                await db.execute(
+                    sqltext("SELECT f_esc, f_emi FROM seriales_gestion WHERE serial = 'SER-HIST-003'")
+                )
+            ).one()
+        f_esc, f_emi = row
+        assert str(f_esc) == "2026-08-05"
+        assert str(f_emi) == "2026-08-05"
+    finally:
+        async with AsyncSessionLocal() as db:
+            await db.execute(sqltext("DELETE FROM seriales_gestion WHERE serial = 'SER-HIST-003'"))
+            await db.execute(sqltext("DELETE FROM ordenes WHERE numero_orden = 'ORD-HIST-003'"))
+            await db.commit()
+
+
+@pytest.mark.asyncio
 async def test_carga_masiva_no_csv(client, headers):
     r = await client.post(
         "/api/ordenes/carga-masiva",
