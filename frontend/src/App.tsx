@@ -23,6 +23,7 @@ import { LiquidacionesPage } from "@/pages/pagos/LiquidacionesPage";
 import { FacturasTransportePage } from "@/pages/transporte/FacturasTransportePage";
 import { PagosCiudadesPage } from "@/pages/pagos-ciudades/PagosCiudadesPage";
 import { BuscarPaquetePage } from "@/pages/buscar/BuscarPaquetePage";
+import { AjusteDireccionesPage } from "@/pages/direcciones/AjusteDireccionesPage";
 import { Placeholder } from "@/pages/Placeholder";
 
 const qc = new QueryClient({
@@ -68,6 +69,7 @@ export default function App() {
             <Route path="/gestiones" element={<DetalleGestionesPage />} />
             <Route path="/planillas" element={<PlanillasPage />} />
             <Route path="/buscar" element={<BuscarPaquetePage />} />
+            <Route path="/direcciones" element={<AjusteDireccionesPage />} />
           </Route>
         </Routes>
       </BrowserRouter>
