@@ -18,22 +18,36 @@ async def headers(token):
     return {"Authorization": f"Bearer {token}"}
 
 
-# ── Tests unitarios de ajustar_dir_leonisa (ejemplos del docstring original) ──
+# ── Tests unitarios de ajustar_dir_leonisa (ejemplos del docstring) ────────────
 
 @pytest.mark.parametrize("raw,esperado", [
-    ("CARRERA 78 K  # 50   53 CASA", "KRA 78K 50 53 CASA"),
+    ("CARRERA 78 K  # 50   53 CASA", "KRA 78K 50 53 CS"),
     ("KRA.81H 51C-81 SUR", "KRA 81H 51C 81 SUR"),
     (
         "CLL 54C SUR 88I 65 CONJUNTO RESIDENCIAL TANGARA 1 TORRE 4 APTO 1106",
-        "CLL 54C SUR 88I 65 TORRE 4 APTO 1106",
+        "CLL 54C SUR 88I 65 APTO 1106 TO 4",
     ),
     (
         "CLL 51 SUR 87D-79 PISO 1 ENTREGAR DE LUNES A VIERNES 8 AM A 5 PM",
         "CLL 51 SUR 87D 79 PS 1",
     ),
+    ("carretera 80 45 30", "KRA 80 45 30"),
+    ("avenida caracas 53 20 sur", "KRA 14 53 20 SUR"),
+    ("carrera 15 40 20 bloque 2 apto 501", "KRA 15 40 20 APTO 501 BL 2"),
+    ("carrera 15 40 20 edificio 5 apto 302", "KRA 15 40 20 APTO 302 ED 5"),
 ])
 def test_ajustar_dir_leonisa_ejemplos(raw, esperado):
     assert ajustar_dir_leonisa(raw) == esperado
+
+
+@pytest.mark.parametrize("raw", [
+    "CARRERA 78 K  # 50   53 CASA",
+    "carrera 78 k  # 50   53 casa",
+    "Carrera 78 K  # 50   53 Casa",
+])
+def test_ajustar_dir_leonisa_independiente_de_case(raw):
+    # Mayúsculas, minúsculas o Title Case deben dar exactamente el mismo resultado
+    assert ajustar_dir_leonisa(raw) == "KRA 78K 50 53 CS"
 
 
 def test_ajustar_dir_leonisa_vacio():
@@ -42,9 +56,15 @@ def test_ajustar_dir_leonisa_vacio():
 
 
 def test_ajustar_dir_leonisa_sin_via_reconocida():
-    # Sin tipo de vía reconocido → no se modifica (coord_count queda en 0)
-    raw = "BARRIO DESCONOCIDO SIN COORDENADAS"
-    assert ajustar_dir_leonisa(raw) == raw
+    # Sin tipo de vía reconocido → no se modifica más allá de uppercase
+    raw = "barrio desconocido sin coordenadas"
+    assert ajustar_dir_leonisa(raw) == raw.upper()
+
+
+def test_ajustar_dir_leonisa_menos_de_3_coordenadas_queda_en_mayusculas():
+    # No hay placa (solo 2 números) → no se reordena con confianza, pero el
+    # resultado nunca queda en minúsculas.
+    assert ajustar_dir_leonisa("cll 80 45") == "CLL 80 45"
 
 
 # ── Tests de integración de los endpoints ──────────────────────────────────────
@@ -69,7 +89,7 @@ async def test_ajustar_endpoint(client, headers):
     assert data["total_filas"] == 2
     assert data["total_columnas"] == 6
     assert data["col_direccion"] == 5
-    assert data["filas"][0][5] == "KRA 78K 50 53 CASA"
+    assert data["filas"][0][5] == "KRA 78K 50 53 CS"
     assert data["filas"][1][5] == "KRA 81H 51C 81 SUR"
     # Las demás columnas quedan intactas
     assert data["filas"][0][0] == "ORD-1"

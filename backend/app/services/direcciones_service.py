@@ -26,7 +26,11 @@ COL_DIRECCION = 5  # columna 6 del archivo (índice 0-based)
 # ── Tabla de abreviaciones de tipo de vía ────────────────────────────────────
 # El orden importa: los patrones más largos primero para evitar reemplazos parciales
 _VIA_MAP = [
-    # ── Compuestos primero (AV CARRERA → KRA, AV CALLE → CLL) ──────────────────
+    # ── Avenidas con nombre propio que en realidad son una carrera numerada ────
+    # Debe ir antes de la regla simple "AVENIDA" → "AV" (si no, "AVENIDA" ya se
+    # habría reemplazado por "AV" y este patrón nunca matchearía).
+    (r"\bAV(?:ENIDA)?\s+CARACAS\b", "KRA 14"),
+    # ── Compuestos (AV CARRERA → KRA, AV CALLE → CLL) ──────────────────────────
     (r"\bAV(?:ENIDA)?\s+(?:CARRERA|CARERA|CARR|CRA|CR|KRA|KR)\b", "KRA"),
     (r"\bAV(?:ENIDA)?\s+(?:CALLE|CALE|CALL|CLL|CL)\b",            "CLL"),
     (r"\bAV(?:ENIDA)?\s+(?:DIAGONAL|DIAG|DG)\b",                  "DG"),
@@ -40,6 +44,7 @@ _VIA_MAP = [
     (r"\bCL\b",          "CLL"),
     (r"\bCARRERA\b",     "KRA"),
     (r"\bCARERA\b",      "KRA"),   # typo frecuente (una R)
+    (r"\bCARRETERA\b",   "KRA"),
     (r"\bCARR\b",        "KRA"),
     (r"\bKRR\b",         "KRA"),   # typo frecuente (tres letras)
     (r"\bCRA\b",         "KRA"),
@@ -58,13 +63,14 @@ _VIA_MAP = [
 # Abreviaciones canónicas para keywords de complemento
 _COMP_ABBREV: dict[str, str] = {
     'APARTAMENTO': 'APTO', 'APTO': 'APTO', 'AP': 'APTO',
-    'TORRE': 'TORRE', 'TRR': 'TORRE',
+    'TORRE': 'TO', 'TRR': 'TO',
     'PISO': 'PS', 'PS': 'PS',
-    'BLOQUE': 'BLQ', 'BLQ': 'BLQ', 'BL': 'BLQ',
+    'BLOQUE': 'BL', 'BLQ': 'BL', 'BL': 'BL',
     'INTERIOR': 'INT', 'INT': 'INT',
     'LOCAL': 'LC', 'LC': 'LC',
-    'CASA': 'CASA', 'CS': 'CASA',
+    'CASA': 'CS', 'CS': 'CS',
     'MZA': 'MZA', 'MZ': 'MZA',
+    'EDIFICIO': 'ED', 'EDIF': 'ED', 'ED': 'ED',
 }
 
 _CARDINALS_COMPOUND = ('SUR ESTE', 'SUR OESTE', 'NORTE ESTE', 'NORTE OESTE')
@@ -154,18 +160,25 @@ def _parse_y_limpiar(text: str) -> tuple[str, int]:
         parts.append(card)
 
     # Extraer solo complementos conocidos; ignorar el resto
+    complementos: list[str] = []
     while i < len(tokens):
         tok = tokens[i]
         if tok in _COMP_ABBREV:
             abbrev = _COMP_ABBREV[tok]
             i += 1
             if i < len(tokens) and _COMP_VAL_RE.match(tokens[i]):
-                parts.append(f"{abbrev} {tokens[i]}")
+                complementos.append(f"{abbrev} {tokens[i]}")
                 i += 1
             else:
-                parts.append(abbrev)
+                complementos.append(abbrev)
         else:
             i += 1  # descartar: nombre de conjunto, instrucción, etc.
+
+    # APTO siempre primero entre los complementos (antes de bloque, torre,
+    # piso, etc.), sin importar en qué orden aparecieron en el texto original.
+    # sort() es estable: preserva el orden relativo entre los demás complementos.
+    complementos.sort(key=lambda c: 0 if c.split()[0] == 'APTO' else 1)
+    parts.extend(complementos)
 
     return ' '.join(parts), coord_count
 
@@ -174,11 +187,19 @@ def ajustar_dir_leonisa(raw: str) -> str:
     """
     Transforma una dirección al formato Leonisa (mínimo espacio, sin ruido).
 
+    Es independiente de mayúsculas/minúsculas/Title Case en la entrada: todo se
+    normaliza a mayúsculas desde el primer paso.
+
     Ejemplos:
-      "CARRERA 78 K  # 50   53 CASA"                                        → "KRA 78K 50 53 CASA"
-      "KRA.81H 51C-81 SUR"                                                  → "KRA 81H 51C 81 SUR"
-      "CLL 54C SUR 88I 65 CONJUNTO RESIDENCIAL TANGARA 1 TORRE 4 APTO 1106" → "CLL 54C SUR 88I 65 TORRE 4 APTO 1106"
+      "carrera 78 K  # 50   53 casa"                                        → "KRA 78K 50 53 CS"
+      "Kra.81H 51C-81 sur"                                                  → "KRA 81H 51C 81 SUR"
+      "cll 54C sur 88I 65 Conjunto Residencial Tangara 1 Torre 4 Apto 1106" → "CLL 54C SUR 88I 65 APTO 1106 TO 4"
       "CLL 51 SUR 87D-79 PISO 1 ENTREGAR DE LUNES A VIERNES 8 AM A 5 PM"   → "CLL 51 SUR 87D 79 PS 1"
+      "carretera 80 45 30"                                                  → "KRA 80 45 30"
+      "avenida caracas 53 20 sur"                                           → "KRA 14 53 20 SUR"
+      "carrera 15 40 20 bloque 2 apto 501"                                  → "KRA 15 40 20 APTO 501 BL 2"
+      "carrera 15 40 20 edificio 5 apto 302"                                → "KRA 15 40 20 APTO 302 ED 5"
+      "cll 80 45"  (sin placa: solo 2 coordenadas)                          → "CLL 80 45" (mayúsculas, sin reordenar)
     """
     if not isinstance(raw, str) or not raw.strip():
         return ""
@@ -216,7 +237,7 @@ def ajustar_dir_leonisa(raw: str) -> str:
     )
 
     # 7. Mover dígito antepuesto a keyword de complemento: "3PISO" → "PISO 3", "4TORRE" → "TORRE 4"
-    _KW_PATTERN = r'APARTAMENTO|APTO|TORRE|TRR|PISO|BLOQUE|BLQ|INTERIOR|INT|LOCAL|CASA|MZA'
+    _KW_PATTERN = r'APARTAMENTO|APTO|TORRE|TRR|PISO|BLOQUE|BLQ|INTERIOR|INT|LOCAL|CASA|MZA|EDIFICIO|EDIF'
     text = re.sub(rf'(\d+)({_KW_PATTERN})\b', r'\2 \1', text)
 
     # 8. Unir número + letra suelta: "78 K" → "78K", "87 D" → "87D"
@@ -240,9 +261,12 @@ def ajustar_dir_leonisa(raw: str) -> str:
     result, coord_count = _parse_y_limpiar(text)
 
     # Validación: una dirección válida necesita vía + 3 coords (número, cruce, placa).
-    # Si el parser extrajo menos de 3, la dirección quedó recortada → conservar original.
+    # Si el parser extrajo menos de 3, no reordenamos con confianza — pero se
+    # devuelve `text` (ya en mayúsculas, con tipo de vía y cardinales ya
+    # sustituidos) en vez del `raw` original, para que el resultado nunca
+    # quede en minúsculas aunque no se pueda validar la estructura completa.
     if coord_count < 3:
-        return raw.strip()
+        return text
 
     return result
 
