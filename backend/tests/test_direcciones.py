@@ -105,7 +105,7 @@ async def test_descargar_endpoint_roundtrip(client, headers):
     ]
     r = await client.post(
         "/api/direcciones/descargar",
-        json={"numero_orden": "20260601", "filas": filas},
+        json={"nombre_archivo": "20260601", "filas": filas},
         headers=headers,
     )
     assert r.status_code == 200
@@ -124,7 +124,7 @@ async def test_descargar_endpoint_roundtrip(client, headers):
 async def test_descargar_endpoint_sanitiza_nombre(client, headers):
     r = await client.post(
         "/api/direcciones/descargar",
-        json={"numero_orden": "../../etc/passwd", "filas": [["a", "b"]]},
+        json={"nombre_archivo": "../../etc/passwd", "filas": [["a", "b"]]},
         headers=headers,
     )
     assert r.status_code == 200

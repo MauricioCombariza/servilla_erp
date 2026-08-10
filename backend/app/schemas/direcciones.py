@@ -9,5 +9,5 @@ class AjusteDireccionesResult(BaseModel):
 
 
 class DescargarDireccionesRequest(BaseModel):
-    numero_orden: str
+    nombre_archivo: str
     filas: list[list[str]]

@@ -16,6 +16,6 @@ export const direccionesApi = {
     });
   },
 
-  descargar: (numeroOrden: string, filas: string[][]) =>
-    api.post("/direcciones/descargar", { numero_orden: numeroOrden, filas }, { responseType: "blob" }),
+  descargar: (nombreArchivo: string, filas: string[][]) =>
+    api.post("/direcciones/descargar", { nombre_archivo: nombreArchivo, filas }, { responseType: "blob" }),
 };

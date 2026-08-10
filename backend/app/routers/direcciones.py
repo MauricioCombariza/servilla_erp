@@ -38,7 +38,7 @@ async def ajustar(file: UploadFile, _=_auth):
 
 @router.post("/descargar")
 async def descargar(body: DescargarDireccionesRequest, _=_auth):
-    nombre = _NOMBRE_INVALIDO_RE.sub("", body.numero_orden).strip() or "direcciones"
+    nombre = _NOMBRE_INVALIDO_RE.sub("", body.nombre_archivo).strip() or "direcciones"
     contenido = generar_txt(body.filas)
     return Response(
         content=contenido,
