@@ -4,6 +4,7 @@ import { useAuthStore } from "@/store/authStore";
 import { AppShell } from "@/components/layout/AppShell";
 import { Login } from "@/pages/Login";
 import { ClientesPage } from "@/pages/clientes/ClientesPage";
+import { ClienteDetailPage } from "@/pages/clientes/ClienteDetailPage";
 import { PersonalPage } from "@/pages/personal/PersonalPage";
 import { OrdenesPage } from "@/pages/ordenes/OrdenesPage";
 import { CargaMasivaPage } from "@/pages/ordenes/CargaMasivaPage";
@@ -50,6 +51,7 @@ export default function App() {
           >
             <Route index element={<Navigate to="/clientes" replace />} />
             <Route path="/clientes" element={<ClientesPage />} />
+            <Route path="/clientes/:id" element={<ClienteDetailPage />} />
             <Route path="/personal" element={<PersonalPage />} />
             <Route path="/ordenes" element={<OrdenesPage />} />
             <Route path="/ordenes/carga-masiva" element={<CargaMasivaPage />} />
