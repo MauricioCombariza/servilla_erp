@@ -19,6 +19,7 @@ from app.routers.ordenes import router as ordenes_router
 from app.routers.reportes import router as reportes_router
 from app.routers.personal import router as personal_router
 from app.routers.direcciones import router as direcciones_router
+from app.routers.pendientes_entrega import router as pendientes_entrega_router
 from app.config import settings
 from app.database import engine
 
@@ -59,6 +60,7 @@ app.include_router(labores_router)
 app.include_router(buscar_router)
 app.include_router(flujo_router)
 app.include_router(direcciones_router)
+app.include_router(pendientes_entrega_router)
 
 
 @app.get("/health")

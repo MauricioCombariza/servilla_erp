@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import date, timedelta
 from urllib.parse import urlparse
 
 import pymysql
@@ -16,6 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Rango de `orden` que delimita el lote de órdenes activo para el reporte de
+# pendientes de entrega (courier externo / mensajeros). Es un esquema de
+# numeración estructural del sistema legado, no un parámetro de negocio que
+# cambie por corrida — igual al hardcode del script Streamlit original.
+PENDIENTES_ORDEN_INICIO = 122000
+PENDIENTES_ORDEN_FIN = 128000
 
 
 def _parse_dsn() -> dict:
@@ -135,6 +143,56 @@ async def buscar_histo(termino: str, modo: str) -> list[dict]:
     elif modo == "nombre":
         return await asyncio.to_thread(_buscar_histo_nombre_sync, termino)
     return []
+
+
+def _fetch_pendientes_courier_sync(codigos: list[int], corte: str) -> list[dict]:
+    """
+    Retorna filas de bases_web.histo consideradas 'pendientes de entrega' para
+    los cod_men dados: aún no entregadas ni devueltas (retorno/ret_esc), dentro
+    del lote de órdenes activo (PENDIENTES_ORDEN_INICIO..FIN) y con f_emi >= corte.
+
+    histo.cod_men/orden son VARCHAR — se castean a entero para comparar (igual
+    al pd.to_numeric defensivo del script Streamlit original, que no asumía
+    match exacto de string). histo.f_emi también es VARCHAR 'YYYY.MM.DD' (no
+    DATE): el corte debe venir formateado igual para que la comparación de
+    string funcione (ver updateDashboard.py: 'YYYY-MM-DD' NO filtra nada aquí,
+    porque '.' > '-' en orden lexicográfico).
+    """
+    dsn = _parse_dsn()
+    if not dsn or not codigos:
+        return []
+    try:
+        conn = pymysql.connect(
+            **dsn,
+            cursorclass=pymysql.cursors.DictCursor,
+            connect_timeout=5,
+            read_timeout=30,
+        )
+        placeholders = ",".join(["%s"] * len(codigos))
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT serial, orden, cod_men, f_emi, no_entidad, nombred,
+                           dirdes1, cod_sec, ciudad1, dpto1, retorno, ret_esc, motivo
+                    FROM histo
+                    WHERE CAST(TRIM(cod_men) AS UNSIGNED) IN ({placeholders})
+                      AND f_emi >= %s
+                      AND CAST(TRIM(orden) AS UNSIGNED) BETWEEN %s AND %s
+                      AND retorno NOT IN ('D', 'o')
+                      AND ret_esc IN ('i', 'p')
+                    """,
+                    (*codigos, corte, PENDIENTES_ORDEN_INICIO, PENDIENTES_ORDEN_FIN),
+                )
+                return cur.fetchall()
+    except Exception as exc:
+        logger.error("Error consultando pendientes de entrega en bases_web.histo: %s", exc)
+        return []
+
+
+async def fetch_pendientes_courier(codigos: list[int], dias_corte: int = 60) -> list[dict]:
+    corte = (date.today() - timedelta(days=dias_corte)).strftime("%Y.%m.%d")
+    return await asyncio.to_thread(_fetch_pendientes_courier_sync, codigos, corte)
 
 
 async def sync_ciudades_planilla(planilla: str, db: AsyncSession) -> int:

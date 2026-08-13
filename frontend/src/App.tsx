@@ -25,6 +25,7 @@ import { FacturasTransportePage } from "@/pages/transporte/FacturasTransportePag
 import { PagosCiudadesPage } from "@/pages/pagos-ciudades/PagosCiudadesPage";
 import { BuscarPaquetePage } from "@/pages/buscar/BuscarPaquetePage";
 import { AjusteDireccionesPage } from "@/pages/direcciones/AjusteDireccionesPage";
+import { PendientesEntregaPage } from "@/pages/pendientes-entrega/PendientesEntregaPage";
 import { Placeholder } from "@/pages/Placeholder";
 
 const qc = new QueryClient({
@@ -72,6 +73,7 @@ export default function App() {
             <Route path="/planillas" element={<PlanillasPage />} />
             <Route path="/buscar" element={<BuscarPaquetePage />} />
             <Route path="/direcciones" element={<AjusteDireccionesPage />} />
+            <Route path="/pendientes-entrega" element={<PendientesEntregaPage />} />
           </Route>
         </Routes>
       </BrowserRouter>
