@@ -14,6 +14,7 @@ from app.schemas.personal import (
 
 router = APIRouter(prefix="/api/personal", tags=["personal"])
 _auth = Depends(require_role("administrador", "logistica"))
+_auth_by_code = Depends(require_role("administrador", "logistica", "mensajero"))
 
 
 # ── Ciudades (reference endpoint) ────────────────────────────────────────────
@@ -54,7 +55,7 @@ async def create_personal(body: PersonalCreate, db: AsyncSession = Depends(get_d
 
 
 @router.get("/by-code/{codigo}", response_model=PersonalRead)
-async def get_personal_by_codigo(codigo: str, db: AsyncSession = Depends(get_db), _=_auth):
+async def get_personal_by_codigo(codigo: str, db: AsyncSession = Depends(get_db), _=_auth_by_code):
     result = await db.execute(
         select(Personal).where(Personal.codigo == codigo, Personal.activo == True)  # noqa: E712
     )

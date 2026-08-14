@@ -10,7 +10,7 @@ from app.models.escaneos_carryt import EscaneoCarryt
 from app.schemas.escaneos_carryt import EscaneoCarrytCreate, EscaneoCarrytRead
 
 router = APIRouter(prefix="/api/escaneos-carryt", tags=["escaneos-carryt"])
-_auth = Depends(require_role("administrador", "logistica"))
+_auth = Depends(require_role("administrador", "logistica", "mensajero"))
 
 
 @router.get("/", response_model=list[EscaneoCarrytRead])
