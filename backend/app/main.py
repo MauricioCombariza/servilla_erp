@@ -20,6 +20,7 @@ from app.routers.reportes import router as reportes_router
 from app.routers.personal import router as personal_router
 from app.routers.direcciones import router as direcciones_router
 from app.routers.pendientes_entrega import router as pendientes_entrega_router
+from app.routers.escaneos_carryt import router as escaneos_carryt_router
 from app.config import settings
 from app.database import engine
 
@@ -61,6 +62,7 @@ app.include_router(buscar_router)
 app.include_router(flujo_router)
 app.include_router(direcciones_router)
 app.include_router(pendientes_entrega_router)
+app.include_router(escaneos_carryt_router)
 
 
 @app.get("/health")

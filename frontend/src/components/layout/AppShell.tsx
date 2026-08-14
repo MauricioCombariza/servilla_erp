@@ -3,6 +3,7 @@ import {
   Users, UserCheck, ShoppingCart, FileText, BarChart2,
   Clock, DollarSign, Truck, Receipt, Wallet, Calculator, List, ClipboardCheck,
   LogOut, Menu, X, ArrowDownCircle, ArrowUpCircle, Search, Building2, MapPin, PackageCheck,
+  ScanLine,
 } from "lucide-react";
 import { useState } from "react";
 import { useAuthStore } from "@/store/authStore";
@@ -29,6 +30,7 @@ const navItems = [
   { to: "/buscar", label: "Buscar Paquete", icon: Search },
   { to: "/direcciones", label: "Ajuste Direcciones", icon: MapPin },
   { to: "/pendientes-entrega", label: "Pendientes Entrega", icon: PackageCheck },
+  { to: "/escaneo-carryt", label: "Escaneo Carryt", icon: ScanLine },
 ];
 
 export function AppShell() {
