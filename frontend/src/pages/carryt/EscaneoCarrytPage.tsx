@@ -67,7 +67,7 @@ function usePersonalLookup() {
 type Mensajero = { codigo: string; nombre_completo: string };
 type Feedback = { type: "success" | "error"; message: string } | null;
 
-const PUEDE_VER_REPORTES = ["administrador", "logistica"];
+const PUEDE_VER_REPORTES = ["administrador", "logistica", "mensajero"];
 
 export function EscaneoCarrytPage() {
   const lookup = usePersonalLookup();

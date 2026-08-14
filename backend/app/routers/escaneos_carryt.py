@@ -19,7 +19,7 @@ from app.services.excel_utils import XLSX_MEDIA_TYPE
 
 router = APIRouter(prefix="/api/escaneos-carryt", tags=["escaneos-carryt"])
 _auth = Depends(require_role("administrador", "logistica", "mensajero"))
-_auth_reporte = Depends(require_role("administrador", "logistica"))
+_auth_reporte = Depends(require_role("administrador", "logistica", "mensajero"))
 
 
 @router.get("/", response_model=list[EscaneoCarrytRead])
