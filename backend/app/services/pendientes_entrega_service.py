@@ -1,18 +1,15 @@
 from __future__ import annotations
 
-import io
 import re
 import unicodedata
 from collections import defaultdict
 
-from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font
-from openpyxl.utils import get_column_letter
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.personal import Personal
 from app.services.bases_web import fetch_pendientes_courier
+from app.services.excel_utils import construir_excel
 
 _MESES_ES = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -233,41 +230,13 @@ def nombre_archivo_excel(persona: Personal) -> str:
     return f"pendientes_{persona.codigo}_{_slug_archivo(persona.nombre_completo)}.xlsx"
 
 
-def _construir_excel(titulo: str, columnas: list[str], filas: list[dict], widths: list[int]) -> bytes:
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Pendientes"
-
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(columnas))
-    ws.cell(row=1, column=1, value=titulo).font = Font(bold=True, size=13)
-
-    header_row = 3
-    for col, nombre_col in enumerate(columnas, start=1):
-        c = ws.cell(row=header_row, column=col, value=nombre_col)
-        c.font = Font(bold=True)
-        c.alignment = Alignment(horizontal="center")
-
-    row_idx = header_row + 1
-    for fila in filas:
-        for col, key in enumerate(columnas, start=1):
-            ws.cell(row=row_idx, column=col, value=fila.get(key))
-        row_idx += 1
-
-    for col, w in enumerate(widths, start=1):
-        ws.column_dimensions[get_column_letter(col)].width = w
-
-    buffer = io.BytesIO()
-    wb.save(buffer)
-    return buffer.getvalue()
-
-
 def construir_excel_courier(nombre: str, filas: list[dict]) -> bytes:
     titulo = "Pendientes de entrega" + (f" - {nombre}" if nombre else "")
     widths = [16, 10, 10, 12, 26, 26, 30, 10, 16, 12, 10, 10, 20]
-    return _construir_excel(titulo, COLUMNAS_EXCEL, filas, widths)
+    return construir_excel(titulo, COLUMNAS_EXCEL, filas, widths)
 
 
 def construir_excel_mensual(mes_label: str, filas: list[dict]) -> bytes:
     titulo = f"Pendientes de entrega - {mes_label}"
     widths = [16, 26, 16, 10, 10, 12, 26, 26, 30, 10, 16, 12, 10, 10, 20]
-    return _construir_excel(titulo, COLUMNAS_EXCEL_MENSUAL, filas, widths)
+    return construir_excel(titulo, COLUMNAS_EXCEL_MENSUAL, filas, widths)

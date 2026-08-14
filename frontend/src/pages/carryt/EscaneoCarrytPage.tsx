@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
+import { Download } from "lucide-react";
 import { laboresApi } from "@/api/labores";
 import { escaneosCarrytApi, type EscaneoCarryt } from "@/api/escaneosCarryt";
+import { useAuthStore } from "@/store/authStore";
 
 const SCANNER_ELEMENT_ID = "carryt-qr-reader";
 const SCAN_FORMATS = [
@@ -65,6 +67,8 @@ function usePersonalLookup() {
 type Mensajero = { codigo: string; nombre_completo: string };
 type Feedback = { type: "success" | "error"; message: string } | null;
 
+const PUEDE_VER_REPORTES = ["administrador", "logistica"];
+
 export function EscaneoCarrytPage() {
   const lookup = usePersonalLookup();
   const [mensajero, setMensajero] = useState<Mensajero | null>(null);
@@ -72,6 +76,9 @@ export function EscaneoCarrytPage() {
   const [feedback, setFeedback] = useState<Feedback>(null);
   const lastScanRef = useRef<{ serial: string; at: number }>({ serial: "", at: 0 });
   const qc = useQueryClient();
+  const role = useAuthStore((s) => s.role);
+  const [descargandoReporte, setDescargandoReporte] = useState<"dia" | "unicas" | null>(null);
+  const [errorReporte, setErrorReporte] = useState("");
 
   const escaneosQuery = useQuery({
     queryKey: ["escaneos-carryt", mensajero?.codigo],
@@ -158,6 +165,30 @@ export function EscaneoCarrytPage() {
     setManualSerial("");
   }
 
+  async function handleDescargarReporte(tipo: "dia" | "unicas") {
+    setDescargandoReporte(tipo);
+    setErrorReporte("");
+    try {
+      const r =
+        tipo === "dia"
+          ? await escaneosCarrytApi.descargarExcelDia()
+          : await escaneosCarrytApi.descargarExcelRutasUnicas();
+      const hoy = new Date().toISOString().slice(0, 10);
+      const nombreArchivo = tipo === "dia" ? `carryt_${hoy}.xlsx` : `rutas_unicas_${hoy}.xlsx`;
+      const url = URL.createObjectURL(r.data as Blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = nombreArchivo;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setErrorReporte(msg ?? "Error al generar el archivo");
+    } finally {
+      setDescargandoReporte(null);
+    }
+  }
+
   const escaneos = escaneosQuery.data ?? [];
 
   if (!mensajero) {
@@ -193,6 +224,33 @@ export function EscaneoCarrytPage() {
           >
             Confirmar
           </button>
+
+          {role && PUEDE_VER_REPORTES.includes(role) && (
+            <div className="mt-6 pt-5 border-t border-gray-100">
+              <p className="text-xs font-medium text-gray-500 mb-2">Reportes de hoy</p>
+              {errorReporte && <p className="text-xs text-red-600 mb-2">{errorReporte}</p>}
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleDescargarReporte("dia")}
+                  disabled={descargandoReporte !== null}
+                  className="inline-flex items-center justify-center gap-1.5 bg-gray-800 hover:bg-gray-900 text-white font-medium py-2.5 rounded-lg text-sm transition-colors disabled:opacity-40"
+                >
+                  <Download size={14} />
+                  {descargandoReporte === "dia" ? "Generando..." : "Excel del día"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDescargarReporte("unicas")}
+                  disabled={descargandoReporte !== null}
+                  className="inline-flex items-center justify-center gap-1.5 bg-gray-800 hover:bg-gray-900 text-white font-medium py-2.5 rounded-lg text-sm transition-colors disabled:opacity-40"
+                >
+                  <Download size={14} />
+                  {descargandoReporte === "unicas" ? "Generando..." : "Rutas únicas"}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );

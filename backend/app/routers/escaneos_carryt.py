@@ -1,6 +1,7 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,9 +9,17 @@ from app.auth.dependencies import require_role
 from app.database import get_db
 from app.models.escaneos_carryt import EscaneoCarryt
 from app.schemas.escaneos_carryt import EscaneoCarrytCreate, EscaneoCarrytRead
+from app.services.escaneos_carryt_service import (
+    construir_excel_dia,
+    construir_excel_rutas_unicas,
+    filtrar_rutas_unicas,
+    get_escaneos_del_dia,
+)
+from app.services.excel_utils import XLSX_MEDIA_TYPE
 
 router = APIRouter(prefix="/api/escaneos-carryt", tags=["escaneos-carryt"])
 _auth = Depends(require_role("administrador", "logistica", "mensajero"))
+_auth_reporte = Depends(require_role("administrador", "logistica"))
 
 
 @router.get("/", response_model=list[EscaneoCarrytRead])
@@ -52,3 +61,40 @@ async def registrar_escaneo(
     await db.commit()
     await db.refresh(escaneo)
     return escaneo
+
+
+@router.get("/excel-dia")
+async def descargar_excel_dia(
+    fecha: date | None = None,
+    db: AsyncSession = Depends(get_db),
+    _=_auth_reporte,
+):
+    dia = fecha or date.today()
+    escaneos = await get_escaneos_del_dia(db, dia)
+    if not escaneos:
+        raise HTTPException(status_code=404, detail="No hay paquetes escaneados para esa fecha.")
+    contenido = construir_excel_dia(dia, escaneos)
+    return Response(
+        content=contenido,
+        media_type=XLSX_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="carryt_{dia.isoformat()}.xlsx"'},
+    )
+
+
+@router.get("/excel-rutas-unicas")
+async def descargar_excel_rutas_unicas(
+    fecha: date | None = None,
+    db: AsyncSession = Depends(get_db),
+    _=_auth_reporte,
+):
+    dia = fecha or date.today()
+    escaneos = await get_escaneos_del_dia(db, dia)
+    unicas = filtrar_rutas_unicas(escaneos)
+    if not unicas:
+        raise HTTPException(status_code=404, detail="No hay rutas únicas para esa fecha.")
+    contenido = construir_excel_rutas_unicas(dia, unicas)
+    return Response(
+        content=contenido,
+        media_type=XLSX_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="rutas_unicas_{dia.isoformat()}.xlsx"'},
+    )
