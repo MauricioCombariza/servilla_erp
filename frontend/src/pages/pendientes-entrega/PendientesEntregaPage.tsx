@@ -13,10 +13,21 @@ export function PendientesEntregaPage() {
   const [expandidos, setExpandidos] = useState<Set<string>>(new Set());
   const [descargando, setDescargando] = useState<Record<string, boolean>>({});
   const [error, setError] = useState("");
+  const [descargandoMes, setDescargandoMes] = useState<Record<string, boolean>>({});
+  const [errorMensual, setErrorMensual] = useState("");
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["pendientes-entrega", tipo],
     queryFn: () => pendientesEntregaApi.resumen(tipo).then((r) => r.data),
+  });
+
+  const {
+    data: dataMensual,
+    isLoading: isLoadingMensual,
+    isError: isErrorMensual,
+  } = useQuery({
+    queryKey: ["pendientes-entrega-mensual"],
+    queryFn: () => pendientesEntregaApi.resumenMensual().then((r) => r.data),
   });
 
   function cambiarTab(nuevoTipo: TipoPersonalPendientes) {
@@ -53,7 +64,27 @@ export function PendientesEntregaPage() {
     }
   }
 
+  async function handleDescargarMes(anomes: string) {
+    setDescargandoMes((prev) => ({ ...prev, [anomes]: true }));
+    setErrorMensual("");
+    try {
+      const r = await pendientesEntregaApi.descargarExcelMensual(anomes);
+      const url = URL.createObjectURL(r.data as Blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `pendientes_${anomes.replace(".", "_")}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setErrorMensual(msg ?? "Error al generar el archivo");
+    } finally {
+      setDescargandoMes((prev) => ({ ...prev, [anomes]: false }));
+    }
+  }
+
   const personas = data?.personas ?? [];
+  const meses = dataMensual?.meses ?? [];
 
   return (
     <div>
@@ -63,6 +94,62 @@ export function PendientesEntregaPage() {
           {personas.length} con pendientes
           {data ? ` · desde ${data.corte_desde}` : ""}
         </p>
+      </div>
+
+      <div className="mb-6">
+        <h2 className="text-sm font-semibold text-gray-900 mb-2">Total por mes</h2>
+        {errorMensual && (
+          <div className="mb-3 bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
+            <AlertCircle size={18} className="text-red-500 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-red-700">{errorMensual}</p>
+          </div>
+        )}
+        {isLoadingMensual ? (
+          <p className="text-sm text-gray-500">Cargando...</p>
+        ) : isErrorMensual ? (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
+            <AlertCircle size={18} className="text-red-500 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-red-700">
+              Error al cargar los totales mensuales. Verifica la conexión a la base de datos.
+            </p>
+          </div>
+        ) : meses.length === 0 ? (
+          <p className="text-sm text-gray-500">No hay pendientes de entrega en este momento.</p>
+        ) : (
+          <div className="border border-gray-200 rounded-xl overflow-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 text-gray-500 text-xs">
+                  <th className="text-left px-3 py-2 font-medium">Mes</th>
+                  <th className="text-right px-3 py-2 font-medium">Courier Externo</th>
+                  <th className="text-right px-3 py-2 font-medium">Mensajeros</th>
+                  <th className="text-right px-3 py-2 font-medium">Total</th>
+                  <th className="text-right px-3 py-2 font-medium">Descargar</th>
+                </tr>
+              </thead>
+              <tbody>
+                {meses.map((m) => (
+                  <tr key={m.anomes} className="border-t border-gray-100">
+                    <td className="px-3 py-2 text-gray-900">{m.mes}</td>
+                    <td className="px-3 py-2 text-right text-gray-600">{m.courier_externo}</td>
+                    <td className="px-3 py-2 text-right text-gray-600">{m.mensajero}</td>
+                    <td className="px-3 py-2 text-right font-medium text-gray-900">{m.total}</td>
+                    <td className="px-3 py-2 text-right">
+                      <button
+                        onClick={() => handleDescargarMes(m.anomes)}
+                        disabled={descargandoMes[m.anomes]}
+                        className="inline-flex items-center gap-1.5 bg-primary hover:bg-primary-hover text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+                      >
+                        <Download size={14} />
+                        {descargandoMes[m.anomes] ? "Generando..." : "Excel"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="flex gap-1 border-b border-gray-200 mb-4">

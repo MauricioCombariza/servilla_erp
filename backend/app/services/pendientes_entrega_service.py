@@ -24,6 +24,10 @@ COLUMNAS_EXCEL = [
     "dirdes1", "cod_sec", "ciudad1", "dpto1", "retorno", "ret_esc", "motivo",
 ]
 
+COLUMNAS_EXCEL_MENSUAL = ["tipo_personal", "courier", *COLUMNAS_EXCEL]
+
+TIPOS_PERSONAL = ("courier_externo", "mensajero")
+
 _NOMBRE_INVALIDO_RE = re.compile(r"[^A-Za-z0-9_-]")
 
 
@@ -39,6 +43,18 @@ async def _get_personal_activo(db: AsyncSession, tipo_personal: str) -> list[Per
         .order_by(Personal.nombre_completo)
     )
     return list(result.scalars().all())
+
+
+async def _get_personal_activo_todos(db: AsyncSession) -> dict[str, list[Personal]]:
+    result = await db.execute(
+        select(Personal)
+        .where(Personal.tipo_personal.in_(TIPOS_PERSONAL), Personal.activo == True)  # noqa: E712
+        .order_by(Personal.nombre_completo)
+    )
+    por_tipo: dict[str, list[Personal]] = defaultdict(list)
+    for persona in result.scalars().all():
+        por_tipo[persona.tipo_personal].append(persona)
+    return por_tipo
 
 
 def _codigos_numericos(personas: list[Personal]) -> dict[int, Personal]:
@@ -68,22 +84,34 @@ def _agrupar_por_cod_men(rows: list[dict]) -> dict[str, list[dict]]:
     return agrupado
 
 
+def _anomes_valido(anomes: str) -> bool:
+    return len(anomes) == 7 and anomes[4] == "."
+
+
+def mes_label_desde_anomes(anomes: str) -> str | None:
+    if not _anomes_valido(anomes):
+        return None
+    anio, mes = anomes.split(".")
+    try:
+        return f"{_MESES_ES[int(mes) - 1]} {anio}"
+    except (ValueError, IndexError):
+        return None
+
+
 def calcular_desglose_mensual(rows: list[dict]) -> list[dict]:
     conteo: dict[str, int] = defaultdict(int)
     for row in rows:
         anomes = (row.get("f_emi") or "")[:7]  # 'YYYY.MM'
-        if len(anomes) != 7 or anomes[4] != ".":
+        if not _anomes_valido(anomes):
             continue
         conteo[anomes] += 1
 
     desglose = []
     for anomes in sorted(conteo):
-        anio, mes = anomes.split(".")
-        try:
-            nombre_mes = _MESES_ES[int(mes) - 1]
-        except (ValueError, IndexError):
+        etiqueta = mes_label_desde_anomes(anomes)
+        if etiqueta is None:
             continue
-        desglose.append({"mes": f"{nombre_mes} {anio}", "pendientes": conteo[anomes]})
+        desglose.append({"mes": etiqueta, "pendientes": conteo[anomes]})
     return desglose
 
 
@@ -116,6 +144,68 @@ async def get_pendientes_por_personal(
     return resultado
 
 
+async def get_resumen_mensual(db: AsyncSession, dias_corte: int = 60) -> list[dict]:
+    """Total de pendientes por mes, combinando courier_externo + mensajero."""
+    por_tipo = await _get_personal_activo_todos(db)
+    codigos_map: dict[int, Personal] = {}
+    for tipo in TIPOS_PERSONAL:
+        codigos_map.update(_codigos_numericos(por_tipo.get(tipo, [])))
+    if not codigos_map:
+        return []
+
+    rows = await fetch_pendientes_courier(list(codigos_map.keys()), dias_corte)
+    agrupado = _agrupar_por_cod_men(rows)
+
+    conteo: dict[str, dict[str, int]] = defaultdict(lambda: {"courier_externo": 0, "mensajero": 0})
+    for codigo, persona in codigos_map.items():
+        for fila in agrupado.get(str(codigo), []):
+            anomes = (fila.get("f_emi") or "")[:7]
+            if not _anomes_valido(anomes):
+                continue
+            conteo[anomes][persona.tipo_personal] += 1
+
+    resultado = []
+    for anomes in sorted(conteo):
+        etiqueta = mes_label_desde_anomes(anomes)
+        if etiqueta is None:
+            continue
+        c = conteo[anomes]
+        resultado.append({
+            "anomes": anomes,
+            "mes": etiqueta,
+            "courier_externo": c["courier_externo"],
+            "mensajero": c["mensajero"],
+            "total": c["courier_externo"] + c["mensajero"],
+        })
+    return resultado
+
+
+async def get_pendientes_mes(db: AsyncSession, anomes: str, dias_corte: int = 60) -> list[dict]:
+    """Pendientes de un mes específico, combinando courier_externo + mensajero."""
+    por_tipo = await _get_personal_activo_todos(db)
+    codigos_map: dict[int, Personal] = {}
+    for tipo in TIPOS_PERSONAL:
+        codigos_map.update(_codigos_numericos(por_tipo.get(tipo, [])))
+    if not codigos_map:
+        return []
+
+    rows = await fetch_pendientes_courier(list(codigos_map.keys()), dias_corte)
+    agrupado = _agrupar_por_cod_men(rows)
+
+    resultado = []
+    for codigo, persona in codigos_map.items():
+        for fila in agrupado.get(str(codigo), []):
+            if (fila.get("f_emi") or "")[:7] != anomes:
+                continue
+            enriquecida = dict(fila)
+            enriquecida["tipo_personal"] = persona.tipo_personal
+            enriquecida["courier"] = persona.nombre_completo
+            resultado.append(enriquecida)
+
+    resultado.sort(key=lambda r: (r["tipo_personal"], r["courier"], r.get("f_emi") or ""))
+    return resultado
+
+
 async def get_pendientes_courier_individual(
     db: AsyncSession, codigo: str, tipo_personal: str, dias_corte: int = 60,
 ) -> tuple[Personal, list[dict]] | None:
@@ -143,31 +233,41 @@ def nombre_archivo_excel(persona: Personal) -> str:
     return f"pendientes_{persona.codigo}_{_slug_archivo(persona.nombre_completo)}.xlsx"
 
 
-def construir_excel_courier(nombre: str, filas: list[dict]) -> bytes:
+def _construir_excel(titulo: str, columnas: list[str], filas: list[dict], widths: list[int]) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = "Pendientes"
 
-    titulo = "Pendientes de entrega" + (f" - {nombre}" if nombre else "")
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(COLUMNAS_EXCEL))
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(columnas))
     ws.cell(row=1, column=1, value=titulo).font = Font(bold=True, size=13)
 
     header_row = 3
-    for col, nombre_col in enumerate(COLUMNAS_EXCEL, start=1):
+    for col, nombre_col in enumerate(columnas, start=1):
         c = ws.cell(row=header_row, column=col, value=nombre_col)
         c.font = Font(bold=True)
         c.alignment = Alignment(horizontal="center")
 
     row_idx = header_row + 1
     for fila in filas:
-        for col, key in enumerate(COLUMNAS_EXCEL, start=1):
+        for col, key in enumerate(columnas, start=1):
             ws.cell(row=row_idx, column=col, value=fila.get(key))
         row_idx += 1
 
-    widths = [16, 10, 10, 12, 26, 26, 30, 10, 16, 12, 10, 10, 20]
     for col, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(col)].width = w
 
     buffer = io.BytesIO()
     wb.save(buffer)
     return buffer.getvalue()
+
+
+def construir_excel_courier(nombre: str, filas: list[dict]) -> bytes:
+    titulo = "Pendientes de entrega" + (f" - {nombre}" if nombre else "")
+    widths = [16, 10, 10, 12, 26, 26, 30, 10, 16, 12, 10, 10, 20]
+    return _construir_excel(titulo, COLUMNAS_EXCEL, filas, widths)
+
+
+def construir_excel_mensual(mes_label: str, filas: list[dict]) -> bytes:
+    titulo = f"Pendientes de entrega - {mes_label}"
+    widths = [16, 26, 16, 10, 10, 12, 26, 26, 30, 10, 16, 12, 10, 10, 20]
+    return _construir_excel(titulo, COLUMNAS_EXCEL_MENSUAL, filas, widths)

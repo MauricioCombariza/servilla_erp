@@ -19,3 +19,16 @@ class PendientesEntregaResumen(BaseModel):
     tipo_personal: str
     corte_desde: str
     personas: list[PendientesEntregaRow]
+
+
+class ResumenMensualRow(BaseModel):
+    anomes: str
+    mes: str
+    courier_externo: int
+    mensajero: int
+    total: int
+
+
+class ResumenMensualResponse(BaseModel):
+    corte_desde: str
+    meses: list[ResumenMensualRow]
