@@ -1,5 +1,7 @@
 import api from "./client";
 
+export type ClienteDirecciones = "leonisa" | "vehigrupo";
+
 export interface AjusteDireccionesResult {
   total_filas: number;
   total_columnas: number;
@@ -8,14 +10,19 @@ export interface AjusteDireccionesResult {
 }
 
 export const direccionesApi = {
-  ajustar: (file: File) => {
+  ajustar: (file: File, cliente: ClienteDirecciones) => {
     const form = new FormData();
     form.append("file", file);
+    form.append("cliente", cliente);
     return api.post<AjusteDireccionesResult>("/direcciones/ajustar", form, {
       headers: { "Content-Type": "multipart/form-data" },
     });
   },
 
-  descargar: (nombreArchivo: string, filas: string[][]) =>
-    api.post("/direcciones/descargar", { nombre_archivo: nombreArchivo, filas }, { responseType: "blob" }),
+  descargar: (nombreArchivo: string, filas: string[][], cliente: ClienteDirecciones) =>
+    api.post(
+      "/direcciones/descargar",
+      { cliente, nombre_archivo: nombreArchivo, filas },
+      { responseType: "blob" },
+    ),
 };

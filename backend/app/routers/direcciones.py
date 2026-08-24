@@ -1,11 +1,16 @@
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 
 from app.auth.dependencies import require_role
 from app.schemas.direcciones import AjusteDireccionesResult, DescargarDireccionesRequest
-from app.services.direcciones_service import generar_txt, procesar_archivo
+from app.services.direcciones_service import (
+    generar_txt_leonisa,
+    generar_txt_vehigrupo,
+    procesar_archivo_leonisa,
+    procesar_archivo_vehigrupo,
+)
 
 router = APIRouter(prefix="/api/direcciones", tags=["direcciones"])
 _auth = Depends(require_role("administrador", "logistica"))
@@ -15,10 +20,14 @@ _auth = Depends(require_role("administrador", "logistica"))
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 _NOMBRE_INVALIDO_RE = re.compile(r"[^A-Za-z0-9_-]")
+_CLIENTES_VALIDOS = ("leonisa", "vehigrupo")
 
 
 @router.post("/ajustar", response_model=AjusteDireccionesResult)
-async def ajustar(file: UploadFile, _=_auth):
+async def ajustar(file: UploadFile, cliente: str = Form(...), _=_auth):
+    if cliente not in _CLIENTES_VALIDOS:
+        raise HTTPException(status_code=400, detail=f"Cliente no soportado: {cliente}")
+
     fname = (file.filename or "").lower()
     if not fname.endswith(".txt"):
         raise HTTPException(status_code=400, detail="Solo se aceptan archivos .txt")
@@ -31,7 +40,9 @@ async def ajustar(file: UploadFile, _=_auth):
         )
 
     try:
-        return procesar_archivo(contenido)
+        if cliente == "leonisa":
+            return procesar_archivo_leonisa(contenido)
+        return procesar_archivo_vehigrupo(contenido)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -39,7 +50,11 @@ async def ajustar(file: UploadFile, _=_auth):
 @router.post("/descargar")
 async def descargar(body: DescargarDireccionesRequest, _=_auth):
     nombre = _NOMBRE_INVALIDO_RE.sub("", body.nombre_archivo).strip() or "direcciones"
-    contenido = generar_txt(body.filas)
+    contenido = (
+        generar_txt_leonisa(body.filas)
+        if body.cliente == "leonisa"
+        else generar_txt_vehigrupo(body.filas)
+    )
     return Response(
         content=contenido,
         # application/octet-stream evita que FastAPI anexe "; charset=utf-8" al

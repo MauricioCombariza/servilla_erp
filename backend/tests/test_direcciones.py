@@ -3,7 +3,12 @@ import io
 
 import pytest
 
-from app.services.direcciones_service import ajustar_dir_leonisa
+from app.services.direcciones_service import (
+    VHG_FIELDS,
+    ajustar_dir_leonisa,
+    generar_txt_vehigrupo,
+    procesar_archivo_vehigrupo,
+)
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -82,6 +87,7 @@ async def test_ajustar_endpoint(client, headers):
     r = await client.post(
         "/api/direcciones/ajustar",
         files={"file": ("ordenes.txt", io.BytesIO(_archivo_muestra()), "text/plain")},
+        data={"cliente": "leonisa"},
         headers=headers,
     )
     assert r.status_code == 200
@@ -101,6 +107,7 @@ async def test_ajustar_endpoint_extension_invalida(client, headers):
     r = await client.post(
         "/api/direcciones/ajustar",
         files={"file": ("ordenes.csv", io.BytesIO(b"a|b"), "text/csv")},
+        data={"cliente": "leonisa"},
         headers=headers,
     )
     assert r.status_code == 400
@@ -112,6 +119,18 @@ async def test_ajustar_endpoint_columnas_insuficientes(client, headers):
     r = await client.post(
         "/api/direcciones/ajustar",
         files={"file": ("ordenes.txt", io.BytesIO(contenido), "text/plain")},
+        data={"cliente": "leonisa"},
+        headers=headers,
+    )
+    assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_ajustar_endpoint_cliente_invalido(client, headers):
+    r = await client.post(
+        "/api/direcciones/ajustar",
+        files={"file": ("ordenes.txt", io.BytesIO(_archivo_muestra()), "text/plain")},
+        data={"cliente": "otro"},
         headers=headers,
     )
     assert r.status_code == 400
@@ -125,7 +144,7 @@ async def test_descargar_endpoint_roundtrip(client, headers):
     ]
     r = await client.post(
         "/api/direcciones/descargar",
-        json={"nombre_archivo": "20260601", "filas": filas},
+        json={"cliente": "leonisa", "nombre_archivo": "20260601", "filas": filas},
         headers=headers,
     )
     assert r.status_code == 200
@@ -144,8 +163,121 @@ async def test_descargar_endpoint_roundtrip(client, headers):
 async def test_descargar_endpoint_sanitiza_nombre(client, headers):
     r = await client.post(
         "/api/direcciones/descargar",
-        json={"nombre_archivo": "../../etc/passwd", "filas": [["a", "b"]]},
+        json={"cliente": "leonisa", "nombre_archivo": "../../etc/passwd", "filas": [["a", "b"]]},
         headers=headers,
     )
     assert r.status_code == 200
     assert "/" not in r.headers["content-disposition"].split("filename=")[1]
+
+
+# ── Banco Vehigrupo: ancho fijo (288 caracteres/línea, CRLF, latin-1) ──────────
+
+def _linea_vhg(doc="", nombre="", direccion="", barrio="", ciudad="", depto="", cola="") -> str:
+    valores = [doc, nombre, direccion, barrio, ciudad, depto, cola]
+    return "".join(v.ljust(fin - inicio) for v, (inicio, fin) in zip(valores, VHG_FIELDS))
+
+
+def _archivo_vhg_muestra() -> bytes:
+    lineas = [
+        _linea_vhg(
+            doc="CC00000000000000000000000000004263000001",
+            nombre="RAMIREZ GIRALDO JOHN OLIVER",
+            direccion="CL 49 50C 107",
+            barrio="EL HOSPITAL",
+            ciudad="",
+            depto="",
+            cola="1I",
+        ),
+        _linea_vhg(
+            doc="CC00000000000000000000000000004476000002",
+            nombre="TABARES BETANCUR JUAN CARLOS",
+            direccion="CARRERA 48 49 14",
+            barrio="CENTRO",
+            ciudad="AMAGA",
+            depto="ANTIOQUIA",
+            cola="1I",
+        ),
+    ]
+    return ("\r\n".join(lineas) + "\r\n").encode("latin-1")
+
+
+def test_procesar_archivo_vehigrupo_normaliza_direccion_y_preserva_resto():
+    resultado = procesar_archivo_vehigrupo(_archivo_vhg_muestra())
+    assert resultado.total_filas == 2
+    assert resultado.total_columnas == 7
+    assert resultado.col_direccion == 2
+    assert resultado.filas[0][2] == "CLL 49 50C 107"
+    assert resultado.filas[1][2] == "KRA 48 49 14"
+    # Los demás campos quedan intactos (con su padding de ancho fijo original)
+    assert resultado.filas[0][1].strip() == "RAMIREZ GIRALDO JOHN OLIVER"
+    assert resultado.filas[1][4].strip() == "AMAGA"
+
+
+def test_procesar_archivo_vehigrupo_linea_corta_lanza_error():
+    with pytest.raises(ValueError):
+        procesar_archivo_vehigrupo(b"linea demasiado corta\r\n")
+
+
+def test_generar_txt_vehigrupo_roundtrip_preserva_ancho_fijo():
+    resultado = procesar_archivo_vehigrupo(_archivo_vhg_muestra())
+    contenido = generar_txt_vehigrupo(resultado.filas)
+    lineas = contenido.decode("latin-1").split("\r\n")
+    lineas = [l for l in lineas if l]  # descarta el "" final tras el último \r\n
+    assert len(lineas) == 2
+    assert all(len(l) == 288 for l in lineas)
+    assert lineas[0][105:170].strip() == "CLL 49 50C 107"
+    # Campos no editados se preservan exactamente
+    assert lineas[1][216:251].strip() == "AMAGA"
+
+
+def test_generar_txt_vehigrupo_direccion_larga_no_trunca():
+    fila = [
+        "CC" + "0" * 38,
+        "NOMBRE".ljust(65),
+        "X" * 90,  # dirección más larga que el campo (65)
+        "BARRIO".ljust(46),
+        "CIUDAD".ljust(35),
+        "DEPTO".ljust(29),
+        "1I".rjust(8),
+    ]
+    contenido = generar_txt_vehigrupo([fila])
+    linea = contenido.decode("latin-1").split("\r\n")[0]
+    assert "X" * 90 in linea
+    assert len(linea) > 288  # no se truncó: la línea creció
+
+
+@pytest.mark.asyncio
+async def test_ajustar_endpoint_vehigrupo(client, headers):
+    r = await client.post(
+        "/api/direcciones/ajustar",
+        files={"file": ("BD_VHG.txt", io.BytesIO(_archivo_vhg_muestra()), "text/plain")},
+        data={"cliente": "vehigrupo"},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total_filas"] == 2
+    assert data["total_columnas"] == 7
+    assert data["col_direccion"] == 2
+    assert data["filas"][0][2] == "CLL 49 50C 107"
+
+
+@pytest.mark.asyncio
+async def test_descargar_endpoint_vehigrupo_roundtrip(client, headers):
+    ajustar = await client.post(
+        "/api/direcciones/ajustar",
+        files={"file": ("BD_VHG.txt", io.BytesIO(_archivo_vhg_muestra()), "text/plain")},
+        data={"cliente": "vehigrupo"},
+        headers=headers,
+    )
+    filas = ajustar.json()["filas"]
+
+    r = await client.post(
+        "/api/direcciones/descargar",
+        json={"cliente": "vehigrupo", "nombre_archivo": "BD_VHG", "filas": filas},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    lineas = [l for l in r.content.decode("latin-1").split("\r\n") if l]
+    assert len(lineas) == 2
+    assert all(len(l) == 288 for l in lineas)

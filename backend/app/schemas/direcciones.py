@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -9,5 +11,6 @@ class AjusteDireccionesResult(BaseModel):
 
 
 class DescargarDireccionesRequest(BaseModel):
+    cliente: Literal["leonisa", "vehigrupo"]
     nombre_archivo: str
     filas: list[list[str]]

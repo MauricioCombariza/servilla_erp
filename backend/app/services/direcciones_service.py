@@ -1,10 +1,16 @@
 """
-Ajuste de direcciones Leonisa
-==============================
-Normaliza direcciones colombianas al formato Leonisa (KRA/CLL/DG/TV,
-cardinales, complementos como TORRE/APTO/PISO) y procesa archivos .txt
-separados por | (sin encabezado, codificación latin-1) donde la columna
-6 (índice 5) contiene la dirección a ajustar.
+Ajuste de direcciones (Leonisa, Banco Vehigrupo)
+==================================================
+Normaliza direcciones colombianas al formato estándar (KRA/CLL/DG/TV,
+cardinales, complementos como TORRE/APTO/PISO). La misma función de
+normalización (`ajustar_dir_leonisa`) se reutiliza para ambos clientes;
+lo que cambia es el formato del archivo:
+
+- Leonisa: .txt separado por | (sin encabezado, latin-1), dirección en
+  la columna 6 (índice 5).
+- Banco Vehigrupo: .txt de ancho fijo (288 caracteres por línea, CRLF,
+  latin-1, sin encabezado), dirección en las columnas 106-170
+  (índice 105:170).
 
 Puerto directo de la herramienta Streamlit
 dashboard/pages_home/AjusteDireccionesLeonisa.py — misma lógica de
@@ -21,7 +27,12 @@ import pandas as pd
 from app.schemas.direcciones import AjusteDireccionesResult
 
 ENCODING = "latin-1"
-COL_DIRECCION = 5  # columna 6 del archivo (índice 0-based)
+COL_DIRECCION = 5  # columna 6 del archivo Leonisa (índice 0-based)
+
+# ── Layout de ancho fijo del archivo Banco Vehigrupo ─────────────────────────
+VHG_LINE_LEN = 288
+VHG_FIELDS = [(0, 40), (40, 105), (105, 170), (170, 216), (216, 251), (251, 280), (280, 288)]
+VHG_COL_DIRECCION = 2  # índice del campo dirección dentro de VHG_FIELDS/filas
 
 # ── Tabla de abreviaciones de tipo de vía ────────────────────────────────────
 # El orden importa: los patrones más largos primero para evitar reemplazos parciales
@@ -271,7 +282,7 @@ def ajustar_dir_leonisa(raw: str) -> str:
     return result
 
 
-def procesar_archivo(contenido: bytes) -> AjusteDireccionesResult:
+def procesar_archivo_leonisa(contenido: bytes) -> AjusteDireccionesResult:
     """Lee un .txt separado por | (sin encabezado, latin-1) y normaliza la columna
     de dirección (índice COL_DIRECCION). Lanza ValueError si el archivo no tiene
     suficientes columnas."""
@@ -296,10 +307,54 @@ def procesar_archivo(contenido: bytes) -> AjusteDireccionesResult:
     )
 
 
-def generar_txt(filas: list[list[str]]) -> bytes:
+def generar_txt_leonisa(filas: list[list[str]]) -> bytes:
     """Reconstruye el .txt separado por | (sin encabezado, latin-1) a partir de
     las filas (ya editadas por el usuario)."""
     df = pd.DataFrame(filas)
     buffer = io.StringIO()
     df.to_csv(buffer, sep="|", header=False, index=False)
     return buffer.getvalue().encode(ENCODING)
+
+
+def procesar_archivo_vehigrupo(contenido: bytes) -> AjusteDireccionesResult:
+    """Lee un .txt de ancho fijo (288 caracteres/línea, CRLF, latin-1, sin
+    encabezado) del Banco Vehigrupo y normaliza el campo dirección
+    (columnas 106-170). Lanza ValueError si alguna línea es más corta de lo
+    esperado."""
+    lineas = contenido.decode(ENCODING).splitlines()
+
+    filas: list[list[str]] = []
+    for n, linea in enumerate(lineas, start=1):
+        if len(linea) < VHG_LINE_LEN:
+            raise ValueError(
+                f"La línea {n} tiene {len(linea)} caracteres; se esperaban "
+                f"al menos {VHG_LINE_LEN} (formato de ancho fijo Vehigrupo)."
+            )
+
+        campos = [linea[inicio:fin] for inicio, fin in VHG_FIELDS]
+        campos[VHG_COL_DIRECCION] = ajustar_dir_leonisa(campos[VHG_COL_DIRECCION].strip())
+        filas.append(campos)
+
+    return AjusteDireccionesResult(
+        total_filas=len(filas),
+        total_columnas=len(VHG_FIELDS),
+        col_direccion=VHG_COL_DIRECCION,
+        filas=filas,
+    )
+
+
+def generar_txt_vehigrupo(filas: list[list[str]]) -> bytes:
+    """Reconstruye el .txt de ancho fijo (288 caracteres/línea, CRLF, latin-1)
+    del Banco Vehigrupo a partir de las filas (ya editadas por el usuario). El
+    campo dirección se rellena con espacios hasta su ancho original (65); si
+    quedó más largo no se trunca (la línea resultante queda más larga)."""
+    ancho_direccion = VHG_FIELDS[VHG_COL_DIRECCION][1] - VHG_FIELDS[VHG_COL_DIRECCION][0]
+
+    lineas: list[str] = []
+    for fila in filas:
+        campos = list(fila)
+        direccion = campos[VHG_COL_DIRECCION].strip()
+        campos[VHG_COL_DIRECCION] = direccion.ljust(ancho_direccion)
+        lineas.append("".join(campos))
+
+    return ("\r\n".join(lineas) + "\r\n").encode(ENCODING)
