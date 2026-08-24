@@ -61,6 +61,7 @@ _VIA_MAP = [
     (r"\bCRA\b",         "KRA"),
     (r"\bCR\b",          "KRA"),
     (r"\bKR\b",          "KRA"),
+    (r"\bCA\b",          "KRA"),   # abreviatura de Carrera usada en archivos bancarios (Vehigrupo)
     (r"\bAK\b",          "KRA"),   # Autopista / Avenida Carrera abreviada
     (r"\bDIAGONAL\b",    "DG"),
     (r"\bDIAG\b",        "DG"),
@@ -70,30 +71,32 @@ _VIA_MAP = [
     (r"\bAVENIDA\b",     "AV"),
 ]
 
-# ── Tipo de vía pegado al final de la palabra anterior ──────────────────────
+# ── Tipo de vía pegado al final de la palabra/número anterior ───────────────
 # Frecuente en nombres de barrio/conjunto sin espacio antes del tipo de vía:
 # "GUAYACAN DE LA PLAZACL 48 SUR 39 57" (falta el espacio entre "PLAZA" y
-# "CL"). En ese caso "\bCL\b" (usado en _VIA_MAP) nunca matchea porque no hay
-# límite de palabra antes de "CL" (está pegado a "PLAZA"). Se detecta con un
-# lookbehind de letra (en vez de \b) y se inserta el espacio faltante para
-# que _VIA_MAP sí pueda reconocerlo después. Los patrones más largos van
-# primero por la misma razón que en _VIA_MAP (evitar matches parciales).
+# "CL") o pegado a un número de complemento: "AP 1916CR 61 33 51". En ambos
+# casos "\bCL\b"/"\bCR\b" (usados en _VIA_MAP) nunca matchean porque no hay
+# límite de palabra antes del tipo de vía (está pegado a la letra o dígito
+# anterior). Se detecta con un lookbehind de letra o dígito (en vez de \b) y
+# se inserta el espacio faltante para que _VIA_MAP sí pueda reconocerlo
+# después. Los patrones más largos van primero por la misma razón que en
+# _VIA_MAP (evitar matches parciales).
 _VIA_TOKENS_SIMPLES = (
-    "CARRETERA", "CARRERA", "CARERA", "CARR", "KRR", "CRA", "CR", "KRA", "KR", "AK",
+    "CARRETERA", "CARRERA", "CARERA", "CARR", "KRR", "CRA", "CR", "KRA", "KR", "CA", "AK",
     "CALLE", "CALE", "CLLE", "CLL", "CALL", "CL",
     "DIAGONAL", "DIAG", "DG",
-    "TRANSVERSAL", "TRANSV", "TR",
+    "TRANSVERSAL", "TRANSV", "TR", "TV",
     "AVENIDA", "AV",
 )
 _VIA_PEGADA_RE = re.compile(
-    r"(?<=[A-Z])(" + "|".join(sorted(_VIA_TOKENS_SIMPLES, key=len, reverse=True)) + r")\b"
+    r"(?<=[A-Z0-9])(" + "|".join(sorted(_VIA_TOKENS_SIMPLES, key=len, reverse=True)) + r")\b"
 )
 
 # ── Parser por tokens ────────────────────────────────────────────────────────
 # Abreviaciones canónicas para keywords de complemento
 _COMP_ABBREV: dict[str, str] = {
     'APARTAMENTO': 'APTO', 'APTO': 'APTO', 'AP': 'APTO',
-    'TORRE': 'TO', 'TRR': 'TO',
+    'TORRE': 'TO', 'TRR': 'TO', 'TO': 'TO',
     'PISO': 'PS', 'PS': 'PS',
     'BLOQUE': 'BL', 'BLQ': 'BL', 'BL': 'BL',
     'INTERIOR': 'INT', 'INT': 'INT',
