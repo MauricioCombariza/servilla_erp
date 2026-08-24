@@ -72,6 +72,25 @@ def test_ajustar_dir_leonisa_menos_de_3_coordenadas_queda_en_mayusculas():
     assert ajustar_dir_leonisa("cll 80 45") == "CLL 80 45"
 
 
+@pytest.mark.parametrize("raw,esperado", [
+    ("GUAYACAN DE LA PLAZACL 48 SUR 39 57 AP 566", "CLL 48 SUR 39 57 APTO 566"),
+    ("OCEANACL 39 52 95 AP 914", "CLL 39 52 95 APTO 914"),
+    ("REFUGIO VALLE VERDEAV 26 51 81 AP 1615 BL 2", "AV 26 51 81 APTO 1615 BL 2"),
+    ("NOGALES APARTAMENTOSCR 65 C 72 140 AP 1107 TO 1", "KRA 65C 72 140 APTO 1107"),
+])
+def test_ajustar_dir_leonisa_tipo_via_pegado_al_nombre_anterior(raw, esperado):
+    # El tipo de vía puede venir pegado (sin espacio) al nombre del
+    # barrio/conjunto que lo precede — común en el archivo Vehigrupo.
+    assert ajustar_dir_leonisa(raw) == esperado
+
+
+def test_ajustar_dir_leonisa_tipo_via_pegado_no_rompe_palabras_normales():
+    # Palabras que contienen una subcadena de tipo de vía pero no la tienen
+    # pegada a números de dirección no deben partirse.
+    assert ajustar_dir_leonisa("CONJUNTO IRUNKM 69 VIA PANAMERICANA CA 15") == \
+        "CONJUNTO IRUNKM 69 VIA PANAMERICANA CA 15"
+
+
 # ── Tests de integración de los endpoints ──────────────────────────────────────
 
 def _archivo_muestra() -> bytes:

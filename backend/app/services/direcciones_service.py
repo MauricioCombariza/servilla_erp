@@ -70,6 +70,25 @@ _VIA_MAP = [
     (r"\bAVENIDA\b",     "AV"),
 ]
 
+# ── Tipo de vía pegado al final de la palabra anterior ──────────────────────
+# Frecuente en nombres de barrio/conjunto sin espacio antes del tipo de vía:
+# "GUAYACAN DE LA PLAZACL 48 SUR 39 57" (falta el espacio entre "PLAZA" y
+# "CL"). En ese caso "\bCL\b" (usado en _VIA_MAP) nunca matchea porque no hay
+# límite de palabra antes de "CL" (está pegado a "PLAZA"). Se detecta con un
+# lookbehind de letra (en vez de \b) y se inserta el espacio faltante para
+# que _VIA_MAP sí pueda reconocerlo después. Los patrones más largos van
+# primero por la misma razón que en _VIA_MAP (evitar matches parciales).
+_VIA_TOKENS_SIMPLES = (
+    "CARRETERA", "CARRERA", "CARERA", "CARR", "KRR", "CRA", "CR", "KRA", "KR", "AK",
+    "CALLE", "CALE", "CLLE", "CLL", "CALL", "CL",
+    "DIAGONAL", "DIAG", "DG",
+    "TRANSVERSAL", "TRANSV", "TR",
+    "AVENIDA", "AV",
+)
+_VIA_PEGADA_RE = re.compile(
+    r"(?<=[A-Z])(" + "|".join(sorted(_VIA_TOKENS_SIMPLES, key=len, reverse=True)) + r")\b"
+)
+
 # ── Parser por tokens ────────────────────────────────────────────────────────
 # Abreviaciones canónicas para keywords de complemento
 _COMP_ABBREV: dict[str, str] = {
@@ -211,6 +230,8 @@ def ajustar_dir_leonisa(raw: str) -> str:
       "carrera 15 40 20 bloque 2 apto 501"                                  → "KRA 15 40 20 APTO 501 BL 2"
       "carrera 15 40 20 edificio 5 apto 302"                                → "KRA 15 40 20 APTO 302 ED 5"
       "cll 80 45"  (sin placa: solo 2 coordenadas)                          → "CLL 80 45" (mayúsculas, sin reordenar)
+      "GUAYACAN DE LA PLAZACL 48 SUR 39 57 AP 566"  (tipo de vía pegado
+       al nombre del conjunto, sin espacio)                                → "CLL 48 SUR 39 57 APTO 566"
     """
     if not isinstance(raw, str) or not raw.strip():
         return ""
@@ -236,6 +257,10 @@ def ajustar_dir_leonisa(raw: str) -> str:
     # 4. Insertar espacio entre letra y dígito contiguos
     #    ("CALLE56F" → "CALLE 56F", "99D19" → "99D 19", "49C27" → "49C 27")
     text = re.sub(r'([A-Z])(\d)', r'\1 \2', text)
+
+    # 4b. Separar tipo de vía pegado al final de la palabra anterior
+    #     ("GUAYACAN DE LA PLAZACL 48 SUR" → "GUAYACAN DE LA PLAZA CL 48 SUR")
+    text = _VIA_PEGADA_RE.sub(r' \1', text)
 
     # 5. Sustituir tipo de vía
     for pattern, repl in _VIA_MAP:
