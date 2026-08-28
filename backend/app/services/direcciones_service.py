@@ -95,9 +95,9 @@ _VIA_PEGADA_RE = re.compile(
 # ── Parser por tokens ────────────────────────────────────────────────────────
 # Abreviaciones canónicas para keywords de complemento
 _COMP_ABBREV: dict[str, str] = {
-    'APARTAMENTO': 'APTO', 'APTO': 'APTO', 'AP': 'APTO',
+    'APARTAMENTO': 'APTO', 'APTO': 'APTO', 'AP': 'APTO', 'APT': 'APTO',
     'TORRE': 'TO', 'TRR': 'TO', 'TO': 'TO',
-    'PISO': 'PS', 'PS': 'PS',
+    'PISO': 'PS', 'PS': 'PS', 'P': 'PS',
     'BLOQUE': 'BL', 'BLQ': 'BL', 'BL': 'BL',
     'INTERIOR': 'INT', 'INT': 'INT',
     'LOCAL': 'LC', 'LC': 'LC',
@@ -112,6 +112,7 @@ _CARDINALS_SIMPLE   = ('SUR', 'NORTE', 'ESTE', 'OESTE')
 _VIA_TYPE_RE   = re.compile(r'^(KRA|CLL|DG|TV|AV)$')
 _COORD_TOK_RE  = re.compile(r'^\d+[A-Z]*$')  # número con letras opcionales: 54C, 88I, 65, 79FBIS
 _COMP_VAL_RE   = re.compile(r'^\d+[A-Z]*$|^[A-Z]$')  # valor tras keyword: 1106, 4, A
+_NAME_TOK_RE   = re.compile(r'^[A-Z]+$')  # token alfabético (posible palabra de nombre propio)
 
 
 def _next_cardinal(tokens: list[str], i: int) -> tuple[str | None, int]:
@@ -194,6 +195,7 @@ def _parse_y_limpiar(text: str) -> tuple[str, int]:
 
     # Extraer solo complementos conocidos; ignorar el resto
     complementos: list[str] = []
+    nombre_edificio: str | None = None
     while i < len(tokens):
         tok = tokens[i]
         if tok in _COMP_ABBREV:
@@ -204,6 +206,20 @@ def _parse_y_limpiar(text: str) -> tuple[str, int]:
                 i += 1
             else:
                 complementos.append(abbrev)
+                # "EDIFICIO" sin número después suele venir seguido del nombre
+                # propio del edificio ("EDIFICIO CALLEJA PARK"), no de ruido a
+                # descartar. Se captura y se agrega al final de la dirección.
+                # Letras sueltas (torres/bloques en numeración romana, p.ej.
+                # "PARK I") se descartan por ambiguas; se corta al llegar a
+                # otro complemento conocido (p.ej. "APT").
+                if abbrev == 'ED':
+                    nombre_tokens: list[str] = []
+                    while i < len(tokens) and _NAME_TOK_RE.match(tokens[i]) and tokens[i] not in _COMP_ABBREV:
+                        if len(tokens[i]) > 1:
+                            nombre_tokens.append(tokens[i])
+                        i += 1
+                    if nombre_tokens:
+                        nombre_edificio = ' '.join(nombre_tokens)
         else:
             i += 1  # descartar: nombre de conjunto, instrucción, etc.
 
@@ -212,6 +228,8 @@ def _parse_y_limpiar(text: str) -> tuple[str, int]:
     # sort() es estable: preserva el orden relativo entre los demás complementos.
     complementos.sort(key=lambda c: 0 if c.split()[0] == 'APTO' else 1)
     parts.extend(complementos)
+    if nombre_edificio:
+        parts.append(nombre_edificio)
 
     return ' '.join(parts), coord_count
 
@@ -248,8 +266,11 @@ def ajustar_dir_leonisa(raw: str) -> str:
     text = text.replace("#", " ")
 
     # 2b. Indicadores de "número" usados como separador → eliminar
-    #     NO., NRO, NUM, NUMERO son equivalentes a #
-    text = re.sub(r'\b(?:NUMERO|NRO|NUM|NR|NO)\b', ' ', text)
+    #     NO., NRO, NUM, NUMERO son equivalentes a #. "N" suelto (con espacios
+    #     a ambos lados, no pegado a un dígito) también se usa así en algunos
+    #     archivos — se elimina aquí, ANTES del paso 8 (unir letra suelta), para
+    #     que no se confunda con una letra de coordenada real como "78 K"→"78K".
+    text = re.sub(r'\b(?:NUMERO|NRO|NUM|NR|NO|N)\b', ' ', text)
 
     # 3. Guión entre cualquier par alfanumérico → espacio
     #    "50-53"→"50 53",  "87D-79"→"87D 79",  "81-J"→"81 J",  "86C-69-A"→"86C 69 A"
@@ -276,11 +297,14 @@ def ajustar_dir_leonisa(raw: str) -> str:
     )
 
     # 7. Mover dígito antepuesto a keyword de complemento: "3PISO" → "PISO 3", "4TORRE" → "TORRE 4"
-    _KW_PATTERN = r'APARTAMENTO|APTO|TORRE|TRR|PISO|BLOQUE|BLQ|INTERIOR|INT|LOCAL|CASA|MZA|EDIFICIO|EDIF'
+    _KW_PATTERN = r'APARTAMENTO|APTO|APT|TORRE|TRR|PISO|BLOQUE|BLQ|INTERIOR|INT|LOCAL|CASA|MZA|EDIFICIO|EDIF'
     text = re.sub(rf'(\d+)({_KW_PATTERN})\b', r'\2 \1', text)
 
     # 8. Unir número + letra suelta: "78 K" → "78K", "87 D" → "87D"
-    text = re.sub(r'(\d+)\s+([A-Z])(?!\w)', r'\1\2', text)
+    #    Excluye "P": es la abreviatura de "PISO" (ver _COMP_ABBREV) y debe
+    #    quedar como token de complemento separado, no fundirse en la
+    #    coordenada anterior ("60 P 7" → "60 P 7", no "60P 7").
+    text = re.sub(r'(\d+)\s+([A-OQ-Z])(?!\w)', r'\1\2', text)
 
     # 8b. Unir número + token "letras+BIS": "81 GBIS" → "81GBIS"
     #     Cubre el caso donde el BIS viene pegado a la letra del número ("GBis" como un token)
@@ -290,8 +314,9 @@ def ajustar_dir_leonisa(raw: str) -> str:
     text = re.sub(r'(\d+[A-Z]+)\s+BIS\b', r'\1BIS', text)
 
     # 10. Unir alfanumérico + letra suelta: "88IBIS A"→"88IBISA", "57ABIS B"→"57ABISB"
-    #     Corre después de BIS para capturar la letra que le sigue al BIS
-    text = re.sub(r'(\d+[A-Z]+)\s+([A-Z])(?!\w)', r'\1\2', text)
+    #     Corre después de BIS para capturar la letra que le sigue al BIS.
+    #     Excluye "P" por la misma razón que el paso 8.
+    text = re.sub(r'(\d+[A-Z]+)\s+([A-OQ-Z])(?!\w)', r'\1\2', text)
 
     # 11. Colapsar espacios
     text = re.sub(r'\s+', ' ', text).strip()

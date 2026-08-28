@@ -107,6 +107,43 @@ def test_ajustar_dir_leonisa_to_ya_abreviado_se_reconoce():
     assert ajustar_dir_leonisa("carrera 15 40 20 apto 501 to 2") == "KRA 15 40 20 APTO 501 TO 2"
 
 
+@pytest.mark.parametrize("raw,esperado", [
+    ("Calle160#14b-42 torre 1 apt 304", "CLL 160 14B 42 APTO 304 TO 1"),
+    ("carrera 15 40 20 apt 501", "KRA 15 40 20 APTO 501"),
+])
+def test_ajustar_dir_leonisa_apt_abreviado_se_reconoce(raw, esperado):
+    # "APT" (Apartamento abreviado a 3 letras) debe reconocerse igual que
+    # "APTO"/"AP"/"APARTAMENTO", no descartarse como ruido.
+    assert ajustar_dir_leonisa(raw) == esperado
+
+
+def test_ajustar_dir_leonisa_edificio_con_nombre_propio():
+    # Cuando "EDIFICIO" no va seguido de un número, lo que sigue suele ser el
+    # nombre propio del edificio: se conserva y se agrega al final (en vez de
+    # descartarse como ruido). Letras sueltas (numeración romana de torre/
+    # bloque, p.ej. "PARK I") se descartan por ambiguas.
+    assert ajustar_dir_leonisa(
+        "CARRERA 20   # 127 B  22 EDIFICIO CALLEJA PARK I APT 302"
+    ) == "KRA 20 127B 22 APTO 302 ED CALLEJA PARK"
+    assert ajustar_dir_leonisa(
+        "Av Carrera 9 # 146 - 45 Apto 702 Edificio Milano Park"
+    ) == "KRA 9 146 45 APTO 702 ED MILANO PARK"
+
+
+def test_ajustar_dir_leonisa_p_abreviado_es_piso():
+    # "P" suelto (sin punto ni más letras) se usa como abreviatura de "PISO"
+    # en algunos archivos.
+    assert ajustar_dir_leonisa("CR 11 N 86 60 P 7") == "KRA 11 86 60 PS 7"
+
+
+def test_ajustar_dir_leonisa_n_suelto_se_descarta():
+    # "N" suelto (separado por espacios, no pegado a un número) se usa como
+    # indicador de número ("No") en algunos archivos y no debe confundirse
+    # con una letra de coordenada real (compárese con "carrera 78 K" en
+    # test_ajustar_dir_leonisa_ejemplos, donde la letra SÍ se conserva).
+    assert ajustar_dir_leonisa("CR 11  N 86 60") == "KRA 11 86 60"
+
+
 # ── Tests de integración de los endpoints ──────────────────────────────────────
 
 def _archivo_muestra() -> bytes:
