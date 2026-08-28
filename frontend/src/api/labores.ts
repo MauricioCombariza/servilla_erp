@@ -65,6 +65,12 @@ export const laboresApi = {
   lookupPersonalCodigo: (codigo: string) =>
     api.get<{ id: number; nombre_completo: string; identificacion?: string; codigo: string }>(`/personal/by-code/${codigo}`),
 
-  getTarifa: (tipo: string) =>
-    api.get<{ tipo_servicio: string; tarifa: number }>(`/labores/tarifas/${tipo}`),
+  getTarifa: (tipo: string, fecha?: string) =>
+    api.get<{
+      tipo_servicio: string;
+      tarifa: number;
+      tarifa_base?: number;
+      es_festivo?: boolean;
+      recargo_aplicado?: number;
+    }>(`/labores/tarifas/${tipo}`, { params: fecha ? { fecha } : undefined }),
 };

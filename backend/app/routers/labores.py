@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, text
@@ -7,6 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require_role
 from app.database import get_db
 from app.models.labores import RegistroHoras, RegistroLabores
+from app.services.calendario_service import (
+    RECARGO_DOMINICAL_FESTIVO, es_domingo_o_festivo, tarifa_con_recargo,
+)
 from app.schemas.labores import (
     RegistroHorasBulkCreate,
     RegistroHorasCreate, RegistroHorasRead, RegistroHorasUpdate,
@@ -82,16 +85,36 @@ async def _upsert_subsidio_transporte(db: AsyncSession, personal_id: int, fecha)
 # ── Tarifas ───────────────────────────────────────────────────────────────────
 
 @router.get("/tarifas/{tipo_servicio}")
-async def get_tarifa(tipo_servicio: str, db: AsyncSession = Depends(get_db), _=_auth):
+async def get_tarifa(
+    tipo_servicio: str,
+    fecha: date | None = None,
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
     result = await db.execute(text("""
         SELECT tarifa FROM tarifas_servicios
         WHERE tipo_servicio = :tipo AND activo = TRUE
         ORDER BY vigencia_desde DESC LIMIT 1
     """), {"tipo": tipo_servicio})
-    tarifa = result.scalar_one_or_none()
-    if tarifa is None:
+    tarifa_base = result.scalar_one_or_none()
+    if tarifa_base is None:
         raise HTTPException(status_code=404, detail="Tarifa no encontrada")
-    return {"tipo_servicio": tipo_servicio, "tarifa": float(tarifa)}
+    tarifa_base = float(tarifa_base)
+
+    es_festivo = (
+        tipo_servicio == "alistamiento_hora"
+        and fecha is not None
+        and es_domingo_o_festivo(fecha)
+    )
+    tarifa_final = tarifa_con_recargo(tarifa_base) if es_festivo else tarifa_base
+
+    return {
+        "tipo_servicio": tipo_servicio,
+        "tarifa": tarifa_final,
+        "tarifa_base": tarifa_base,
+        "es_festivo": es_festivo,
+        "recargo_aplicado": RECARGO_DOMINICAL_FESTIVO if es_festivo else 0.0,
+    }
 
 
 # ── Registro de horas ─────────────────────────────────────────────────────────

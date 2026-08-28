@@ -22,4 +22,10 @@ export const escaneosCarrytApi = {
 
   descargarExcelRutasUnicas: () =>
     api.get("/escaneos-carryt/excel-rutas-unicas", { responseType: "blob" }),
+
+  descargarExcelRango: (fecha_desde: string, fecha_hasta: string) =>
+    api.get("/escaneos-carryt/excel-rango", {
+      params: { fecha_desde, fecha_hasta },
+      responseType: "blob",
+    }),
 };

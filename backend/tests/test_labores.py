@@ -293,6 +293,68 @@ async def test_resumen_labores_reporta_monto_sin_aprobar(client, headers):
             await db.commit()
 
 
+# ── Tarifas (recargo dominical/festivo) ───────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_tarifa_alistamiento_domingo_aplica_recargo(client, headers):
+    r = await client.get(
+        "/api/labores/tarifas/alistamiento_hora",
+        params={"fecha": "2026-08-30"},  # domingo
+        headers=headers,
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["es_festivo"] is True
+    assert data["recargo_aplicado"] == pytest.approx(0.90)
+    assert data["tarifa"] == pytest.approx(data["tarifa_base"] * 1.90, abs=0.01)
+
+
+@pytest.mark.asyncio
+async def test_tarifa_alistamiento_dia_habil_sin_recargo(client, headers):
+    r = await client.get(
+        "/api/labores/tarifas/alistamiento_hora",
+        params={"fecha": "2026-08-31"},  # lunes
+        headers=headers,
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["es_festivo"] is False
+    assert data["tarifa"] == pytest.approx(data["tarifa_base"])
+
+
+@pytest.mark.asyncio
+async def test_tarifa_alistamiento_sin_fecha_compatibilidad(client, headers):
+    r = await client.get("/api/labores/tarifas/alistamiento_hora", headers=headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["es_festivo"] is False
+    assert data["tarifa"] == data["tarifa_base"]
+
+
+@pytest.mark.asyncio
+async def test_tarifa_festivo_nacional(client, headers):
+    r = await client.get(
+        "/api/labores/tarifas/alistamiento_hora",
+        params={"fecha": "2026-01-01"},  # Año Nuevo
+        headers=headers,
+    )
+    assert r.status_code == 200
+    assert r.json()["es_festivo"] is True
+
+
+@pytest.mark.asyncio
+async def test_tarifa_pegado_guia_no_afectada_por_domingo(client, headers):
+    r = await client.get(
+        "/api/labores/tarifas/pegado_guia",
+        params={"fecha": "2026-08-30"},  # domingo
+        headers=headers,
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["es_festivo"] is False
+    assert data["tarifa"] == data["tarifa_base"]
+
+
 # ── Sin autenticación ─────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio

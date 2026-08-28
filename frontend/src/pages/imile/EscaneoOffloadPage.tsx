@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
-import { Download } from "lucide-react";
-import { escaneosCarrytApi, type EscaneoCarryt } from "@/api/escaneosCarryt";
-import { useAuthStore } from "@/store/authStore";
+import { AlertTriangle } from "lucide-react";
+import {
+  escaneosImileOffloadApi,
+  type EscaneoImileOffload,
+} from "@/api/escaneosImileOffload";
 import { usePersonalLookup } from "@/hooks/usePersonalLookup";
 
-const SCANNER_ELEMENT_ID = "carryt-qr-reader";
+const SCANNER_ELEMENT_ID = "imile-offload-qr-reader";
 const SCAN_FORMATS = [
   Html5QrcodeSupportedFormats.QR_CODE,
   Html5QrcodeSupportedFormats.CODE_128,
@@ -19,55 +21,59 @@ const SCAN_FORMATS = [
   Html5QrcodeSupportedFormats.UPC_E,
   Html5QrcodeSupportedFormats.CODABAR,
 ];
+const STATUS_POLL_MS = 15_000;
 
 type Mensajero = { codigo: string; nombre_completo: string };
 type Feedback = { type: "success" | "error"; message: string } | null;
 
-const PUEDE_VER_REPORTES = ["administrador", "logistica", "mensajero"];
-
-function inicioDeMes(): string {
-  const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
-}
-
-export function EscaneoCarrytPage() {
+export function EscaneoOffloadPage() {
   const lookup = usePersonalLookup();
   const [mensajero, setMensajero] = useState<Mensajero | null>(null);
   const [manualSerial, setManualSerial] = useState("");
   const [feedback, setFeedback] = useState<Feedback>(null);
+  const [sesionCaida, setSesionCaida] = useState(false);
   const lastScanRef = useRef<{ serial: string; at: number }>({ serial: "", at: 0 });
   const qc = useQueryClient();
-  const role = useAuthStore((s) => s.role);
-  const [descargandoReporte, setDescargandoReporte] = useState<"dia" | "unicas" | "rango" | null>(
-    null
-  );
-  const [errorReporte, setErrorReporte] = useState("");
-  const [rangoDesde, setRangoDesde] = useState(inicioDeMes());
-  const [rangoHasta, setRangoHasta] = useState(() => new Date().toISOString().slice(0, 10));
+
+  const statusQuery = useQuery({
+    queryKey: ["imile-offload-status"],
+    queryFn: () => escaneosImileOffloadApi.status().then((r) => r.data),
+    enabled: !!mensajero,
+    refetchInterval: STATUS_POLL_MS,
+  });
+
+  useEffect(() => {
+    if (statusQuery.data?.conectado) setSesionCaida(false);
+  }, [statusQuery.data?.conectado]);
 
   const escaneosQuery = useQuery({
-    queryKey: ["escaneos-carryt", mensajero?.codigo],
-    queryFn: () => escaneosCarrytApi.listarDelDia(mensajero!.codigo).then((r) => r.data),
+    queryKey: ["escaneos-imile-offload", mensajero?.codigo],
+    queryFn: () => escaneosImileOffloadApi.listarDelDia(mensajero!.codigo).then((r) => r.data),
     enabled: !!mensajero,
   });
 
   const registrarMutation = useMutation({
     mutationFn: (serial: string) =>
-      escaneosCarrytApi.registrar({
+      escaneosImileOffloadApi.registrar({
         serial,
         cod_men: mensajero!.codigo,
         nombre_mensajero: mensajero!.nombre_completo,
       }),
     onSuccess: (res) => {
-      setFeedback({ type: "success", message: `Serial ${res.data.serial} registrado` });
-      qc.setQueryData<EscaneoCarryt[]>(["escaneos-carryt", mensajero?.codigo], (old) => [
-        res.data,
-        ...(old ?? []),
-      ]);
+      setFeedback({ type: "success", message: `Serial ${res.data.serial} enviado a iMile` });
+      qc.setQueryData<EscaneoImileOffload[]>(
+        ["escaneos-imile-offload", mensajero?.codigo],
+        (old) => [res.data, ...(old ?? [])]
+      );
       if (navigator.vibrate) navigator.vibrate(80);
     },
     onError: (err: any, serial: string) => {
-      const detail = err?.response?.data?.detail ?? "No se pudo registrar el serial";
+      if (err?.response?.status === 503) {
+        setSesionCaida(true);
+        if (navigator.vibrate) navigator.vibrate([120, 80, 120, 80, 120]);
+        return;
+      }
+      const detail = err?.response?.data?.detail ?? "No se pudo enviar el serial a iMile";
       setFeedback({ type: "error", message: `${serial}: ${detail}` });
       if (navigator.vibrate) navigator.vibrate([50, 50, 50]);
     },
@@ -75,7 +81,7 @@ export function EscaneoCarrytPage() {
 
   function handleSerial(rawSerial: string) {
     const serial = rawSerial.trim();
-    if (!serial || !mensajero) return;
+    if (!serial || !mensajero || sesionCaida) return;
 
     const now = Date.now();
     if (lastScanRef.current.serial === serial && now - lastScanRef.current.at < 2000) return;
@@ -122,6 +128,7 @@ export function EscaneoCarrytPage() {
     setMensajero(null);
     lookup.reset();
     setFeedback(null);
+    setSesionCaida(false);
   }
 
   function submitManual(e: React.FormEvent) {
@@ -130,44 +137,14 @@ export function EscaneoCarrytPage() {
     setManualSerial("");
   }
 
-  async function handleDescargarReporte(tipo: "dia" | "unicas" | "rango") {
-    setDescargandoReporte(tipo);
-    setErrorReporte("");
-    try {
-      const hoy = new Date().toISOString().slice(0, 10);
-      let r;
-      let nombreArchivo;
-      if (tipo === "dia") {
-        r = await escaneosCarrytApi.descargarExcelDia();
-        nombreArchivo = `carryt_${hoy}.xlsx`;
-      } else if (tipo === "unicas") {
-        r = await escaneosCarrytApi.descargarExcelRutasUnicas();
-        nombreArchivo = `rutas_unicas_${hoy}.xlsx`;
-      } else {
-        r = await escaneosCarrytApi.descargarExcelRango(rangoDesde, rangoHasta);
-        nombreArchivo = `carryt_${rangoDesde}_a_${rangoHasta}.xlsx`;
-      }
-      const url = URL.createObjectURL(r.data as Blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = nombreArchivo;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setErrorReporte(msg ?? "Error al generar el archivo");
-    } finally {
-      setDescargandoReporte(null);
-    }
-  }
-
   const escaneos = escaneosQuery.data ?? [];
+  const desconectado = sesionCaida || statusQuery.data?.conectado === false;
 
   if (!mensajero) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 w-full max-w-sm">
-          <h1 className="text-2xl font-bold text-gray-900 mb-1">Escaneo Carryt</h1>
+          <h1 className="text-2xl font-bold text-gray-900 mb-1">Escaneo Offloading iMile</h1>
           <p className="text-sm text-gray-500 mb-6">Ingresa el código del mensajero</p>
 
           <input
@@ -196,59 +173,6 @@ export function EscaneoCarrytPage() {
           >
             Confirmar
           </button>
-
-          {role && PUEDE_VER_REPORTES.includes(role) && (
-            <div className="mt-6 pt-5 border-t border-gray-100">
-              <p className="text-xs font-medium text-gray-500 mb-2">Reportes de hoy</p>
-              {errorReporte && <p className="text-xs text-red-600 mb-2">{errorReporte}</p>}
-              <div className="flex flex-col gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleDescargarReporte("dia")}
-                  disabled={descargandoReporte !== null}
-                  className="inline-flex items-center justify-center gap-1.5 bg-gray-800 hover:bg-gray-900 text-white font-medium py-2.5 rounded-lg text-sm transition-colors disabled:opacity-40"
-                >
-                  <Download size={14} />
-                  {descargandoReporte === "dia" ? "Generando..." : "Excel del día"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDescargarReporte("unicas")}
-                  disabled={descargandoReporte !== null}
-                  className="inline-flex items-center justify-center gap-1.5 bg-gray-800 hover:bg-gray-900 text-white font-medium py-2.5 rounded-lg text-sm transition-colors disabled:opacity-40"
-                >
-                  <Download size={14} />
-                  {descargandoReporte === "unicas" ? "Generando..." : "Rutas únicas"}
-                </button>
-              </div>
-
-              <p className="text-xs font-medium text-gray-500 mt-4 mb-2">Envíos por rango de fechas</p>
-              <div className="flex items-center gap-2 mb-2">
-                <input
-                  type="date"
-                  value={rangoDesde}
-                  onChange={(e) => setRangoDesde(e.target.value)}
-                  className="flex-1 border border-gray-300 rounded-lg px-2 py-2 text-xs"
-                />
-                <span className="text-gray-400">—</span>
-                <input
-                  type="date"
-                  value={rangoHasta}
-                  onChange={(e) => setRangoHasta(e.target.value)}
-                  className="flex-1 border border-gray-300 rounded-lg px-2 py-2 text-xs"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => handleDescargarReporte("rango")}
-                disabled={descargandoReporte !== null || !rangoDesde || !rangoHasta}
-                className="w-full inline-flex items-center justify-center gap-1.5 bg-gray-800 hover:bg-gray-900 text-white font-medium py-2.5 rounded-lg text-sm transition-colors disabled:opacity-40"
-              >
-                <Download size={14} />
-                {descargandoReporte === "rango" ? "Generando..." : "Descargar rango"}
-              </button>
-            </div>
-          )}
         </div>
       </div>
     );
@@ -259,7 +183,7 @@ export function EscaneoCarrytPage() {
       <header className="bg-white border-b border-gray-200 p-4 flex items-center justify-between gap-3">
         <div>
           <p className="font-semibold text-gray-900">{mensajero.nombre_completo}</p>
-          <p className="text-xs text-gray-500">Código {mensajero.codigo} · Carryt</p>
+          <p className="text-xs text-gray-500">Código {mensajero.codigo} · Offloading iMile</p>
         </div>
         <button onClick={cambiarMensajero} className="text-sm text-primary hover:underline flex-shrink-0">
           Cambiar mensajero
@@ -267,9 +191,30 @@ export function EscaneoCarrytPage() {
       </header>
 
       <div className="p-4 flex flex-col gap-4 flex-1 overflow-hidden">
+        {desconectado && (
+          <div className="rounded-lg px-4 py-3 bg-red-100 text-red-800 flex items-start gap-2">
+            <AlertTriangle size={18} className="flex-shrink-0 mt-0.5" />
+            <div className="text-sm">
+              <p className="font-semibold">Sesión de iMile expirada</p>
+              <p>
+                Un administrador debe reingresar manualmente en iMile antes de seguir
+                escaneando. El escaneo está pausado.
+              </p>
+              <button
+                type="button"
+                onClick={() => statusQuery.refetch()}
+                className="mt-2 text-xs font-medium underline"
+              >
+                Reintentar ahora
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="text-center">
           <span className="inline-block bg-primary/10 text-primary font-semibold px-4 py-1.5 rounded-full text-sm">
-            {escaneos.length} paquete{escaneos.length === 1 ? "" : "s"} escaneado{escaneos.length === 1 ? "" : "s"} hoy
+            {escaneos.length} paquete{escaneos.length === 1 ? "" : "s"} enviado
+            {escaneos.length === 1 ? "" : "s"} a iMile hoy
           </span>
         </div>
 
@@ -290,11 +235,12 @@ export function EscaneoCarrytPage() {
             value={manualSerial}
             onChange={(e) => setManualSerial(e.target.value)}
             placeholder="Ingresar serial manualmente"
-            className="flex-1 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-primary outline-none"
+            disabled={desconectado}
+            className="flex-1 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-primary outline-none disabled:opacity-50"
           />
           <button
             type="submit"
-            disabled={!manualSerial.trim()}
+            disabled={!manualSerial.trim() || desconectado}
             className="bg-gray-800 hover:bg-gray-900 text-white font-medium px-4 rounded-lg text-sm disabled:opacity-40"
           >
             Agregar
@@ -303,19 +249,24 @@ export function EscaneoCarrytPage() {
 
         <div className="flex-1 overflow-y-auto bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
           {escaneos.length === 0 && (
-            <p className="text-center text-sm text-gray-400 py-6">Aún no hay paquetes escaneados</p>
+            <p className="text-center text-sm text-gray-400 py-6">Aún no hay paquetes enviados</p>
           )}
           {escaneos.map((e) => (
             <div key={e.id} className="px-4 py-2.5 flex items-center justify-between text-sm">
               <span className="font-mono text-gray-800">{e.serial}</span>
-              <span className="text-gray-400 text-xs">
-                {e.fecha_creacion
-                  ? new Date(e.fecha_creacion).toLocaleTimeString("es-CO", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })
-                  : ""}
-              </span>
+              <div className="flex items-center gap-2">
+                {e.resultado !== "ok" && (
+                  <span className="text-xs text-red-600 font-medium">{e.resultado}</span>
+                )}
+                <span className="text-gray-400 text-xs">
+                  {e.fecha_creacion
+                    ? new Date(e.fecha_creacion).toLocaleTimeString("es-CO", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })
+                    : ""}
+                </span>
+              </div>
             </div>
           ))}
         </div>

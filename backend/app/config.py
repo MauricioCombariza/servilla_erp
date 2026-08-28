@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     allowed_origins: str = "http://localhost:5173"
     environment: str = "development"
 
+    imile_storage_state_path: str = "backend/.secrets/imile_session.json"
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @property

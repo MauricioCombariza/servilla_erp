@@ -31,10 +31,10 @@ function decimalToHhmm(v: number): string {
 
 // ── Hook: carga tarifas al inicio ─────────────────────────────────────────────
 
-function useTarifas() {
+function useTarifas(fechaAlistamiento?: string) {
   const q1 = useQuery({
-    queryKey: ["tarifa", "alistamiento_hora"],
-    queryFn: () => laboresApi.getTarifa("alistamiento_hora").then(r => r.data.tarifa),
+    queryKey: ["tarifa", "alistamiento_hora", fechaAlistamiento ?? null],
+    queryFn: () => laboresApi.getTarifa("alistamiento_hora", fechaAlistamiento).then(r => r.data),
     staleTime: 60_000,
   });
   const q2 = useQuery({
@@ -48,7 +48,9 @@ function useTarifas() {
     staleTime: 60_000,
   });
   return {
-    alistamiento: q1.data ?? 7960.9,
+    alistamiento: q1.data?.tarifa ?? 7960.9,
+    alistamientoEsFestivo: q1.data?.es_festivo ?? false,
+    alistamientoRecargo: q1.data?.recargo_aplicado ?? 0,
     pegado: q2.data ?? 11.54,
     transporte: q3.data ?? 8333,
   };
@@ -886,6 +888,25 @@ function EditHoraModal({ hora, onClose, onSaved }: { hora: RegistroHoras; onClos
   const [obs, setObs] = useState(hora.observaciones ?? "");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const esAlistamiento = tipoTrabajo === "alistamiento_sobres" || tipoTrabajo === "alistamiento_paquetes";
+  const lastAutoTarifaRef = useRef(hora.tarifa_hora);
+
+  const { data: tarifaInfo } = useQuery({
+    queryKey: ["tarifa", "alistamiento_hora", fecha],
+    queryFn: () => laboresApi.getTarifa("alistamiento_hora", fecha).then(r => r.data),
+    enabled: esAlistamiento,
+    staleTime: 60_000,
+  });
+
+  useEffect(() => {
+    if (!tarifaInfo) return;
+    const prevDefault = lastAutoTarifaRef.current;
+    if (parseFloat(tarifa) === prevDefault) {
+      setTarifa(String(tarifaInfo.tarifa));
+    }
+    lastAutoTarifaRef.current = tarifaInfo.tarifa;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tarifaInfo]);
 
   const disabled = hora.aprobado || hora.liquidado;
 
@@ -940,6 +961,11 @@ function EditHoraModal({ hora, onClose, onSaved }: { hora: RegistroHoras; onClos
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm disabled:bg-gray-50" />
             </div>
           </div>
+          {esAlistamiento && tarifaInfo?.es_festivo && (
+            <p className="text-xs text-amber-600">
+              Domingo/festivo: recargo {Math.round((tarifaInfo.recargo_aplicado ?? 0) * 100)}% (tarifa sugerida ${fmt.format(tarifaInfo.tarifa)}/h)
+            </p>
+          )}
           <div>
             <label className="block text-xs text-gray-500 mb-1">Tipo de trabajo</label>
             <input value={tipoTrabajo} onChange={e => setTipoTrabajo(e.target.value)} disabled={disabled}
@@ -1062,15 +1088,16 @@ interface OrdenOption { id: number; label: string }
 interface FilaHora { uid: number; orden_id: number | null; horasInput: string; tarifa: number }
 
 function RegistroHoraForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const tarifas = useTarifas();
   const personal = usePersonalLookup();
   const [fecha, setFecha] = useState(HOY_STR);
+  const tarifas = useTarifas(fecha);
   const [tipoTrabajo, setTipoTrabajo] = useState("alistamiento_sobres");
   const [numOrdenes, setNumOrdenes] = useState(1);
   const [filas, setFilas] = useState<FilaHora[]>([{ uid: 0, orden_id: null, horasInput: "0:00", tarifa: tarifas.alistamiento }]);
   const [saving, setSaving] = useState(false);
   const [subsidioInfo, setSubsidioInfo] = useState<string | null>(null);
   const uidRef = useRef(1);
+  const lastAutoTarifaRef = useRef(tarifas.alistamiento);
 
   const { data: ordenes = [] } = useQuery({
     queryKey: ["ordenes-activas"],
@@ -1088,13 +1115,24 @@ function RegistroHoraForm({ onClose, onSaved }: { onClose: () => void; onSaved: 
           uid: uidRef.current++,
           orden_id: ordenes[0]?.id ?? null,
           horasInput: "0:00",
-          tarifa: tarifas.alistamiento,
+          tarifa: lastAutoTarifaRef.current,
         }));
         return [...prev, ...extra];
       }
       return prev.slice(0, n);
     });
   }, [numOrdenes]);
+
+  // Al cambiar la fecha, la tarifa de alistamiento puede pasar a domingo/festivo.
+  // Solo actualizamos filas que siguen en el valor por defecto anterior, para no
+  // pisar una tarifa que el usuario ya haya editado manualmente.
+  useEffect(() => {
+    const prevDefault = lastAutoTarifaRef.current;
+    const nextDefault = tarifas.alistamiento;
+    if (nextDefault === prevDefault) return;
+    setFilas(prev => prev.map(f => f.tarifa === prevDefault ? { ...f, tarifa: nextDefault } : f));
+    lastAutoTarifaRef.current = nextDefault;
+  }, [tarifas.alistamiento]);
 
   useEffect(() => {
     if (ordenes.length > 0) {
@@ -1231,6 +1269,11 @@ function RegistroHoraForm({ onClose, onSaved }: { onClose: () => void; onSaved: 
                 })}
                 <p className="text-xs text-gray-400 mt-1">
                   Tarifa: ${fmt.format(tarifas.alistamiento)}/h (desde tarifas_servicios)
+                  {tarifas.alistamientoEsFestivo && (
+                    <span className="text-amber-600 font-medium">
+                      {" "}· Domingo/festivo: recargo {Math.round(tarifas.alistamientoRecargo * 100)}% aplicado
+                    </span>
+                  )}
                 </p>
               </div>
 

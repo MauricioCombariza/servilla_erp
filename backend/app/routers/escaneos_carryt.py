@@ -11,9 +11,11 @@ from app.models.escaneos_carryt import EscaneoCarryt
 from app.schemas.escaneos_carryt import EscaneoCarrytCreate, EscaneoCarrytRead
 from app.services.escaneos_carryt_service import (
     construir_excel_dia,
+    construir_excel_rango,
     construir_excel_rutas_unicas,
     filtrar_rutas_unicas,
     get_escaneos_del_dia,
+    get_escaneos_rango,
 )
 from app.services.excel_utils import XLSX_MEDIA_TYPE
 
@@ -97,4 +99,30 @@ async def descargar_excel_rutas_unicas(
         content=contenido,
         media_type=XLSX_MEDIA_TYPE,
         headers={"Content-Disposition": f'attachment; filename="rutas_unicas_{dia.isoformat()}.xlsx"'},
+    )
+
+
+@router.get("/excel-rango")
+async def descargar_excel_rango(
+    fecha_desde: date,
+    fecha_hasta: date,
+    db: AsyncSession = Depends(get_db),
+    _=_auth_reporte,
+):
+    if fecha_desde > fecha_hasta:
+        raise HTTPException(
+            status_code=400, detail="La fecha inicial debe ser anterior o igual a la final."
+        )
+    escaneos = await get_escaneos_rango(db, fecha_desde, fecha_hasta)
+    if not escaneos:
+        raise HTTPException(status_code=404, detail="No hay paquetes escaneados en ese rango de fechas.")
+    contenido = construir_excel_rango(fecha_desde, fecha_hasta, escaneos)
+    return Response(
+        content=contenido,
+        media_type=XLSX_MEDIA_TYPE,
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="carryt_{fecha_desde.isoformat()}_a_{fecha_hasta.isoformat()}.xlsx"'
+            )
+        },
     )

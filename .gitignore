@@ -29,3 +29,6 @@ Thumbs.db
 
 # Alembic
 backend/app/migrations/versions/*.pyc
+
+# Sesión persistida de automatización iMile (equivale a credenciales de login)
+backend/.secrets/

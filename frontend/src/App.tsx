@@ -27,6 +27,7 @@ import { BuscarPaquetePage } from "@/pages/buscar/BuscarPaquetePage";
 import { AjusteDireccionesPage } from "@/pages/direcciones/AjusteDireccionesPage";
 import { PendientesEntregaPage } from "@/pages/pendientes-entrega/PendientesEntregaPage";
 import { EscaneoCarrytPage } from "@/pages/carryt/EscaneoCarrytPage";
+import { EscaneoOffloadPage } from "@/pages/imile/EscaneoOffloadPage";
 import { Placeholder } from "@/pages/Placeholder";
 
 const qc = new QueryClient({
@@ -49,6 +50,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <EscaneoCarrytPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/imile-offload-scan"
+            element={
+              <ProtectedRoute>
+                <EscaneoOffloadPage />
               </ProtectedRoute>
             }
           />
