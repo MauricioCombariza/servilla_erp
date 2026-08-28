@@ -8,6 +8,7 @@ class AjusteDireccionesResult(BaseModel):
     total_columnas: int
     col_direccion: int
     col_nombre: int | None = None
+    direcciones_originales: list[str]
     filas: list[list[str]]
 
 

@@ -7,6 +7,7 @@ export interface AjusteDireccionesResult {
   total_columnas: number;
   col_direccion: number;
   col_nombre: number | null;
+  direcciones_originales: string[];
   filas: string[][];
 }
 

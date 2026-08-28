@@ -356,14 +356,16 @@ def procesar_archivo_leonisa(contenido: bytes) -> AjusteDireccionesResult:
             f"Se necesitan al menos {COL_DIRECCION + 1}."
         )
 
-    df[COL_DIRECCION] = df[COL_DIRECCION].apply(ajustar_dir_leonisa)
     df = df.fillna("")
+    direcciones_originales = df[COL_DIRECCION].astype(str).tolist()
+    df[COL_DIRECCION] = df[COL_DIRECCION].apply(ajustar_dir_leonisa)
 
     return AjusteDireccionesResult(
         total_filas=len(df),
         total_columnas=df.shape[1],
         col_direccion=COL_DIRECCION,
         col_nombre=COL_NOMBRE if df.shape[1] > COL_NOMBRE else None,
+        direcciones_originales=direcciones_originales,
         filas=df.astype(str).values.tolist(),
     )
 
@@ -385,6 +387,7 @@ def procesar_archivo_vehigrupo(contenido: bytes) -> AjusteDireccionesResult:
     lineas = contenido.decode(ENCODING).splitlines()
 
     filas: list[list[str]] = []
+    direcciones_originales: list[str] = []
     for n, linea in enumerate(lineas, start=1):
         if len(linea) < VHG_LINE_LEN:
             raise ValueError(
@@ -393,14 +396,17 @@ def procesar_archivo_vehigrupo(contenido: bytes) -> AjusteDireccionesResult:
             )
 
         campos = [linea[inicio:fin] for inicio, fin in VHG_FIELDS]
-        campos[VHG_COL_DIRECCION] = ajustar_dir_leonisa(campos[VHG_COL_DIRECCION].strip())
+        direccion_original = campos[VHG_COL_DIRECCION].strip()
+        campos[VHG_COL_DIRECCION] = ajustar_dir_leonisa(direccion_original)
         filas.append(campos)
+        direcciones_originales.append(direccion_original)
 
     return AjusteDireccionesResult(
         total_filas=len(filas),
         total_columnas=len(VHG_FIELDS),
         col_direccion=VHG_COL_DIRECCION,
         col_nombre=VHG_COL_NOMBRE,
+        direcciones_originales=direcciones_originales,
         filas=filas,
     )
 

@@ -26,14 +26,14 @@ export function AjusteDireccionesPage() {
 
   const [colDireccion, setColDireccion] = useState<number | null>(null);
   const [colNombre, setColNombre] = useState<number | null>(null);
-  const [original, setOriginal] = useState<string[][]>([]);
+  const [direccionesOriginales, setDireccionesOriginales] = useState<string[]>([]);
   const [rows, setRows] = useState<string[][]>([]);
 
   function handleCambiarCliente(c: ClienteDirecciones) {
     setCliente(c);
     setFile(null);
     setRows([]);
-    setOriginal([]);
+    setDireccionesOriginales([]);
     setColDireccion(null);
     setColNombre(null);
     setError("");
@@ -52,13 +52,13 @@ export function AjusteDireccionesPage() {
       const r = await direccionesApi.ajustar(file, cliente);
       setColDireccion(r.data.col_direccion);
       setColNombre(r.data.col_nombre);
-      setOriginal(r.data.filas.map((f) => [...f]));
+      setDireccionesOriginales(r.data.direcciones_originales);
       setRows(r.data.filas.map((f) => [...f]));
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       setError(msg ?? "Error al procesar el archivo");
       setRows([]);
-      setOriginal([]);
+      setDireccionesOriginales([]);
       setColDireccion(null);
       setColNombre(null);
     } finally {
@@ -147,7 +147,7 @@ export function AjusteDireccionesPage() {
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
-              if (f) { setFile(f); setRows([]); setOriginal([]); setColDireccion(null); setColNombre(null); setError(""); }
+              if (f) { setFile(f); setRows([]); setDireccionesOriginales([]); setColDireccion(null); setColNombre(null); setError(""); }
             }}
           />
           {file ? (
@@ -219,10 +219,10 @@ export function AjusteDireccionesPage() {
                 {rows.map((row, i) => (
                   <tr key={i} className="border-b border-gray-100 last:border-0">
                     <td className="px-3 py-1.5 text-gray-600 whitespace-nowrap">
-                      {colNombre !== null ? original[i][colNombre]?.trim() : "—"}
+                      {colNombre !== null ? row[colNombre]?.trim() : "—"}
                     </td>
                     <td className="px-3 py-1.5 text-gray-600 whitespace-nowrap">
-                      {original[i][colDireccion]?.trim()}
+                      {direccionesOriginales[i]?.trim()}
                     </td>
                     <td className="p-1">
                       <input
