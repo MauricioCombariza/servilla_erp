@@ -310,8 +310,11 @@ def ajustar_dir_leonisa(raw: str) -> str:
     #     Cubre el caso donde el BIS viene pegado a la letra del número ("GBis" como un token)
     text = re.sub(r'(\d+)\s+([A-Z]+BIS)\b', r'\1\2', text)
 
-    # 9. Unir BIS al token anterior cuando BIS es un token separado: "87D BIS" → "87DBIS"
-    text = re.sub(r'(\d+[A-Z]+)\s+BIS\b', r'\1BIS', text)
+    # 9. Unir BIS al token anterior cuando BIS es un token separado: "87D BIS" → "87DBIS".
+    #    La letra es opcional: "14 BIS" → "14BIS" (sin letra de por medio, el
+    #    coordinador de tokens no reconocía "BIS" suelto y abortaba todo el
+    #    parseo, dejando la dirección completa sin normalizar).
+    text = re.sub(r'(\d+[A-Z]*)\s+BIS\b', r'\1BIS', text)
 
     # 10. Unir alfanumérico + letra suelta: "88IBIS A"→"88IBISA", "57ABIS B"→"57ABISB"
     #     Corre después de BIS para capturar la letra que le sigue al BIS.

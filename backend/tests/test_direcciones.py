@@ -144,6 +144,15 @@ def test_ajustar_dir_leonisa_n_suelto_se_descarta():
     assert ajustar_dir_leonisa("CR 11  N 86 60") == "KRA 11 86 60"
 
 
+def test_ajustar_dir_leonisa_bis_suelto_sin_letra():
+    # "BIS" como token separado y sin letra de coordenada de por medio
+    # ("14 BIS", no "87D BIS") no era reconocido por el colector de
+    # coordenadas y abortaba todo el parseo, dejando la dirección completa
+    # sin normalizar (sin abreviar vía/torre/apto ni reordenar complementos).
+    assert ajustar_dir_leonisa("Kra 14 Bis 153-80 Torre 16 Apto 101") == \
+        "KRA 14BIS 153 80 APTO 101 TO 16"
+
+
 # ── Tests de integración de los endpoints ──────────────────────────────────────
 
 def _archivo_muestra() -> bytes:
