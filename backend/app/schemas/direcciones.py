@@ -7,6 +7,7 @@ class AjusteDireccionesResult(BaseModel):
     total_filas: int
     total_columnas: int
     col_direccion: int
+    col_nombre: int | None = None
     filas: list[list[str]]
 
 

@@ -28,11 +28,13 @@ from app.schemas.direcciones import AjusteDireccionesResult
 
 ENCODING = "latin-1"
 COL_DIRECCION = 5  # columna 6 del archivo Leonisa (índice 0-based)
+COL_NOMBRE = 4  # columna 5 del archivo Leonisa (índice 0-based), precede a la dirección
 
 # ── Layout de ancho fijo del archivo Banco Vehigrupo ─────────────────────────
 VHG_LINE_LEN = 288
 VHG_FIELDS = [(0, 40), (40, 105), (105, 170), (170, 216), (216, 251), (251, 280), (280, 288)]
 VHG_COL_DIRECCION = 2  # índice del campo dirección dentro de VHG_FIELDS/filas
+VHG_COL_NOMBRE = 1  # índice del campo "Nombre" dentro de VHG_FIELDS/filas
 
 # ── Tabla de abreviaciones de tipo de vía ────────────────────────────────────
 # El orden importa: los patrones más largos primero para evitar reemplazos parciales
@@ -104,6 +106,8 @@ _COMP_ABBREV: dict[str, str] = {
     'CASA': 'CS', 'CS': 'CS',
     'MZA': 'MZA', 'MZ': 'MZA',
     'EDIFICIO': 'ED', 'EDIF': 'ED', 'ED': 'ED',
+    'OFICINA': 'OF', 'OFI': 'OF', 'OF': 'OF',
+    'CONSULTORIO': 'CONS', 'CONSUL': 'CONS', 'CONS': 'CONS',
 }
 
 _CARDINALS_COMPOUND = ('SUR ESTE', 'SUR OESTE', 'NORTE ESTE', 'NORTE OESTE')
@@ -297,7 +301,7 @@ def ajustar_dir_leonisa(raw: str) -> str:
     )
 
     # 7. Mover dígito antepuesto a keyword de complemento: "3PISO" → "PISO 3", "4TORRE" → "TORRE 4"
-    _KW_PATTERN = r'APARTAMENTO|APTO|APT|TORRE|TRR|PISO|BLOQUE|BLQ|INTERIOR|INT|LOCAL|CASA|MZA|EDIFICIO|EDIF'
+    _KW_PATTERN = r'APARTAMENTO|APTO|APT|TORRE|TRR|PISO|BLOQUE|BLQ|INTERIOR|INT|LOCAL|CASA|MZA|EDIFICIO|EDIF|OFICINA|OFI|CONSULTORIO|CONSUL|CONS'
     text = re.sub(rf'(\d+)({_KW_PATTERN})\b', r'\2 \1', text)
 
     # 8. Unir número + letra suelta: "78 K" → "78K", "87 D" → "87D"
@@ -359,6 +363,7 @@ def procesar_archivo_leonisa(contenido: bytes) -> AjusteDireccionesResult:
         total_filas=len(df),
         total_columnas=df.shape[1],
         col_direccion=COL_DIRECCION,
+        col_nombre=COL_NOMBRE if df.shape[1] > COL_NOMBRE else None,
         filas=df.astype(str).values.tolist(),
     )
 
@@ -395,6 +400,7 @@ def procesar_archivo_vehigrupo(contenido: bytes) -> AjusteDireccionesResult:
         total_filas=len(filas),
         total_columnas=len(VHG_FIELDS),
         col_direccion=VHG_COL_DIRECCION,
+        col_nombre=VHG_COL_NOMBRE,
         filas=filas,
     )
 

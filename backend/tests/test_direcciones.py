@@ -153,6 +153,28 @@ def test_ajustar_dir_leonisa_bis_suelto_sin_letra():
         "KRA 14BIS 153 80 APTO 101 TO 16"
 
 
+@pytest.mark.parametrize("raw,esperado", [
+    ("Kra 15 40 20 Oficina 205", "KRA 15 40 20 OF 205"),
+    ("kra 15 40 20 ofi 205", "KRA 15 40 20 OF 205"),
+    ("KRA 15 40 20 OFICINA 205", "KRA 15 40 20 OF 205"),
+])
+def test_ajustar_dir_leonisa_oficina_se_reconoce(raw, esperado):
+    # "OFICINA"/"OFI"/"OF" (cualquier combinación de mayúsculas/minúsculas)
+    # debe reconocerse como complemento y abreviarse a "OF".
+    assert ajustar_dir_leonisa(raw) == esperado
+
+
+@pytest.mark.parametrize("raw,esperado", [
+    ("Kra 15 40 20 Consultorio 202", "KRA 15 40 20 CONS 202"),
+    ("kra 15 40 20 consul 202", "KRA 15 40 20 CONS 202"),
+    ("KRA 15 40 20 CONS 202", "KRA 15 40 20 CONS 202"),
+])
+def test_ajustar_dir_leonisa_consultorio_se_reconoce(raw, esperado):
+    # "CONSULTORIO"/"CONSUL"/"CONS" (cualquier combinación de mayúsculas/
+    # minúsculas) debe reconocerse como complemento y abreviarse a "CONS".
+    assert ajustar_dir_leonisa(raw) == esperado
+
+
 # ── Tests de integración de los endpoints ──────────────────────────────────────
 
 def _archivo_muestra() -> bytes:
