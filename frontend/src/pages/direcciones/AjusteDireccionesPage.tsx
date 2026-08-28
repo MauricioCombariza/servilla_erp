@@ -25,7 +25,6 @@ export function AjusteDireccionesPage() {
   const [error, setError] = useState("");
 
   const [colDireccion, setColDireccion] = useState<number | null>(null);
-  const [colNombre, setColNombre] = useState<number | null>(null);
   const [direccionesOriginales, setDireccionesOriginales] = useState<string[]>([]);
   const [rows, setRows] = useState<string[][]>([]);
 
@@ -35,7 +34,6 @@ export function AjusteDireccionesPage() {
     setRows([]);
     setDireccionesOriginales([]);
     setColDireccion(null);
-    setColNombre(null);
     setError("");
     if (inputRef.current) inputRef.current.value = "";
   }
@@ -51,7 +49,6 @@ export function AjusteDireccionesPage() {
     try {
       const r = await direccionesApi.ajustar(file, cliente);
       setColDireccion(r.data.col_direccion);
-      setColNombre(r.data.col_nombre);
       setDireccionesOriginales(r.data.direcciones_originales);
       setRows(r.data.filas.map((f) => [...f]));
     } catch (e: unknown) {
@@ -60,7 +57,6 @@ export function AjusteDireccionesPage() {
       setRows([]);
       setDireccionesOriginales([]);
       setColDireccion(null);
-      setColNombre(null);
     } finally {
       setLoading(false);
     }
@@ -147,7 +143,7 @@ export function AjusteDireccionesPage() {
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
-              if (f) { setFile(f); setRows([]); setDireccionesOriginales([]); setColDireccion(null); setColNombre(null); setError(""); }
+              if (f) { setFile(f); setRows([]); setDireccionesOriginales([]); setColDireccion(null); setError(""); }
             }}
           />
           {file ? (
@@ -206,30 +202,26 @@ export function AjusteDireccionesPage() {
             </button>
           </div>
 
-          <div className="border border-gray-200 rounded-xl overflow-auto max-h-[600px]">
-            <table className="min-w-full text-sm">
+          <div className="border border-gray-200 rounded-xl overflow-y-auto overflow-x-hidden max-h-[600px]">
+            <table className="w-full table-fixed text-sm">
               <thead>
                 <tr className="bg-gray-50 text-gray-500 text-xs sticky top-0">
-                  <th className="text-left px-3 py-2 font-medium whitespace-nowrap">Nombre</th>
-                  <th className="text-left px-3 py-2 font-medium whitespace-nowrap">Dirección original</th>
-                  <th className="text-left px-3 py-2 font-medium whitespace-nowrap">Dirección corregida</th>
+                  <th className="text-left px-2 py-2 font-medium w-1/2">Dirección original</th>
+                  <th className="text-left px-2 py-2 font-medium w-1/2">Dirección corregida</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row, i) => (
                   <tr key={i} className="border-b border-gray-100 last:border-0">
-                    <td className="px-3 py-1.5 text-gray-600 whitespace-nowrap">
-                      {colNombre !== null ? row[colNombre]?.trim() : "—"}
-                    </td>
-                    <td className="px-3 py-1.5 text-gray-600 whitespace-nowrap">
+                    <td className="px-2 py-1.5 text-gray-600 break-words">
                       {direccionesOriginales[i]?.trim()}
                     </td>
-                    <td className="p-1">
+                    <td className="px-2 py-1">
                       <input
                         type="text"
                         value={row[colDireccion]}
                         onChange={(e) => handleEditarDireccion(i, e.target.value)}
-                        className="w-72 border border-gray-300 rounded px-2 py-1 text-sm"
+                        className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
                       />
                     </td>
                   </tr>
