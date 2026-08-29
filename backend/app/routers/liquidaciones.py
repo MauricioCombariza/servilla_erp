@@ -138,13 +138,14 @@ async def planillas_pendientes_mensajero(
             sg.planilla,
             MIN(sg.f_esc) AS fecha_escaner,
             COUNT(*) AS total_seriales,
-            COALESCE(SUM(sg.precio_mensajero), 0) AS total_mensajero
+            COALESCE(SUM(sg.precio_mensajero), 0) AS total_mensajero,
+            ROUND(COALESCE(SUM(sg.precio_mensajero), 0) / COUNT(*), 2) AS valor_por_envio
         FROM seriales_gestion sg
         WHERE sg.mensajero_id = :pid AND sg.estado = 'pendiente'
           AND EXTRACT(MONTH FROM sg.f_esc) = :mes
           AND EXTRACT(YEAR  FROM sg.f_esc) = :anio
         GROUP BY sg.planilla
-        ORDER BY MIN(sg.f_esc)
+        ORDER BY sg.planilla ASC
     """)
     rows = (await db.execute(sql, {"pid": personal_id, "mes": mes, "anio": anio})).mappings().all()
     return [PlanillaPendienteMensajero(**dict(r)) for r in rows]

@@ -72,6 +72,7 @@ class PlanillaPendienteMensajero(BaseModel):
     fecha_escaner: date | None
     total_seriales: int
     total_mensajero: float
+    valor_por_envio: float
 
 
 class ResumenPendientePago(BaseModel):

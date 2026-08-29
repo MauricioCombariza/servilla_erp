@@ -24,6 +24,7 @@ export interface PlanillaPendienteMensajero {
   fecha_escaner: string | null;
   total_seriales: number;
   total_mensajero: number;
+  valor_por_envio: number;
 }
 
 export const liqApi = {

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle, DollarSign, Trash2, Plus, Rows3, SlidersHorizontal, X } from "lucide-react";
+import { CheckCircle, DollarSign, Trash2, Plus, Rows3, SlidersHorizontal, X, Pencil } from "lucide-react";
 import { gestionesApi } from "@/api/gestiones";
 import { laboresApi } from "@/api/labores";
 import { personalApi } from "@/api/personal";
@@ -359,10 +359,22 @@ function PersonaCombobox({ personas, value, onChange }: {
 function SeleccionarTab({ mes, anio, soloSeriales, onGenerado }: {
   mes: number; anio: number; soloSeriales: boolean; onGenerado: () => void;
 }) {
+  const qc = useQueryClient();
   const [personalId, setPersonalId] = useState<number | "">("");
   const [planillasSel, setPlanillasSel] = useState<Set<string>>(new Set());
   const [fechasSel, setFechasSel] = useState<Set<string>>(new Set());
   const [showConfirm, setShowConfirm] = useState(false);
+  const [editingPlanilla, setEditingPlanilla] = useState<string | null>(null);
+  const [editVal, setEditVal] = useState("");
+
+  const cambiarValorEnvio = useMutation({
+    mutationFn: ({ planilla, valor }: { planilla: string; valor: number }) =>
+      gestionesApi.cambiarPrecio(planilla, valor),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["sel-planillas", personalId, mes, anio] });
+      setEditingPlanilla(null);
+    },
+  });
 
   const { data: personas = [] } = useQuery({
     queryKey: ["personal-liquidables"],
@@ -445,7 +457,7 @@ function SeleccionarTab({ mes, anio, soloSeriales, onGenerado }: {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    {["", "Planilla", "Fecha", "Seriales", "Valor"].map((h) => (
+                    {["", "Planilla", "Fecha", "Seriales", "Valor/envío", "Valor"].map((h) => (
                       <th key={h} className="text-left px-4 py-2 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
                     ))}
                   </tr>
@@ -459,6 +471,46 @@ function SeleccionarTab({ mes, anio, soloSeriales, onGenerado }: {
                       <td className="px-4 py-2 font-mono text-xs text-gray-700">{p.planilla}</td>
                       <td className="px-4 py-2 text-gray-600 text-xs">{p.fecha_escaner ?? "—"}</td>
                       <td className="px-4 py-2 text-gray-600">{p.total_seriales}</td>
+                      <td className="px-4 py-2">
+                        {editingPlanilla === p.planilla ? (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              step="any"
+                              value={editVal}
+                              onChange={(e) => setEditVal(e.target.value)}
+                              className="border border-gray-300 rounded px-2 py-1 text-sm w-24"
+                              autoFocus
+                            />
+                            <button
+                              onClick={() => cambiarValorEnvio.mutate({ planilla: p.planilla, valor: parseFloat(editVal) })}
+                              disabled={cambiarValorEnvio.isPending}
+                              className="text-xs bg-primary text-white px-2 py-1 rounded disabled:opacity-60"
+                            >
+                              Guardar
+                            </button>
+                            <button
+                              onClick={() => setEditingPlanilla(null)}
+                              className="text-xs text-gray-500 hover:text-gray-700"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <CurrencyCell value={p.valor_por_envio} />
+                            <button
+                              onClick={() => {
+                                setEditingPlanilla(p.planilla);
+                                setEditVal(String(p.valor_por_envio));
+                              }}
+                              className="text-gray-400 hover:text-primary transition-colors"
+                            >
+                              <Pencil size={13} />
+                            </button>
+                          </div>
+                        )}
+                      </td>
                       <td className="px-4 py-2 font-semibold text-gray-900"><CurrencyCell value={p.total_mensajero} /></td>
                     </tr>
                   ))}
