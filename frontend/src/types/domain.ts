@@ -385,6 +385,33 @@ export interface ResumenMensualFlujo {
   flujo_neto: number;
 }
 
+// ── Administración (usuarios, roles, páginas) ──────────────────────────────────
+
+export interface Usuario {
+  id: number;
+  username: string;
+  nombre_completo: string;
+  email: string | null;
+  rol: string;
+  activo: boolean;
+  fecha_creacion: string | null;
+  ultimo_acceso: string | null;
+}
+
+export interface Rol {
+  nombre: string;
+  descripcion: string | null;
+  activo: boolean;
+  fecha_creacion: string | null;
+  paginas: string[];
+}
+
+export interface PaginaCatalogo {
+  key: string;
+  label: string;
+  path: string;
+}
+
 export interface PlanillaResumen {
   planilla: string;
   cod_men: string;

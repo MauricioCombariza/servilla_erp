@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, String
+from sqlalchemy import Boolean, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import TIMESTAMP
 
@@ -17,7 +17,9 @@ class Usuario(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     nombre_completo: Mapped[str] = mapped_column(String(100), nullable=False)
     email: Mapped[str | None] = mapped_column(String(100))
-    rol: Mapped[str] = mapped_column(String(15), nullable=False)
+    rol: Mapped[str] = mapped_column(
+        String(30), ForeignKey("roles.nombre", onupdate="CASCADE"), nullable=False
+    )
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
     fecha_creacion: Mapped[datetime | None] = mapped_column(_ts, default=None)
     ultimo_acceso: Mapped[datetime | None] = mapped_column(_ts, default=None)

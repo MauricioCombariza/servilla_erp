@@ -3,7 +3,7 @@ import re
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 
-from app.auth.dependencies import require_role
+from app.auth.dependencies import require_page
 from app.schemas.direcciones import AjusteDireccionesResult, DescargarDireccionesRequest
 from app.services.direcciones_service import (
     generar_txt_leonisa,
@@ -13,7 +13,7 @@ from app.services.direcciones_service import (
 )
 
 router = APIRouter(prefix="/api/direcciones", tags=["direcciones"])
-_auth = Depends(require_role("administrador", "logistica"))
+_auth = Depends(require_page("direcciones"))
 
 # Un lote de órdenes cabe en unos pocos MB; no es un dashboard completo, así que
 # se lee entero en memoria (sin streaming a disco).

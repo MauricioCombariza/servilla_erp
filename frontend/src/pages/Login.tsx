@@ -27,7 +27,7 @@ export function Login() {
     try {
       const res = await authApi.login(data.username, data.password);
       setTokens(res.data.access_token, res.data.refresh_token);
-      setUser(res.data.role, res.data.nombre_completo);
+      setUser(res.data.role, res.data.nombre_completo, res.data.page_keys);
       navigate("/clientes");
     } catch {
       setError("Usuario o contraseña incorrectos");

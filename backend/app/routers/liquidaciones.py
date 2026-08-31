@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require_role
+from app.auth.dependencies import require_page, require_role
 from app.database import get_db
 from app.models.liquidaciones import Liquidacion
 from app.models.personal import Personal
@@ -19,7 +19,7 @@ from app.schemas.liquidaciones import (
 )
 
 router = APIRouter(prefix="/api/liquidaciones", tags=["liquidaciones"])
-_auth = Depends(require_role("administrador", "contabilidad", "operaciones"))
+_auth = Depends(require_page("pagos_mensajeros"))
 _auth_admin = Depends(require_role("administrador", "contabilidad"))
 
 

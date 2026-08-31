@@ -42,3 +42,28 @@ def require_role(*roles: str):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sin permisos")
         return current_user
     return _check
+
+
+async def get_role_page_keys(db: AsyncSession, rol: str) -> set[str]:
+    from app.models.roles import Rol, RolPagina
+
+    result = await db.execute(
+        select(RolPagina.page_key)
+        .join(Rol, Rol.nombre == RolPagina.rol)
+        .where(RolPagina.rol == rol, Rol.activo == True)  # noqa: E712
+    )
+    return {row[0] for row in result.all()}
+
+
+def require_page(*page_keys: str):
+    """Dependency factory: require_page('nomina') — concede acceso si el rol del
+    usuario tiene asignada al menos una de las page_keys (semántica OR)."""
+    async def _check(
+        current_user: dict = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> dict:
+        allowed = await get_role_page_keys(db, current_user["rol"])
+        if not set(page_keys) & allowed:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sin permisos")
+        return current_user
+    return _check

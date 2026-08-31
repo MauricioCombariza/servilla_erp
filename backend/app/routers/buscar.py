@@ -4,14 +4,14 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require_role
+from app.auth.dependencies import require_page
 from app.database import get_db
 from app.models.gestiones import SerialGestion
 from app.schemas.buscar import BuscarResultado, PaqueteItem
 from app.services.bases_web import buscar_histo
 
 router = APIRouter(prefix="/api/buscar", tags=["buscar"])
-_auth = Depends(require_role("administrador", "logistica", "mensajero"))
+_auth = Depends(require_page("buscar"))
 
 LIMIT = 100
 

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require_role
+from app.auth.dependencies import require_page
 from app.database import get_db
 from app.models.clientes import Cliente, PrecioCliente
 from app.schemas.clientes import (
@@ -11,7 +11,7 @@ from app.schemas.clientes import (
 )
 
 router = APIRouter(prefix="/api/clientes", tags=["clientes"])
-_auth = Depends(require_role("administrador", "logistica"))
+_auth = Depends(require_page("clientes"))
 
 
 # ── Clientes ─────────────────────────────────────────────────────────────────

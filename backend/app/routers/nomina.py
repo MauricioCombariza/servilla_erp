@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require_role
+from app.auth.dependencies import require_page
 from app.database import get_db
 from app.models.nomina import (
     NominaEmpleado, NominaEmpleadoPeriodo, NominaParametro, NominaProvision, PagoNomina,
@@ -20,7 +20,7 @@ from app.schemas.nomina import (
 )
 
 router = APIRouter(prefix="/api/nomina", tags=["nomina"])
-_auth = Depends(require_role("administrador", "contabilidad"))
+_auth = Depends(require_page("nomina"))
 
 # Tasas 2025 Colombia (usadas si no existen registros en nomina_parametros)
 _DEFAULTS = {

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require_role
+from app.auth.dependencies import require_page, require_role
 from app.database import get_db
 from app.models.labores import RegistroHoras, RegistroLabores
 from app.services.calendario_service import (
@@ -18,7 +18,7 @@ from app.schemas.labores import (
 )
 
 router = APIRouter(prefix="/api/labores", tags=["labores"])
-_auth = Depends(require_role("administrador", "operaciones", "contabilidad"))
+_auth = Depends(require_page("labores"))
 _auth_admin = Depends(require_role("administrador", "contabilidad"))
 
 

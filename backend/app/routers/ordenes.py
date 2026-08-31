@@ -5,14 +5,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require_role
+from app.auth.dependencies import require_page
 from app.database import get_db
 from app.models.ordenes import Orden
 from app.schemas.ordenes import CargaMasivaResult, OrdenCreate, OrdenRead, OrdenUpdate
 from app.services.ordenes_service import procesar_csv
 
 router = APIRouter(prefix="/api/ordenes", tags=["ordenes"])
-_auth = Depends(require_role("administrador", "logistica"))
+_auth = Depends(require_page("ordenes"))
 
 # El procesamiento es por chunks, así que la memoria no depende del tamaño del
 # archivo; el tope existe por tiempo: más de esto no alcanza a terminar dentro del

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require_role
+from app.auth.dependencies import require_page
 from app.database import get_db
 from app.models.gastos import GastoAdministrativo, GastoFijoMensual, PagoGastoFijo
 from app.schemas.gastos import (
@@ -12,7 +12,7 @@ from app.schemas.gastos import (
 )
 
 router = APIRouter(prefix="/api/gastos", tags=["gastos"])
-_auth = Depends(require_role("administrador", "contabilidad"))
+_auth = Depends(require_page("gastos"))
 
 
 # ── Gastos administrativos ────────────────────────────────────────────────────

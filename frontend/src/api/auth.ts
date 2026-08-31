@@ -5,6 +5,7 @@ interface LoginResponse {
   refresh_token: string;
   role: string;
   nombre_completo: string;
+  page_keys: string[];
 }
 
 export const authApi = {

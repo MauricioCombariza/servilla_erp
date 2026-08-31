@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import get_current_user, require_role
+from app.auth.dependencies import get_current_user, require_page
 from app.database import get_db
 from app.models.facturacion import FacturaEmitida, FacturaRecibida
 from app.schemas.facturacion import (
@@ -28,7 +28,10 @@ from app.services.facturacion_service import (
 )
 
 router = APIRouter(prefix="/api/facturacion", tags=["facturacion"])
-_auth = Depends(require_role("administrador", "logistica"))
+_auth = Depends(require_page(
+    "facturacion_resumen", "facturacion_emitidas", "facturacion_recibidas",
+    "facturacion_cxc", "facturacion_cxp",
+))
 
 
 # ── Resumen financiero ─────────────────────────────────────────────────────────

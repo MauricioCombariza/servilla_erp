@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require_role
+from app.auth.dependencies import require_page
 from app.database import get_db
 from app.schemas.pendientes_entrega import PendientesEntregaResumen, ResumenMensualResponse
 from app.services.pendientes_entrega_service import (
@@ -20,7 +20,7 @@ from app.services.pendientes_entrega_service import (
 )
 
 router = APIRouter(prefix="/api/pendientes-entrega", tags=["pendientes-entrega"])
-_auth = Depends(require_role("administrador", "logistica"))
+_auth = Depends(require_page("pendientes_entrega"))
 
 TipoPersonalPendientes = Literal["courier_externo", "mensajero"]
 

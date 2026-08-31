@@ -5,7 +5,7 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require_role
+from app.auth.dependencies import require_page
 from app.database import get_db
 from app.models.escaneos_carryt import EscaneoCarryt
 from app.schemas.escaneos_carryt import EscaneoCarrytCreate, EscaneoCarrytRead
@@ -20,8 +20,8 @@ from app.services.escaneos_carryt_service import (
 from app.services.excel_utils import XLSX_MEDIA_TYPE
 
 router = APIRouter(prefix="/api/escaneos-carryt", tags=["escaneos-carryt"])
-_auth = Depends(require_role("administrador", "logistica", "mensajero"))
-_auth_reporte = Depends(require_role("administrador", "logistica", "mensajero"))
+_auth = Depends(require_page("escaneo_carryt"))
+_auth_reporte = Depends(require_page("escaneo_carryt"))
 
 
 @router.get("/", response_model=list[EscaneoCarrytRead])
