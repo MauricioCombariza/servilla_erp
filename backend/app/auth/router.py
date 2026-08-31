@@ -6,7 +6,7 @@ from jose import JWTError, jwt
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, get_role_page_keys
 from app.auth.schemas import LoginRequest, RefreshRequest, TokenResponse, UserMe
 from app.config import settings
 from app.database import get_db
@@ -24,7 +24,7 @@ def _create_token(data: dict, expires_delta: timedelta) -> str:
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
-def _make_tokens(user: Usuario) -> TokenResponse:
+def _make_tokens(user: Usuario, page_keys: list[str]) -> TokenResponse:
     base = {"sub": user.username, "rol": user.rol}
     access = _create_token(base | {"type": "access"},
                            timedelta(minutes=settings.jwt_access_expire_minutes))
@@ -35,6 +35,7 @@ def _make_tokens(user: Usuario) -> TokenResponse:
         refresh_token=refresh,
         role=user.rol,
         nombre_completo=user.nombre_completo,
+        page_keys=page_keys,
     )
 
 
@@ -55,7 +56,8 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     )
     await db.commit()
 
-    return _make_tokens(user)
+    page_keys = sorted(await get_role_page_keys(db, user.rol))
+    return _make_tokens(user, page_keys)
 
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -76,9 +78,11 @@ async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
     if user is None or not user.activo:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario inactivo")
 
-    return _make_tokens(user)
+    page_keys = sorted(await get_role_page_keys(db, user.rol))
+    return _make_tokens(user, page_keys)
 
 
 @router.get("/me", response_model=UserMe)
-async def me(current_user: dict = Depends(get_current_user)):
-    return current_user
+async def me(current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    page_keys = sorted(await get_role_page_keys(db, current_user["rol"]))
+    return UserMe(**current_user, page_keys=page_keys)

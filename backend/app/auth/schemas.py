@@ -12,6 +12,7 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     role: str
     nombre_completo: str
+    page_keys: list[str] = []
 
 
 class RefreshRequest(BaseModel):
@@ -25,3 +26,4 @@ class UserMe(BaseModel):
     email: str | None
     rol: str
     activo: bool
+    page_keys: list[str] = []
