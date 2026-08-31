@@ -27,6 +27,7 @@ import { PagosCiudadesPage } from "@/pages/pagos-ciudades/PagosCiudadesPage";
 import { BuscarPaquetePage } from "@/pages/buscar/BuscarPaquetePage";
 import { AjusteDireccionesPage } from "@/pages/direcciones/AjusteDireccionesPage";
 import { PendientesEntregaPage } from "@/pages/pendientes-entrega/PendientesEntregaPage";
+import { DevolucionesPage } from "@/pages/devoluciones/DevolucionesPage";
 import { EscaneoCarrytPage } from "@/pages/carryt/EscaneoCarrytPage";
 import { EscaneoOffloadPage } from "@/pages/imile/EscaneoOffloadPage";
 import { UsuariosRolesPage } from "@/pages/admin/UsuariosRolesPage";
@@ -112,6 +113,7 @@ export default function App() {
             <Route path="/buscar" element={<PageGuard pageKey="buscar"><BuscarPaquetePage /></PageGuard>} />
             <Route path="/direcciones" element={<PageGuard pageKey="direcciones"><AjusteDireccionesPage /></PageGuard>} />
             <Route path="/pendientes-entrega" element={<PageGuard pageKey="pendientes_entrega"><PendientesEntregaPage /></PageGuard>} />
+            <Route path="/devoluciones" element={<PageGuard pageKey="devoluciones"><DevolucionesPage /></PageGuard>} />
             <Route path="/admin/usuarios-roles" element={<AdminOnlyRoute><UsuariosRolesPage /></AdminOnlyRoute>} />
           </Route>
         </Routes>

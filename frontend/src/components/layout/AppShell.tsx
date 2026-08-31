@@ -3,7 +3,7 @@ import {
   Users, UserCheck, ShoppingCart, FileText, BarChart2,
   Clock, DollarSign, Truck, Receipt, Wallet, Calculator, List, ClipboardCheck,
   LogOut, Menu, X, ArrowDownCircle, ArrowUpCircle, Search, Building2, MapPin, PackageCheck,
-  ScanLine, Radio, ShieldCheck,
+  ScanLine, Radio, RotateCcw, ShieldCheck,
 } from "lucide-react";
 import { useState } from "react";
 import { useAuthStore } from "@/store/authStore";
@@ -30,6 +30,7 @@ const navItems = [
   { to: "/buscar", label: "Buscar Paquete", icon: Search, pageKey: "buscar" },
   { to: "/direcciones", label: "Ajuste Direcciones", icon: MapPin, pageKey: "direcciones" },
   { to: "/pendientes-entrega", label: "Pendientes Entrega", icon: PackageCheck, pageKey: "pendientes_entrega" },
+  { to: "/devoluciones", label: "Devoluciones", icon: RotateCcw, pageKey: "devoluciones" },
   { to: "/escaneo-carryt", label: "Escaneo Carryt", icon: ScanLine, pageKey: "escaneo_carryt" },
   { to: "/imile-offload-scan", label: "Escaneo Offloading iMile", icon: Radio, pageKey: "imile_offload_scan" },
   { to: "/admin/usuarios-roles", label: "Administración", icon: ShieldCheck, adminOnly: true },
