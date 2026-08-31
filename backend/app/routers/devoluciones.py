@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from datetime import date
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -7,13 +9,16 @@ from app.database import get_db
 from app.models.devoluciones import Devolucion
 from app.schemas.devoluciones import (
     CargaMasivaDevolucionesResult,
+    DevolucionDocumentoRequest,
     DevolucionEstadoUpdate,
     DevolucionRead,
 )
+from app.services.devoluciones_docx import DOCX_MEDIA_TYPE, construir_docx_devolucion
 from app.services.devoluciones_service import procesar_excel_devoluciones
 
 router = APIRouter(prefix="/api/devoluciones", tags=["devoluciones"])
 _auth = Depends(require_page("devoluciones"))
+_auth_scan = Depends(require_page("devoluciones_scan"))
 
 # Los archivos de devoluciones son cargues manuales chicos (decenas de filas), no
 # dashboards completos: se leen enteros en memoria (sin streaming a disco).
@@ -75,3 +80,32 @@ async def actualizar_estado(
     await db.commit()
     await db.refresh(devolucion)
     return devolucion
+
+
+@router.patch("/serial/{serial}", response_model=DevolucionRead)
+async def actualizar_estado_por_serial(
+    serial: str,
+    body: DevolucionEstadoUpdate,
+    db: AsyncSession = Depends(get_db),
+    _=_auth_scan,
+):
+    result = await db.execute(select(Devolucion).where(Devolucion.serial == serial))
+    devolucion = result.scalar_one_or_none()
+    if devolucion is None:
+        raise HTTPException(status_code=404, detail="Serial no encontrado en devoluciones")
+
+    devolucion.estado = body.estado
+    await db.commit()
+    await db.refresh(devolucion)
+    return devolucion
+
+
+@router.post("/documento")
+async def generar_documento(body: DevolucionDocumentoRequest, _=_auth_scan):
+    contenido = construir_docx_devolucion(body.items)
+    nombre_archivo = f"acta_devolucion_{date.today().isoformat()}.docx"
+    return Response(
+        content=contenido,
+        media_type=DOCX_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'},
+    )
