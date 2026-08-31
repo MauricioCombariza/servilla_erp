@@ -31,6 +31,7 @@ PAGE_CATALOG: list[PageDef] = [
     PageDef("direcciones", "Ajuste Direcciones", "/direcciones"),
     PageDef("pendientes_entrega", "Pendientes Entrega", "/pendientes-entrega"),
     PageDef("devoluciones", "Devoluciones", "/devoluciones"),
+    PageDef("devoluciones_scan", "Escaneo Devoluciones", "/escaneo-devoluciones"),
     PageDef("escaneo_carryt", "Escaneo Carryt", "/escaneo-carryt"),
     PageDef("imile_offload_scan", "Escaneo Offloading iMile", "/imile-offload-scan"),
 ]
