@@ -28,6 +28,7 @@ import { BuscarPaquetePage } from "@/pages/buscar/BuscarPaquetePage";
 import { AjusteDireccionesPage } from "@/pages/direcciones/AjusteDireccionesPage";
 import { PendientesEntregaPage } from "@/pages/pendientes-entrega/PendientesEntregaPage";
 import { DevolucionesPage } from "@/pages/devoluciones/DevolucionesPage";
+import { EscaneoDevolucionesPage } from "@/pages/devoluciones/EscaneoDevolucionesPage";
 import { EscaneoCarrytPage } from "@/pages/carryt/EscaneoCarrytPage";
 import { EscaneoOffloadPage } from "@/pages/imile/EscaneoOffloadPage";
 import { UsuariosRolesPage } from "@/pages/admin/UsuariosRolesPage";
@@ -77,6 +78,16 @@ export default function App() {
               <ProtectedRoute>
                 <PageGuard pageKey="imile_offload_scan">
                   <EscaneoOffloadPage />
+                </PageGuard>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/escaneo-devoluciones"
+            element={
+              <ProtectedRoute>
+                <PageGuard pageKey="devoluciones_scan">
+                  <EscaneoDevolucionesPage />
                 </PageGuard>
               </ProtectedRoute>
             }
