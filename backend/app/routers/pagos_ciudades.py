@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require_role
+from app.auth.dependencies import require_page, require_role
 from app.database import get_db
 from app.models.pagos_ciudades import FacturaCourierCxp, PrefacturaCourier, PrefacturaPlanilla
 from app.models.personal import Personal
@@ -20,7 +20,7 @@ from app.schemas.pagos_ciudades import (
 )
 
 router = APIRouter(prefix="/api/pagos-ciudades", tags=["pagos-ciudades"])
-_auth = Depends(require_role("administrador", "contabilidad", "operaciones"))
+_auth = Depends(require_page("pagos_ciudades"))
 _auth_admin = Depends(require_role("administrador", "contabilidad"))
 
 

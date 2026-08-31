@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require_role
+from app.auth.dependencies import require_page, require_role
 from app.database import get_db
 from app.models.ciudades import Ciudad
 from app.models.personal import Personal, PersonalCiudad
@@ -13,7 +13,7 @@ from app.schemas.personal import (
 )
 
 router = APIRouter(prefix="/api/personal", tags=["personal"])
-_auth = Depends(require_role("administrador", "logistica"))
+_auth = Depends(require_page("personal"))
 _auth_by_code = Depends(require_role("administrador", "logistica", "mensajero"))
 
 

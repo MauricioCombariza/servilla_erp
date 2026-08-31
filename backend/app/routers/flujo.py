@@ -2,11 +2,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require_role
+from app.auth.dependencies import require_page
 from app.database import get_db
 
 router = APIRouter(prefix="/api/flujo", tags=["flujo"])
-_auth = Depends(require_role("administrador", "contabilidad"))
+_auth = Depends(require_page("flujo_caja"))
 
 
 @router.get("/")

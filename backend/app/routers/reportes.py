@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import BigInteger, bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require_role
+from app.auth.dependencies import require_page
 from app.database import get_db
 from app.schemas.reportes import (
     FacturacionClienteRow,
@@ -17,7 +17,7 @@ from app.schemas.reportes import (
 )
 
 router = APIRouter(prefix="/api/reportes", tags=["reportes"])
-_auth = Depends(require_role("administrador", "logistica"))
+_auth = Depends(require_page("reportes"))
 
 
 def _rango_anio_mes(anio: int, mes: int | None) -> tuple[date, date]:

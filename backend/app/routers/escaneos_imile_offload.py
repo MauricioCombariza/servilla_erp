@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require_role
+from app.auth.dependencies import require_page
 from app.database import get_db
 from app.models.escaneos_imile_offload import EscaneoImileOffload
 from app.schemas.escaneos_imile_offload import (
@@ -19,7 +19,7 @@ from app.services.imile_automation import (
 )
 
 router = APIRouter(prefix="/api/escaneos-imile-offload", tags=["escaneos-imile-offload"])
-_auth = Depends(require_role("administrador", "logistica", "mensajero"))
+_auth = Depends(require_page("imile_offload_scan"))
 
 
 @router.get("/", response_model=list[EscaneoImileOffloadRead])

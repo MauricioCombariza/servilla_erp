@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import get_current_user, require_role
+from app.auth.dependencies import get_current_user, require_page
 from app.database import get_db
 from app.models.gestiones import SerialGestion
 from app.schemas.gestiones import (
@@ -45,7 +45,7 @@ from app.services.planillas_service import (
 )
 
 router = APIRouter(prefix="/api/gestiones", tags=["gestiones"])
-_auth = Depends(require_role("administrador", "logistica"))
+_auth = Depends(require_page("gestiones", "planillas"))
 
 
 # ── Planillas (rutas específicas antes de /{id}) ──────────────────────────────
