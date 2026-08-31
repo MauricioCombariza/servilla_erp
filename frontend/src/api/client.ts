@@ -13,7 +13,7 @@ api.interceptors.response.use(
   (res) => res,
   async (error) => {
     if (error.response?.status === 401) {
-      const { refreshToken, logout, setTokens } = useAuthStore.getState();
+      const { refreshToken, logout, setTokens, setUser, role, nombreCompleto } = useAuthStore.getState();
       const isFormData = error.config?.data instanceof FormData;
 
       if (refreshToken && !error.config._retry && !isFormData) {
@@ -21,6 +21,7 @@ api.interceptors.response.use(
         try {
           const res = await axios.post("/api/auth/refresh", { refresh_token: refreshToken });
           setTokens(res.data.access_token, res.data.refresh_token);
+          setUser(res.data.role ?? role, res.data.nombre_completo ?? nombreCompleto, res.data.page_keys ?? []);
           error.config.headers.Authorization = `Bearer ${res.data.access_token}`;
           return api(error.config);
         } catch {

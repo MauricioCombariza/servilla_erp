@@ -9,40 +9,44 @@ import { useState } from "react";
 import { useAuthStore } from "@/store/authStore";
 
 const navItems = [
-  { to: "/clientes", label: "Clientes y Precios", icon: Users },
-  { to: "/personal", label: "Personal", icon: UserCheck },
-  { to: "/ordenes", label: "Órdenes", icon: ShoppingCart },
-  { to: "/facturacion", label: "Resumen Financiero", icon: FileText },
-  { to: "/facturacion/emitidas", label: "Facturas Emitidas", icon: FileText },
-  { to: "/facturacion/recibidas", label: "Facturas Recibidas", icon: FileText },
-  { to: "/facturacion/cobrar", label: "CxC — Por Cobrar", icon: ArrowDownCircle },
-  { to: "/facturacion/pagar", label: "CxP — Por Pagar", icon: ArrowUpCircle },
-  { to: "/reportes", label: "Reportes", icon: BarChart2 },
-  { to: "/labores", label: "Registro Labores", icon: Clock },
-  { to: "/pagos-mensajeros", label: "Gestión Pagos", icon: DollarSign },
-  { to: "/facturas-transporte", label: "Facturas Transporte", icon: Truck },
-  { to: "/pagos-ciudades", label: "Pagos Ciudades", icon: Building2 },
-  { to: "/gastos", label: "Gastos Admin", icon: Receipt },
-  { to: "/flujo-caja", label: "Flujo de Caja", icon: Wallet },
-  { to: "/nomina", label: "Nómina", icon: Calculator },
-  { to: "/gestiones", label: "Detalle Gestiones", icon: List },
-  { to: "/planillas", label: "Planillas", icon: ClipboardCheck },
-  { to: "/buscar", label: "Buscar Paquete", icon: Search },
-  { to: "/direcciones", label: "Ajuste Direcciones", icon: MapPin },
-  { to: "/pendientes-entrega", label: "Pendientes Entrega", icon: PackageCheck },
-  { to: "/escaneo-carryt", label: "Escaneo Carryt", icon: ScanLine },
-  { to: "/imile-offload-scan", label: "Escaneo Offloading iMile", icon: Radio },
+  { to: "/clientes", label: "Clientes y Precios", icon: Users, pageKey: "clientes" },
+  { to: "/personal", label: "Personal", icon: UserCheck, pageKey: "personal" },
+  { to: "/ordenes", label: "Órdenes", icon: ShoppingCart, pageKey: "ordenes" },
+  { to: "/facturacion", label: "Resumen Financiero", icon: FileText, pageKey: "facturacion_resumen" },
+  { to: "/facturacion/emitidas", label: "Facturas Emitidas", icon: FileText, pageKey: "facturacion_emitidas" },
+  { to: "/facturacion/recibidas", label: "Facturas Recibidas", icon: FileText, pageKey: "facturacion_recibidas" },
+  { to: "/facturacion/cobrar", label: "CxC — Por Cobrar", icon: ArrowDownCircle, pageKey: "facturacion_cxc" },
+  { to: "/facturacion/pagar", label: "CxP — Por Pagar", icon: ArrowUpCircle, pageKey: "facturacion_cxp" },
+  { to: "/reportes", label: "Reportes", icon: BarChart2, pageKey: "reportes" },
+  { to: "/labores", label: "Registro Labores", icon: Clock, pageKey: "labores" },
+  { to: "/pagos-mensajeros", label: "Gestión Pagos", icon: DollarSign, pageKey: "pagos_mensajeros" },
+  { to: "/facturas-transporte", label: "Facturas Transporte", icon: Truck, pageKey: "facturas_transporte" },
+  { to: "/pagos-ciudades", label: "Pagos Ciudades", icon: Building2, pageKey: "pagos_ciudades" },
+  { to: "/gastos", label: "Gastos Admin", icon: Receipt, pageKey: "gastos" },
+  { to: "/flujo-caja", label: "Flujo de Caja", icon: Wallet, pageKey: "flujo_caja" },
+  { to: "/nomina", label: "Nómina", icon: Calculator, pageKey: "nomina" },
+  { to: "/gestiones", label: "Detalle Gestiones", icon: List, pageKey: "gestiones" },
+  { to: "/planillas", label: "Planillas", icon: ClipboardCheck, pageKey: "planillas" },
+  { to: "/buscar", label: "Buscar Paquete", icon: Search, pageKey: "buscar" },
+  { to: "/direcciones", label: "Ajuste Direcciones", icon: MapPin, pageKey: "direcciones" },
+  { to: "/pendientes-entrega", label: "Pendientes Entrega", icon: PackageCheck, pageKey: "pendientes_entrega" },
+  { to: "/escaneo-carryt", label: "Escaneo Carryt", icon: ScanLine, pageKey: "escaneo_carryt" },
+  { to: "/imile-offload-scan", label: "Escaneo Offloading iMile", icon: Radio, pageKey: "imile_offload_scan" },
 ];
 
 export function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const { nombreCompleto, role, logout } = useAuthStore();
+  const { nombreCompleto, role, pageKeys, logout } = useAuthStore();
   const navigate = useNavigate();
 
   function handleLogout() {
     logout();
     navigate("/login");
   }
+
+  const visibleItems = navItems.filter((item) =>
+    item.adminOnly ? role === "administrador" : role === "administrador" || pageKeys.includes(item.pageKey ?? "")
+  );
 
   return (
     <div className="flex h-screen bg-surface">
@@ -59,7 +63,7 @@ export function AppShell() {
         </div>
 
         <nav className="flex-1 overflow-y-auto py-2">
-          {navItems.map(({ to, label, icon: Icon }) => (
+          {visibleItems.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}
