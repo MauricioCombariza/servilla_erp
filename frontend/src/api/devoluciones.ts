@@ -33,4 +33,13 @@ export const devolucionesApi = {
 
   updateEstado: (id: number, estado: string) =>
     api.patch<Devolucion>(`/devoluciones/${id}`, { estado }),
+
+  escanearSerial: (serial: string) =>
+    api.patch<Devolucion>(`/devoluciones/serial/${encodeURIComponent(serial)}`, {
+      estado: "devolucion",
+    }),
+
+  generarDocumento: (
+    items: { serial: string; nombre: string | null; direccion: string | null; localidad: string | null }[]
+  ) => api.post("/devoluciones/documento", { items }, { responseType: "blob" }),
 };

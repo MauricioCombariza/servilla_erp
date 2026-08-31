@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Upload, AlertCircle, CheckCircle, FileText, Search } from "lucide-react";
 import { devolucionesApi } from "@/api/devoluciones";
 
-const ESTADOS_SUGERIDOS = ["transito", "entregado", "no_ubicado", "reasignado"];
+const ESTADOS_SUGERIDOS = ["transito", "entregado", "no_ubicado", "reasignado", "devolucion"];
 
 function formatFecha(iso: string) {
   return new Date(iso).toLocaleString("es-CO", { dateStyle: "short", timeStyle: "short" });
