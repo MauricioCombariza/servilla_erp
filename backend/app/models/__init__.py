@@ -11,3 +11,4 @@ from app.models.facturacion import (  # noqa: F401
 from app.models.gestiones import SerialGestion  # noqa: F401
 from app.models.planillas_revisadas import PlanillaRevisada  # noqa: F401
 from app.models.escaneos_carryt import EscaneoCarryt  # noqa: F401
+from app.models.devoluciones import Devolucion  # noqa: F401
