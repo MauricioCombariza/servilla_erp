@@ -3,6 +3,7 @@ import io
 
 import pandas as pd
 import pytest
+from docx import Document
 from sqlalchemy import delete
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -182,3 +183,86 @@ async def test_list_filtra_por_estado(client, headers, limpiar_devoluciones):
 
     r = await client.get("/api/devoluciones/", params={"estado": "entregado", "q": "DEV-TEST-001"}, headers=headers)
     assert all(f["serial"] != "DEV-TEST-001" for f in r.json())
+
+
+# ── Escaneo por serial ──────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_escanear_serial_actualiza_estado_devolucion(client, headers, limpiar_devoluciones):
+    contenido = _xlsx([
+        {"serial": "DEV-TEST-001", "nombre": "Juan", "telefono": "1", "direccion": "A", "localidad": "B"},
+    ])
+    await client.post(
+        "/api/devoluciones/carga-masiva",
+        files={"file": ("dev.xlsx", io.BytesIO(contenido),
+                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        headers=headers,
+    )
+
+    r = await client.patch(
+        "/api/devoluciones/serial/DEV-TEST-001", json={"estado": "devolucion"}, headers=headers
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["estado"] == "devolucion"
+
+    fila = (
+        await client.get("/api/devoluciones/", params={"q": "DEV-TEST-001"}, headers=headers)
+    ).json()[0]
+    assert fila["estado"] == "devolucion"
+
+
+@pytest.mark.asyncio
+async def test_escanear_serial_inexistente_404(client, headers):
+    r = await client.patch(
+        "/api/devoluciones/serial/DEV-NO-EXISTE", json={"estado": "devolucion"}, headers=headers
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_escanear_serial_es_idempotente(client, headers, limpiar_devoluciones):
+    contenido = _xlsx([
+        {"serial": "DEV-TEST-001", "nombre": "Juan", "telefono": "1", "direccion": "A", "localidad": "B"},
+    ])
+    await client.post(
+        "/api/devoluciones/carga-masiva",
+        files={"file": ("dev.xlsx", io.BytesIO(contenido),
+                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        headers=headers,
+    )
+
+    for _ in range(2):
+        r = await client.patch(
+            "/api/devoluciones/serial/DEV-TEST-001", json={"estado": "devolucion"}, headers=headers
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["estado"] == "devolucion"
+
+
+# ── Generación de acta .docx ────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_generar_documento_devolucion(client, headers):
+    body = {
+        "items": [
+            {"serial": "DEV-TEST-001", "nombre": "Juan Perez", "direccion": "CLL 1 2 3", "localidad": "Chapinero"},
+            {"serial": "DEV-TEST-002", "nombre": "Ana Gomez", "direccion": "KRA 5 6 7", "localidad": "Usaquen"},
+        ]
+    }
+    r = await client.post("/api/devoluciones/documento", json=body, headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+
+    doc = Document(io.BytesIO(r.content))
+    assert doc.paragraphs[0].text == "ACTA DE DEVOLUCIÓN"
+    tabla = doc.tables[0]
+    assert len(tabla.rows) == 3  # encabezado + 2 items
+    assert tabla.rows[1].cells[0].text == "DEV-TEST-001"
+
+
+@pytest.mark.asyncio
+async def test_generar_documento_items_vacios_422(client, headers):
+    r = await client.post("/api/devoluciones/documento", json={"items": []}, headers=headers)
+    assert r.status_code == 422
