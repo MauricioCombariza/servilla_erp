@@ -26,3 +26,14 @@ class CargaMasivaDevolucionesResult(BaseModel):
     nuevas: int
     actualizadas: int
     errores: list[str]
+
+
+class DevolucionDocumentoItem(BaseModel):
+    serial: str
+    nombre: str | None = None
+    direccion: str | None = None
+    localidad: str | None = None
+
+
+class DevolucionDocumentoRequest(BaseModel):
+    items: list[DevolucionDocumentoItem] = Field(min_length=1)
