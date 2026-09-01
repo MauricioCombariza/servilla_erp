@@ -3,5 +3,6 @@
 @tailwind utilities;
 
 @layer base {
-  body { @apply bg-surface text-gray-900 antialiased; }
+  body { @apply bg-surface text-gray-900 antialiased font-sans; }
+  h1, h2, h3 { @apply font-heading; }
 }

@@ -57,11 +57,17 @@ export function AppShell() {
       <aside
         className={`${
           sidebarOpen ? "w-56" : "w-0 overflow-hidden"
-        } transition-all duration-200 bg-gray-900 text-gray-100 flex flex-col flex-shrink-0`}
+        } transition-all duration-200 bg-brand-dark text-gray-100 flex flex-col flex-shrink-0`}
       >
-        <div className="px-4 py-5 border-b border-gray-700">
-          <p className="font-semibold text-white text-sm">Servilla ERP</p>
-          <p className="text-xs text-gray-400 mt-0.5 truncate">{nombreCompleto}</p>
+        <div className="px-4 py-5 border-b border-white/10">
+          <div className="flex items-center gap-2">
+            <img src="/brand/icono.svg" alt="" className="w-6 h-6 flex-shrink-0" />
+            <p className="font-heading font-bold text-white text-base tracking-wide">AgriVision</p>
+          </div>
+          <p className="text-[10px] text-brand-gold tracking-wide mt-1">
+            DATOS DEL CAMPO. DECISIONES CIERTAS.
+          </p>
+          <p className="text-xs text-gray-400 mt-2 truncate">{nombreCompleto}</p>
           <span className="text-xs text-gray-500 capitalize">{role}</span>
         </div>
 
@@ -74,7 +80,7 @@ export function AppShell() {
                 `flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
                   isActive
                     ? "bg-primary text-white"
-                    : "text-gray-300 hover:bg-gray-800 hover:text-white"
+                    : "text-gray-300 hover:bg-white/10 hover:text-white"
                 }`
               }
             >
@@ -86,7 +92,7 @@ export function AppShell() {
 
         <button
           onClick={handleLogout}
-          className="flex items-center gap-3 px-4 py-3 text-sm text-gray-400 hover:text-white hover:bg-gray-800 border-t border-gray-700"
+          className="flex items-center gap-3 px-4 py-3 text-sm text-gray-400 hover:text-white hover:bg-white/10 border-t border-white/10"
         >
           <LogOut size={16} />
           Cerrar sesión
@@ -95,7 +101,7 @@ export function AppShell() {
 
       {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-12 bg-white border-b border-gray-200 flex items-center px-4 gap-3 flex-shrink-0">
+        <header className="h-12 bg-white border-b-2 border-brand-gold flex items-center px-4 gap-3 flex-shrink-0">
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
             className="text-gray-500 hover:text-gray-900"
