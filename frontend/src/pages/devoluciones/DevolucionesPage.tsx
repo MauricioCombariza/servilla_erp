@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Upload, AlertCircle, CheckCircle, FileText, FileDown, Search, Download } from "lucide-react";
+import { Upload, AlertCircle, CheckCircle, FileText, FileDown, Search, Download, Plus, X } from "lucide-react";
 import { devolucionesApi } from "@/api/devoluciones";
 
 const ESTADOS_SUGERIDOS = ["transito", "entregado", "no_ubicado", "reasignado", "devolucion"];
@@ -56,6 +56,119 @@ function EstadoSelect({ id, estado }: { id: number; estado: string }) {
   );
 }
 
+function NuevaDevolucionForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const [form, setForm] = useState({
+    serial: "",
+    nombre: "",
+    telefono: "",
+    direccion: "",
+    localidad: "",
+    estado: "transito",
+  });
+  const [error, setError] = useState("");
+
+  const crearMutation = useMutation({
+    mutationFn: () =>
+      devolucionesApi.create({
+        serial: form.serial.trim(),
+        nombre: form.nombre.trim() || undefined,
+        telefono: form.telefono.trim() || undefined,
+        direccion: form.direccion.trim() || undefined,
+        localidad: form.localidad.trim() || undefined,
+        estado: form.estado,
+      }),
+    onSuccess: onCreated,
+    onError: (e: unknown) => {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setError(msg ?? "Error al crear la devolución");
+    },
+  });
+
+  function campo(clave: keyof typeof form) {
+    return {
+      value: form[clave],
+      onChange: (e: React.ChangeEvent<HTMLInputElement>) =>
+        setForm((f) => ({ ...f, [clave]: e.target.value })),
+    };
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.serial.trim()) {
+      setError("El serial es obligatorio");
+      return;
+    }
+    setError("");
+    crearMutation.mutate();
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-lg w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 sticky top-0 bg-white">
+          <h2 className="font-semibold text-gray-900">Nueva devolución</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X size={20} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Serial *</label>
+            <input {...campo("serial")}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-primary outline-none" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Nombre</label>
+            <input {...campo("nombre")}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Teléfono</label>
+            <input {...campo("telefono")}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Dirección</label>
+            <input {...campo("direccion")}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Localidad</label>
+            <input {...campo("localidad")}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Estado</label>
+            <select
+              value={form.estado}
+              onChange={(e) => setForm((f) => ({ ...f, estado: e.target.value }))}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-primary outline-none"
+            >
+              {ESTADOS_SUGERIDOS.map((op) => (
+                <option key={op} value={op}>{op}</option>
+              ))}
+            </select>
+          </div>
+
+          {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
+
+          <div className="flex justify-end gap-3">
+            <button type="button" onClick={onClose}
+              className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
+              Cancelar
+            </button>
+            <button type="submit" disabled={crearMutation.isPending}
+              className="px-4 py-2 text-sm bg-primary hover:bg-primary-hover text-white rounded-lg font-medium disabled:opacity-60">
+              {crearMutation.isPending ? "Guardando..." : "Guardar"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export function DevolucionesPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -68,6 +181,7 @@ export function DevolucionesPage() {
   const [fechaReporte, setFechaReporte] = useState(() => new Date().toISOString().slice(0, 10));
   const [descargandoReporte, setDescargandoReporte] = useState(false);
   const [errorReporte, setErrorReporte] = useState("");
+  const [showNuevaDevolucion, setShowNuevaDevolucion] = useState(false);
 
   const queryClient = useQueryClient();
 
@@ -168,13 +282,23 @@ export function DevolucionesPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold text-gray-900">Devoluciones</h1>
-        <p className="text-sm text-gray-500 mt-0.5">
-          Seriales devueltos, cargados desde Excel. Al subir un archivo, los seriales
-          nuevos entran con estado "transito"; los que ya existen solo actualizan sus
-          datos de contacto (el estado no se pisa).
-        </p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold text-gray-900">Devoluciones</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Seriales devueltos, cargados desde Excel. Al subir un archivo, los seriales
+            nuevos entran con estado "transito"; los que ya existen solo actualizan sus
+            datos de contacto (el estado no se pisa).
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowNuevaDevolucion(true)}
+          className="flex items-center gap-2 bg-primary hover:bg-primary-hover text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex-shrink-0"
+        >
+          <Plus size={16} />
+          Nueva devolución
+        </button>
       </div>
 
       {/* Reporte del día */}
@@ -406,6 +530,16 @@ export function DevolucionesPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {showNuevaDevolucion && (
+        <NuevaDevolucionForm
+          onClose={() => setShowNuevaDevolucion(false)}
+          onCreated={() => {
+            queryClient.invalidateQueries({ queryKey: ["devoluciones"] });
+            setShowNuevaDevolucion(false);
+          }}
+        />
       )}
     </div>
   );

@@ -23,6 +23,15 @@ export const devolucionesApi = {
   list: (params?: { estado?: string; q?: string; limit?: number; offset?: number }) =>
     api.get<Devolucion[]>("/devoluciones/", { params }),
 
+  create: (data: {
+    serial: string;
+    nombre?: string;
+    telefono?: string;
+    direccion?: string;
+    localidad?: string;
+    estado?: string;
+  }) => api.post<Devolucion>("/devoluciones/", data),
+
   cargaMasiva: (file: File) => {
     const form = new FormData();
     form.append("file", file);

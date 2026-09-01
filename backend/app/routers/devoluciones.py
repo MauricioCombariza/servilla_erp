@@ -1,7 +1,8 @@
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_page
@@ -9,6 +10,7 @@ from app.database import get_db
 from app.models.devoluciones import Devolucion
 from app.schemas.devoluciones import (
     CargaMasivaDevolucionesResult,
+    DevolucionCreate,
     DevolucionDocumentoItem,
     DevolucionDocumentoRequest,
     DevolucionEstadoUpdate,
@@ -45,6 +47,28 @@ async def list_devoluciones(
     query = query.limit(limit).offset(offset)
     result = await db.execute(query)
     return result.scalars().all()
+
+
+@router.post("/", response_model=DevolucionRead, status_code=status.HTTP_201_CREATED)
+async def crear_devolucion(body: DevolucionCreate, db: AsyncSession = Depends(get_db), _=_auth):
+    devolucion = Devolucion(
+        serial=body.serial.strip(),
+        nombre=body.nombre or None,
+        telefono=body.telefono or None,
+        direccion=body.direccion or None,
+        localidad=body.localidad or None,
+        estado=body.estado,
+    )
+    db.add(devolucion)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=400, detail=f"Ya existe una devolución con el serial '{body.serial}'"
+        )
+    await db.refresh(devolucion)
+    return devolucion
 
 
 @router.post("/carga-masiva", response_model=CargaMasivaDevolucionesResult)
