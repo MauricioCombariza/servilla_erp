@@ -1,12 +1,25 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Upload, AlertCircle, CheckCircle, FileText, FileDown, Search } from "lucide-react";
+import { Upload, AlertCircle, CheckCircle, FileText, FileDown, Search, Download } from "lucide-react";
 import { devolucionesApi } from "@/api/devoluciones";
 
 const ESTADOS_SUGERIDOS = ["transito", "entregado", "no_ubicado", "reasignado", "devolucion"];
 
 function formatFecha(iso: string) {
   return new Date(iso).toLocaleString("es-CO", { dateStyle: "short", timeStyle: "short" });
+}
+
+async function extraerErrorBlob(e: unknown): Promise<string> {
+  const data = (e as { response?: { data?: unknown } })?.response?.data;
+  if (data instanceof Blob) {
+    try {
+      const parsed = JSON.parse(await data.text());
+      if (typeof parsed?.detail === "string") return parsed.detail;
+    } catch {
+      // no era JSON, cae al mensaje genérico
+    }
+  }
+  return "Error al generar el reporte";
 }
 
 function EstadoSelect({ id, estado }: { id: number; estado: string }) {
@@ -52,6 +65,9 @@ export function DevolucionesPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [generando, setGenerando] = useState(false);
   const [errorDocumento, setErrorDocumento] = useState("");
+  const [fechaReporte, setFechaReporte] = useState(() => new Date().toISOString().slice(0, 10));
+  const [descargandoReporte, setDescargandoReporte] = useState(false);
+  const [errorReporte, setErrorReporte] = useState("");
 
   const queryClient = useQueryClient();
 
@@ -111,6 +127,24 @@ export function DevolucionesPage() {
     }
   }
 
+  async function handleDescargarReporte() {
+    setDescargandoReporte(true);
+    setErrorReporte("");
+    try {
+      const r = await devolucionesApi.reporteDia(fechaReporte);
+      const url = URL.createObjectURL(r.data as Blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `acta_devolucion_${fechaReporte}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: unknown) {
+      setErrorReporte(await extraerErrorBlob(e));
+    } finally {
+      setDescargandoReporte(false);
+    }
+  }
+
   const cargaMutation = useMutation({
     mutationFn: (f: File) => devolucionesApi.cargaMasiva(f),
     onSuccess: () => {
@@ -141,6 +175,29 @@ export function DevolucionesPage() {
           nuevos entran con estado "transito"; los que ya existen solo actualizan sus
           datos de contacto (el estado no se pisa).
         </p>
+      </div>
+
+      {/* Reporte del día */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6 flex items-center gap-3 flex-wrap">
+        <label className="text-sm font-medium text-gray-700">
+          Reporte de devoluciones del día
+        </label>
+        <input
+          type="date"
+          value={fechaReporte}
+          onChange={(e) => setFechaReporte(e.target.value)}
+          className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
+        />
+        <button
+          type="button"
+          onClick={handleDescargarReporte}
+          disabled={descargandoReporte || !fechaReporte}
+          className="inline-flex items-center gap-2 bg-gray-800 hover:bg-gray-900 text-white font-medium px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
+        >
+          <Download size={16} />
+          {descargandoReporte ? "Generando..." : "Descargar reporte (PDF)"}
+        </button>
+        {errorReporte && <p className="text-sm text-red-600">{errorReporte}</p>}
       </div>
 
       {/* Zona de carga */}

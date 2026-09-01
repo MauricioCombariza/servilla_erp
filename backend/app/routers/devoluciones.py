@@ -1,7 +1,7 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_page
@@ -9,11 +9,13 @@ from app.database import get_db
 from app.models.devoluciones import Devolucion
 from app.schemas.devoluciones import (
     CargaMasivaDevolucionesResult,
+    DevolucionDocumentoItem,
     DevolucionDocumentoRequest,
     DevolucionEstadoUpdate,
     DevolucionRead,
 )
 from app.services.devoluciones_docx import DOCX_MEDIA_TYPE, construir_docx_devolucion
+from app.services.devoluciones_pdf import PDF_MEDIA_TYPE, construir_pdf_devolucion
 from app.services.devoluciones_service import procesar_excel_devoluciones
 
 router = APIRouter(prefix="/api/devoluciones", tags=["devoluciones"])
@@ -107,5 +109,42 @@ async def generar_documento(body: DevolucionDocumentoRequest, _=_auth_scan):
     return Response(
         content=contenido,
         media_type=DOCX_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'},
+    )
+
+
+@router.get("/reporte-dia")
+async def reporte_dia(
+    fecha: date = Query(default_factory=date.today),
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    query = (
+        select(Devolucion)
+        .where(
+            Devolucion.estado == "devolucion",
+            func.date(Devolucion.fecha_actualizacion) == fecha,
+        )
+        .order_by(Devolucion.fecha_actualizacion)
+    )
+    result = await db.execute(query)
+    devoluciones = result.scalars().all()
+    if not devoluciones:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No hay devoluciones marcadas como 'devolucion' el {fecha.isoformat()}.",
+        )
+
+    items = [
+        DevolucionDocumentoItem(
+            serial=d.serial, nombre=d.nombre, direccion=d.direccion, localidad=d.localidad
+        )
+        for d in devoluciones
+    ]
+    contenido = construir_pdf_devolucion(items, fecha)
+    nombre_archivo = f"acta_devolucion_{fecha.isoformat()}.pdf"
+    return Response(
+        content=contenido,
+        media_type=PDF_MEDIA_TYPE,
         headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'},
     )

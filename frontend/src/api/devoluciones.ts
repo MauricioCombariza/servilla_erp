@@ -42,4 +42,7 @@ export const devolucionesApi = {
   generarDocumento: (
     items: { serial: string; nombre: string | null; direccion: string | null; localidad: string | null }[]
   ) => api.post("/devoluciones/documento", { items }, { responseType: "blob" }),
+
+  reporteDia: (fecha: string) =>
+    api.get("/devoluciones/reporte-dia", { params: { fecha }, responseType: "blob" }),
 };
