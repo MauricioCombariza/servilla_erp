@@ -19,6 +19,19 @@ _PAGE_WIDTH, _PAGE_HEIGHT = letter
 _HEADER_ASPECT = 338 / 1426  # alto/ancho real de header_logo.png
 _FOOTER_ASPECT = 590 / 340  # alto/ancho real de footer_graphic.png
 
+# Table no envuelve el texto plano de una celda: si es más largo que la columna
+# se translapa sobre la columna siguiente. Se recortan Nombre/Dirección (texto
+# libre) según el ancho de su columna; el serial NO se toca, es el identificador
+# real del paquete.
+_MAX_NOMBRE_CHARS = 28
+_MAX_DIRECCION_CHARS = 40
+
+
+def _truncar(texto: str, maximo: int) -> str:
+    if len(texto) <= maximo:
+        return texto
+    return texto[: maximo - 1].rstrip() + "…"
+
 
 def _dibujar_footer(canvas, _doc) -> None:
     if not FOOTER_GRAPHIC.exists():
@@ -71,7 +84,9 @@ def construir_pdf_devolucion(items: list[DevolucionDocumentoItem], fecha: date) 
 
     data = [["Serial", "Nombre", "Dirección", "Localidad"]]
     for item in items:
-        data.append([item.serial, item.nombre or "", item.direccion or "", item.localidad or ""])
+        nombre = _truncar(item.nombre or "", _MAX_NOMBRE_CHARS)
+        direccion = _truncar(item.direccion or "", _MAX_DIRECCION_CHARS)
+        data.append([item.serial, nombre, direccion, item.localidad or ""])
 
     tabla = Table(
         data,
