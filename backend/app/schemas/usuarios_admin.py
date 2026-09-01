@@ -21,6 +21,7 @@ class UsuarioAdminCreate(UsuarioAdminBase):
 
 
 class UsuarioAdminUpdate(BaseModel):
+    username: str | None = Field(default=None, min_length=3, max_length=50)
     nombre_completo: str | None = Field(default=None, min_length=1, max_length=100)
     email: str | None = None
     rol: str | None = Field(default=None, min_length=1, max_length=30)

@@ -1,6 +1,6 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Upload, AlertCircle, CheckCircle, FileText, Search } from "lucide-react";
+import { Upload, AlertCircle, CheckCircle, FileText, FileDown, Search } from "lucide-react";
 import { devolucionesApi } from "@/api/devoluciones";
 
 const ESTADOS_SUGERIDOS = ["transito", "entregado", "no_ubicado", "reasignado", "devolucion"];
@@ -49,6 +49,9 @@ export function DevolucionesPage() {
   const [uploadError, setUploadError] = useState("");
   const [estadoFiltro, setEstadoFiltro] = useState("");
   const [q, setQ] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [generando, setGenerando] = useState(false);
+  const [errorDocumento, setErrorDocumento] = useState("");
 
   const queryClient = useQueryClient();
 
@@ -59,6 +62,54 @@ export function DevolucionesPage() {
         .list({ estado: estadoFiltro || undefined, q: q || undefined })
         .then((r) => r.data),
   });
+
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [estadoFiltro, q]);
+
+  function toggleRow(id: number) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    setSelectedIds((prev) => {
+      const allSelected = devoluciones.length > 0 && devoluciones.every((d) => prev.has(d.id));
+      return allSelected ? new Set() : new Set(devoluciones.map((d) => d.id));
+    });
+  }
+
+  async function handleGenerarDocumento() {
+    setGenerando(true);
+    setErrorDocumento("");
+    try {
+      const seleccionadas = devoluciones.filter((d) => selectedIds.has(d.id));
+      const r = await devolucionesApi.generarDocumento(
+        seleccionadas.map((d) => ({
+          serial: d.serial,
+          nombre: d.nombre,
+          direccion: d.direccion,
+          localidad: d.localidad,
+        }))
+      );
+      const url = URL.createObjectURL(r.data as Blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `acta_devolucion_${new Date().toISOString().slice(0, 10)}.docx`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setSelectedIds(new Set());
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setErrorDocumento(msg ?? "Error al generar el documento");
+    } finally {
+      setGenerando(false);
+    }
+  }
 
   const cargaMutation = useMutation({
     mutationFn: (f: File) => devolucionesApi.cargaMasiva(f),
@@ -211,6 +262,32 @@ export function DevolucionesPage() {
         </select>
       </div>
 
+      {/* Selección y generación de documento */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center justify-between gap-3 bg-primary/5 border border-primary/20 rounded-xl px-4 py-2.5 mb-4">
+          <p className="text-sm text-gray-700">
+            <span className="font-semibold">{selectedIds.size}</span> devolución
+            {selectedIds.size === 1 ? "" : "es"} seleccionada{selectedIds.size === 1 ? "" : "s"}
+          </p>
+          <button
+            type="button"
+            onClick={handleGenerarDocumento}
+            disabled={generando}
+            className="inline-flex items-center gap-2 bg-primary hover:bg-primary-hover text-white font-medium px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-60"
+          >
+            <FileDown size={16} />
+            {generando ? "Generando..." : "Generar documento"}
+          </button>
+        </div>
+      )}
+
+      {errorDocumento && (
+        <div className="mb-4 bg-red-50 border border-red-200 rounded-xl p-3 flex items-start gap-2">
+          <AlertCircle size={16} className="text-red-500 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-red-700">{errorDocumento}</p>
+        </div>
+      )}
+
       {/* Tabla */}
       {isLoading ? (
         <p className="text-sm text-gray-500">Cargando...</p>
@@ -226,6 +303,15 @@ export function DevolucionesPage() {
           <table className="min-w-full text-sm">
             <thead>
               <tr className="bg-gray-50 text-gray-500 text-xs">
+                <th className="text-left px-3 py-2 font-medium w-8">
+                  <input
+                    type="checkbox"
+                    checked={devoluciones.length > 0 && devoluciones.every((d) => selectedIds.has(d.id))}
+                    onChange={toggleAll}
+                    className="rounded border-gray-300"
+                    aria-label="Seleccionar todas"
+                  />
+                </th>
                 <th className="text-left px-3 py-2 font-medium">Serial</th>
                 <th className="text-left px-3 py-2 font-medium">Nombre</th>
                 <th className="text-left px-3 py-2 font-medium">Teléfono</th>
@@ -238,6 +324,15 @@ export function DevolucionesPage() {
             <tbody>
               {devoluciones.map((d) => (
                 <tr key={d.id} className="border-t border-gray-100">
+                  <td className="px-3 py-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(d.id)}
+                      onChange={() => toggleRow(d.id)}
+                      className="rounded border-gray-300"
+                      aria-label={`Seleccionar ${d.serial}`}
+                    />
+                  </td>
                   <td className="px-3 py-2 text-gray-900 font-mono text-xs">{d.serial}</td>
                   <td className="px-3 py-2 text-gray-700">{d.nombre}</td>
                   <td className="px-3 py-2 text-gray-600">{d.telefono}</td>

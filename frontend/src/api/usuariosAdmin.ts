@@ -11,7 +11,7 @@ export const usuariosAdminApi = {
   create: (data: { username: string; password: string; nombre_completo: string; email?: string; rol: string }) =>
     api.post<Usuario>("/admin/usuarios", data),
 
-  update: (id: number, data: Partial<Pick<Usuario, "nombre_completo" | "email" | "rol" | "activo">>) =>
+  update: (id: number, data: Partial<Pick<Usuario, "username" | "nombre_completo" | "email" | "rol" | "activo">>) =>
     api.put<Usuario>(`/admin/usuarios/${id}`, data),
 
   resetPassword: (id: number, password: string) =>

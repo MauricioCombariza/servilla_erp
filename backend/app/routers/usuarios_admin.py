@@ -99,6 +99,8 @@ async def update_usuario(
         msg = str(e.orig)
         if "fk_usuarios_rol" in msg:
             raise HTTPException(status_code=400, detail=f"El rol '{data.get('rol')}' no existe")
+        if "username" in msg:
+            raise HTTPException(status_code=400, detail="El username ya existe")
         raise HTTPException(status_code=400, detail="Error al actualizar el usuario")
     await db.refresh(usuario)
     return usuario

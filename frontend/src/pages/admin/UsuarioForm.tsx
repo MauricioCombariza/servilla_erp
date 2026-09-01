@@ -44,6 +44,7 @@ export function UsuarioForm({ initial, roles, onClose, onSaved }: Props) {
     try {
       if (initial) {
         await usuariosAdminApi.update(initial.id, {
+          username: data.username,
           nombre_completo: data.nombre_completo,
           email: data.email || undefined,
           rol: data.rol,
@@ -86,7 +87,6 @@ export function UsuarioForm({ initial, roles, onClose, onSaved }: Props) {
             <label className="block text-xs font-medium text-gray-700 mb-1">Usuario *</label>
             <input {...register("username")}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-primary outline-none"
-              disabled={!!initial}
             />
             {errors.username && <p className="text-xs text-red-600 mt-1">{errors.username.message}</p>}
           </div>
