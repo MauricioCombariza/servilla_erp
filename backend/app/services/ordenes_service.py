@@ -38,7 +38,26 @@ Soporta tres formatos de origen:
       - tipo_servicio   = 'sobre' (fijo)
       - ambito          = derivado de ciudad1
 
-Reglas comunes:
+  Flujo 4 — Carryt entrega (detectado por columnas 'cod_men' + 'nombre_mensajero'
+    + 'serial' sin columna 'orden'):
+    Columnas origen: Cliente, fecha, serial, cod_men, nombre_mensajero
+    (mismo shape que exporta escaneos_carryt_service.py + columna Cliente).
+    A diferencia de los otros 3 flujos, este NO crea seriales_gestion/ordenes
+    nuevos — solo confirma la entrega de seriales ya cargados por otra vía:
+      - Busca el serial (normalizado cortando en el primer guion, igual que
+        app/schemas/escaneos_carryt.normalizar_serial) contra
+        split_part(seriales_gestion.serial, '-', 1).
+      - Sin match, match ambiguo (colisión de normalización), cod_men no
+        resuelto en personal activo, o cliente que no coincide con el del
+        serial encontrado → la fila se omite y se cuenta como advertencia.
+      - Match único, no bloqueado (estado='pendiente' AND
+        editado_manualmente=FALSE) → UPDATE de cod_men, mensajero_id y
+        tipo_gestion='Entrega' (equivalente a "marcar como entregado"; el
+        esquema no tiene un estado 'entregado' propio). estado no se toca.
+      - Igual que los demás flujos, respeta DATE_CORTE.
+    Ver _procesar_carryt_entrega.
+
+Reglas comunes (flujos 1-3):
   - Solo se procesan filas con fecha (fecha_recepcion/f_esc) >= 2026-01-01.
   - Serial nuevo → INSERT; existente con estado='pendiente' → UPDATE; otro estado → no-op.
   - Al finalizar seriales, upsert en ordenes agrupando por número de orden.
@@ -87,6 +106,7 @@ _COLUMNAS_UTILES = frozenset({
     "colum_ciudad", "ciudad1", "estado", "planilla", "lot_esc", "cod_men",
     "courrier", "courier",
     "waybill no.", "scan time", "da",
+    "cliente", "fecha", "nombre_mensajero",
 })
 
 
@@ -104,6 +124,29 @@ def _normalizar_nombre(s: str) -> str:
 
 def _es_flujo_imile(df: pd.DataFrame) -> bool:
     return "Waybill No." in df.columns and "Scan time" in df.columns
+
+
+def _peek_columnas(origen: bytes | str, filename: str) -> set[str]:
+    """Lee solo el encabezado (nrows=0) para detectar el flujo Carryt entrega
+    sin materializar el archivo completo. Un archivo corrupto/no parseable no
+    debe fallar aquí — se detecta como "no es Carryt" y el error real de
+    lectura lo reporta, igual que antes, el manejo existente dentro del loop
+    de chunks de procesar_csv."""
+    try:
+        fuente: io.BytesIO | str = io.BytesIO(origen) if isinstance(origen, bytes) else origen
+        if filename.endswith(".xlsx"):
+            df0 = pd.read_excel(fuente, nrows=0)
+        else:
+            df0 = pd.read_csv(fuente, nrows=0)
+        return {str(c).strip().lower() for c in df0.columns}
+    except Exception:
+        return set()
+
+
+def _es_flujo_carryt_entrega(cols: set[str]) -> bool:
+    """Cliente, fecha, serial, cod_men, nombre_mensajero — sin 'orden' (los
+    otros 3 flujos siempre la traen)."""
+    return {"cod_men", "nombre_mensajero", "serial"} <= cols and "orden" not in cols
 
 
 def _transformar_imile(df: pd.DataFrame) -> pd.DataFrame:
@@ -238,6 +281,29 @@ _ORDEN_EXISTS = (
     text("SELECT numero_orden, id FROM ordenes WHERE numero_orden = ANY(:nums)")
     .bindparams(bindparam("nums", type_=ARRAY(String)))
 )
+
+# split_part(serial, '-', 1) matchea tanto si seriales_gestion.serial quedó
+# guardado como UUID completo como si ya está en forma corta (sin guion,
+# split_part devuelve el string completo).
+_CARRYT_MATCH_QUERY = (
+    text("""
+        SELECT id, split_part(serial, '-', 1) AS norm,
+               cliente_id, estado, editado_manualmente
+        FROM seriales_gestion
+        WHERE split_part(serial, '-', 1) = ANY(:normalizados)
+    """)
+    .bindparams(bindparam("normalizados", type_=ARRAY(String)))
+)
+
+_CARRYT_ENTREGA_UPDATE = text("""
+    UPDATE seriales_gestion
+    SET cod_men      = :cod_men,
+        mensajero_id = :mensajero_id,
+        tipo_gestion = 'Entrega'
+    WHERE id = :id
+      AND estado = 'pendiente'
+      AND editado_manualmente = FALSE
+""")
 
 
 def _iter_chunks(origen: bytes | str, filename: str) -> Iterator[pd.DataFrame]:
@@ -396,12 +462,185 @@ def _resolver_cod_men_imile(
     return df["_da_nombre"].apply(_resolver)
 
 
+def _normalizar_serial_carryt(serie: pd.Series) -> pd.Series:
+    """Cortar en el primer guion, igual que
+    app/schemas/escaneos_carryt.normalizar_serial — reimplementado localmente
+    (no importado) porque ambos dominios están deliberadamente desacoplados
+    en el resto del código."""
+    return serie.fillna("").astype(str).str.strip().str.split("-", n=1).str[0]
+
+
+async def _procesar_carryt_entrega(
+    origen: bytes | str,
+    filename: str,
+    db: AsyncSession,
+) -> CargaMasivaResult:
+    """Flujo 4: confirma entrega de seriales Carryt ya existentes (ver
+    docstring del módulo). Solo UPDATE — nunca crea seriales_gestion/ordenes."""
+    errores: list[str] = []
+    total_filas = 0
+    filas_ignoradas = 0
+    sg_actualizados = 0
+    sg_bloqueados = 0
+    sin_match: Counter[str] = Counter()
+    ambiguos: Counter[str] = Counter()
+    cod_men_no_resueltos: Counter[str] = Counter()
+    clientes_no_encontrados: Counter[str] = Counter()
+    clientes_no_coinciden: Counter[str] = Counter()
+
+    clientes_by_name, _, _, personal_by_code, _ = await _cargar_maestros(db)
+
+    chunks = _iter_chunks(origen, filename)
+    while True:
+        try:
+            chunk = next(chunks)
+        except StopIteration:
+            break
+        except Exception as e:
+            errores.append(f"Error leyendo archivo: {e}")
+            break
+
+        chunk = chunk.dropna(how="all")
+        chunk.columns = [str(c).strip().lower() for c in chunk.columns]
+
+        faltantes = {"cliente", "fecha", "serial", "cod_men", "nombre_mensajero"} - set(chunk.columns)
+        if faltantes:
+            errores.append(f"Columnas faltantes: {', '.join(sorted(faltantes))}")
+            break
+
+        total_filas += len(chunk)
+
+        fechas = _parse_fechas(chunk["fecha"])
+        vigentes = fechas.notna() & (fechas >= pd.Timestamp(DATE_CORTE))
+        filas_ignoradas += int((~vigentes).sum())
+        chunk = chunk[vigentes].copy()
+        if chunk.empty:
+            continue
+
+        # Prefijo k_ (no guion bajo inicial) a propósito: itertuples() renombra a
+        # posicional cualquier columna cuyo nombre no sea un identificador válido
+        # de namedtuple (ver comentario de _derivar_valores más arriba).
+        chunk["k_norm"] = _normalizar_serial_carryt(chunk["serial"])
+        chunk["k_cod_men"] = _limpiar_texto(chunk["cod_men"]).str.upper().apply(
+            lambda v: v.zfill(4)[:4] if v else ""
+        )
+        chunk["k_cliente_txt"] = chunk["cliente"].fillna("").astype(str).str.strip()
+
+        for i in range(0, len(chunk), LOTE_UPSERT):
+            lote = chunk.iloc[i:i + LOTE_UPSERT]
+            normalizados = [n for n in lote["k_norm"].tolist() if n]
+            if not normalizados:
+                sin_match["(serial vacío)"] += len(lote)
+                continue
+
+            rows = (
+                await db.execute(_CARRYT_MATCH_QUERY, {"normalizados": normalizados})
+            ).fetchall()
+            matches_by_norm: dict[str, list] = {}
+            for r in rows:
+                matches_by_norm.setdefault(r.norm, []).append(r)
+
+            a_procesar: list[dict] = []
+            for fila in lote.itertuples(index=False):
+                norm = fila.k_norm
+                if not norm:
+                    sin_match["(serial vacío)"] += 1
+                    continue
+
+                candidatos = matches_by_norm.get(norm, [])
+                if not candidatos:
+                    sin_match[norm] += 1
+                    continue
+                if len(candidatos) > 1:
+                    ambiguos[norm] += 1
+                    continue
+
+                row = candidatos[0]
+                if row.estado != "pendiente" or row.editado_manualmente:
+                    sg_bloqueados += 1
+                    continue
+
+                cod_men_val = fila.k_cod_men
+                men_info = personal_by_code.get(cod_men_val) if cod_men_val else None
+                if not men_info:
+                    cod_men_no_resueltos[f"{cod_men_val or '(vacío)'} / {fila.nombre_mensajero}"] += 1
+                    continue
+
+                cliente_txt = fila.k_cliente_txt
+                id_cliente = clientes_by_name.get(cliente_txt.lower())
+                if not id_cliente:
+                    clientes_no_encontrados[cliente_txt] += 1
+                    continue
+                if id_cliente != row.cliente_id:
+                    clientes_no_coinciden[norm] += 1
+                    continue
+
+                sg_actualizados += 1
+                a_procesar.append({
+                    "id": row.id, "cod_men": cod_men_val,
+                    "mensajero_id": men_info["id"],
+                })
+
+            if a_procesar:
+                try:
+                    await db.execute(text("SAVEPOINT sp_batch_carryt"))
+                    await db.execute(_CARRYT_ENTREGA_UPDATE, a_procesar)
+                    await db.execute(text("RELEASE SAVEPOINT sp_batch_carryt"))
+                except Exception as e:
+                    await db.execute(text("ROLLBACK TO SAVEPOINT sp_batch_carryt"))
+                    logger.error("Error en batch carryt entrega: %s", e)
+                    if len(errores) < MAX_ERRORES:
+                        errores.append(f"Error en batch carryt entrega: {e}")
+
+        await db.commit()
+
+    if clientes_no_encontrados:
+        errores.insert(0, _resumen_conteo(
+            clientes_no_encontrados, "filas Carryt con cliente no encontrado"
+        ))
+    if sin_match:
+        errores.append(_resumen_conteo(
+            sin_match, "seriales Carryt sin coincidencia en seriales_gestion (no se creó ninguno)"
+        ))
+    if ambiguos:
+        errores.append(_resumen_conteo(
+            ambiguos, "seriales Carryt ambiguos (más de una fila coincide, no se actualizó ninguna)"
+        ))
+    if cod_men_no_resueltos:
+        errores.append(_resumen_conteo(
+            cod_men_no_resueltos, "filas Carryt con cod_men no resuelto en personal activo"
+        ))
+    if clientes_no_coinciden:
+        errores.append(_resumen_conteo(
+            clientes_no_coinciden,
+            "seriales Carryt cuyo cliente no coincide con seriales_gestion (no se actualizó)",
+        ))
+
+    logger.info(
+        "Carga masiva Carryt entrega: actualizados=%d bloqueados=%d ignoradas=%d errores=%d",
+        sg_actualizados, sg_bloqueados, filas_ignoradas, len(errores),
+    )
+    return CargaMasivaResult(
+        total_filas=total_filas,
+        filas_ignoradas=filas_ignoradas,
+        seriales_nuevos=0,
+        seriales_actualizados=sg_actualizados,
+        seriales_bloqueados=sg_bloqueados,
+        ordenes_nuevas=0,
+        ordenes_actualizadas=0,
+        errores=errores[:MAX_ERRORES],
+    )
+
+
 async def procesar_csv(
     origen: bytes | str,
     db: AsyncSession,
     filename: str = "",
 ) -> CargaMasivaResult:
     """Procesa el archivo por chunks. `origen` = contenido en bytes o ruta en disco."""
+    if _es_flujo_carryt_entrega(_peek_columnas(origen, filename)):
+        return await _procesar_carryt_entrega(origen, filename, db)
+
     errores: list[str] = []
     total_filas = 0
     filas_ignoradas = 0
