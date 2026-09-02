@@ -60,14 +60,8 @@ export function AppShell() {
         } transition-all duration-200 bg-brand-dark text-gray-100 flex flex-col flex-shrink-0`}
       >
         <div className="px-4 py-5 border-b border-white/10">
-          <div className="flex items-center gap-2">
-            <img src="/brand/icono.svg" alt="" className="w-6 h-6 flex-shrink-0" />
-            <p className="font-heading font-bold text-white text-base tracking-wide">AgriVision</p>
-          </div>
-          <p className="text-[10px] text-brand-gold tracking-wide mt-1">
-            DATOS DEL CAMPO. DECISIONES CIERTAS.
-          </p>
-          <p className="text-xs text-gray-400 mt-2 truncate">{nombreCompleto}</p>
+          <img src="/brand/logo-blanco.svg" alt="AgriVision" className="h-6 w-auto" />
+          <p className="text-xs text-gray-400 mt-3 truncate">{nombreCompleto}</p>
           <span className="text-xs text-gray-500 capitalize">{role}</span>
         </div>
 

@@ -39,10 +39,7 @@ export function Login() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-brand-bg">
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 border-t-4 border-t-brand-gold p-8 w-full max-w-sm">
-        <div className="flex items-center gap-2 mb-1">
-          <img src="/brand/icono.svg" alt="" className="w-8 h-8" />
-          <h1 className="font-heading text-2xl font-bold text-brand">AgriVision</h1>
-        </div>
+        <img src="/brand/logo-color.svg" alt="AgriVision" className="h-9 w-auto mb-2" />
         <p className="text-sm text-gray-500 mb-6">Módulo Logística</p>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
