@@ -1,4 +1,3 @@
-import re
 from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -13,8 +12,7 @@ class EscaneoCarrytCreate(BaseModel):
     @classmethod
     def normalizar_serial(cls, v: str) -> str:
         v = v.strip()
-        match = re.match(r"^(\d+)", v)
-        return match.group(1) if match else v
+        return v.split("-", 1)[0]
 
 
 class EscaneoCarrytRead(BaseModel):

@@ -1,10 +1,9 @@
-"""Normalizar serial de escaneos_carryt a solo los digitos iniciales y eliminar duplicados
+"""Normalizar serial de escaneos_carryt al primer segmento (antes del primer guion) y eliminar duplicados
 
 Revision ID: 025
 Revises: 024
 Create Date: 2026-09-02
 """
-import re
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -18,8 +17,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def _normalizar(serial: str) -> str:
-    match = re.match(r"^(\d+)", serial)
-    return match.group(1) if match else serial
+    return serial.split("-", 1)[0]
 
 
 def upgrade() -> None:
