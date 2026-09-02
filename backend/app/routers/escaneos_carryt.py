@@ -8,7 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require_page
 from app.database import get_db
 from app.models.escaneos_carryt import EscaneoCarryt
-from app.schemas.escaneos_carryt import EscaneoCarrytCreate, EscaneoCarrytRead
+from app.schemas.escaneos_carryt import (
+    EscaneoCarrytCreate,
+    EscaneoCarrytRead,
+    EscaneoCarrytReasignar,
+    normalizar_serial,
+)
 from app.services.escaneos_carryt_service import (
     construir_excel_dia,
     construir_excel_rango,
@@ -60,6 +65,43 @@ async def registrar_escaneo(
         serial=body.serial,
     )
     db.add(escaneo)
+    await db.commit()
+    await db.refresh(escaneo)
+    return escaneo
+
+
+@router.get("/buscar", response_model=EscaneoCarrytRead)
+async def buscar_por_serial(
+    serial: str, db: AsyncSession = Depends(get_db), _=_auth
+):
+    serial_norm = normalizar_serial(serial)
+    result = await db.execute(
+        select(EscaneoCarryt).where(EscaneoCarryt.serial == serial_norm)
+    )
+    escaneo = result.scalar_one_or_none()
+    if escaneo is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No se encontró ningún paquete escaneado con el serial {serial_norm}",
+        )
+    return escaneo
+
+
+@router.patch("/{escaneo_id}", response_model=EscaneoCarrytRead)
+async def reasignar_mensajero(
+    escaneo_id: int,
+    body: EscaneoCarrytReasignar,
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    result = await db.execute(
+        select(EscaneoCarryt).where(EscaneoCarryt.id == escaneo_id)
+    )
+    escaneo = result.scalar_one_or_none()
+    if escaneo is None:
+        raise HTTPException(status_code=404, detail="Escaneo no encontrado")
+    escaneo.cod_men = body.cod_men
+    escaneo.nombre_mensajero = body.nombre_mensajero
     await db.commit()
     await db.refresh(escaneo)
     return escaneo

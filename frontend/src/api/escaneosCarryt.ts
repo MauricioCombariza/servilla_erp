@@ -17,6 +17,12 @@ export const escaneosCarrytApi = {
   listarDelDia: (cod_men: string) =>
     api.get<EscaneoCarryt[]>("/escaneos-carryt/", { params: { cod_men } }),
 
+  buscarPorSerial: (serial: string) =>
+    api.get<EscaneoCarryt>("/escaneos-carryt/buscar", { params: { serial } }),
+
+  reasignar: (id: number, data: { cod_men: string; nombre_mensajero: string }) =>
+    api.patch<EscaneoCarryt>(`/escaneos-carryt/${id}`, data),
+
   descargarExcelDia: () =>
     api.get("/escaneos-carryt/excel-dia", { responseType: "blob" }),
 

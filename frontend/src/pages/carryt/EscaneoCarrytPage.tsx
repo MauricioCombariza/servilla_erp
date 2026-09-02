@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
-import { Download } from "lucide-react";
+import { Download, X } from "lucide-react";
 import { escaneosCarrytApi, type EscaneoCarryt } from "@/api/escaneosCarryt";
+import { personalApi } from "@/api/personal";
 import { useAuthStore } from "@/store/authStore";
 import { usePersonalLookup } from "@/hooks/usePersonalLookup";
 
@@ -24,6 +25,7 @@ type Mensajero = { codigo: string; nombre_completo: string };
 type Feedback = { type: "success" | "error"; message: string } | null;
 
 const PUEDE_VER_REPORTES = ["administrador", "logistica", "mensajero"];
+const PUEDE_REASIGNAR = ["administrador", "operaciones", "mensajero"];
 
 function inicioDeMes(): string {
   const d = new Date();
@@ -44,6 +46,7 @@ export function EscaneoCarrytPage() {
   const [errorReporte, setErrorReporte] = useState("");
   const [rangoDesde, setRangoDesde] = useState(inicioDeMes());
   const [rangoHasta, setRangoHasta] = useState(() => new Date().toISOString().slice(0, 10));
+  const [showReasignar, setShowReasignar] = useState(false);
 
   const escaneosQuery = useQuery({
     queryKey: ["escaneos-carryt", mensajero?.codigo],
@@ -261,9 +264,20 @@ export function EscaneoCarrytPage() {
           <p className="font-semibold text-gray-900">{mensajero.nombre_completo}</p>
           <p className="text-xs text-gray-500">Código {mensajero.codigo} · Carryt</p>
         </div>
-        <button onClick={cambiarMensajero} className="text-sm text-primary hover:underline flex-shrink-0">
-          Cambiar mensajero
-        </button>
+        <div className="flex items-center gap-3 flex-shrink-0">
+          {role && PUEDE_REASIGNAR.includes(role) && (
+            <button
+              type="button"
+              onClick={() => setShowReasignar(true)}
+              className="text-sm text-primary hover:underline"
+            >
+              Reasignar paquete
+            </button>
+          )}
+          <button onClick={cambiarMensajero} className="text-sm text-primary hover:underline">
+            Cambiar mensajero
+          </button>
+        </div>
       </header>
 
       <div className="p-4 flex flex-col gap-4 flex-1 overflow-hidden">
@@ -318,6 +332,162 @@ export function EscaneoCarrytPage() {
               </span>
             </div>
           ))}
+        </div>
+      </div>
+
+      {showReasignar && (
+        <ReasignarModal
+          onClose={() => setShowReasignar(false)}
+          currentCodMen={mensajero.codigo}
+          qc={qc}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Modal de reasignación de mensajero ────────────────────────────────────────
+interface ReasignarModalProps {
+  onClose: () => void;
+  currentCodMen: string;
+  qc: QueryClient;
+}
+
+function ReasignarModal({ onClose, currentCodMen, qc }: ReasignarModalProps) {
+  const [serialInput, setSerialInput] = useState("");
+  const [found, setFound] = useState<EscaneoCarryt | null>(null);
+  const [nuevoCodMen, setNuevoCodMen] = useState("");
+  const [buscando, setBuscando] = useState(false);
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState("");
+  const [exito, setExito] = useState("");
+
+  const { data: personal = [] } = useQuery({
+    queryKey: ["personal", true],
+    queryFn: () => personalApi.list({ activo: true }).then((r) => r.data),
+  });
+
+  async function buscar(e: React.FormEvent) {
+    e.preventDefault();
+    if (!serialInput.trim()) return;
+    setBuscando(true);
+    setError("");
+    setExito("");
+    setFound(null);
+    try {
+      const r = await escaneosCarrytApi.buscarPorSerial(serialInput.trim());
+      setFound(r.data);
+      setNuevoCodMen(r.data.cod_men);
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setError(msg ?? "No se encontró el paquete");
+    } finally {
+      setBuscando(false);
+    }
+  }
+
+  async function confirmar() {
+    if (!found) return;
+    const p = personal.find((p) => p.codigo === nuevoCodMen);
+    if (!p) {
+      setError("Selecciona un mensajero válido");
+      return;
+    }
+    setGuardando(true);
+    setError("");
+    setExito("");
+    try {
+      const r = await escaneosCarrytApi.reasignar(found.id, {
+        cod_men: p.codigo,
+        nombre_mensajero: p.nombre_completo,
+      });
+      setFound(r.data);
+      setExito(`Paquete ${r.data.serial} reasignado a ${r.data.nombre_mensajero}`);
+      qc.invalidateQueries({ queryKey: ["escaneos-carryt", currentCodMen] });
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setError(msg ?? "No se pudo reasignar el paquete");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-lg w-full max-w-sm">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <h2 className="font-semibold text-gray-900">Reasignar paquete</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <form onSubmit={buscar} className="flex gap-2">
+            <input
+              value={serialInput}
+              onChange={(e) => setSerialInput(e.target.value)}
+              placeholder="Serial del paquete"
+              autoFocus
+              className="flex-1 border border-gray-300 rounded-lg px-3 py-2.5 text-sm font-mono focus:ring-2 focus:ring-primary focus:border-primary outline-none"
+            />
+            <button
+              type="submit"
+              disabled={!serialInput.trim() || buscando}
+              className="bg-gray-800 hover:bg-gray-900 text-white font-medium px-4 rounded-lg text-sm disabled:opacity-40"
+            >
+              {buscando ? "..." : "Buscar"}
+            </button>
+          </form>
+
+          {found && (
+            <div className="space-y-3">
+              <div className="bg-gray-50 rounded-lg px-3 py-2.5 text-sm space-y-1">
+                <p className="font-mono text-gray-800">{found.serial}</p>
+                <p className="text-xs text-gray-500">
+                  Escaneado el {found.fecha} · actualmente en {found.nombre_mensajero} (
+                  {found.cod_men})
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Nuevo mensajero
+                </label>
+                <select
+                  value={nuevoCodMen}
+                  onChange={(e) => setNuevoCodMen(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-primary outline-none"
+                >
+                  {personal.map((p) => (
+                    <option key={p.id} value={p.codigo}>
+                      {p.codigo} — {p.nombre_completo}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <button
+                type="button"
+                onClick={confirmar}
+                disabled={guardando || nuevoCodMen === found.cod_men}
+                className="w-full bg-primary hover:bg-primary-hover text-white font-medium py-2.5 rounded-lg text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {guardando ? "Guardando..." : "Confirmar reasignación"}
+              </button>
+            </div>
+          )}
+
+          {error && (
+            <div className="rounded-lg px-4 py-2.5 text-sm font-medium text-center bg-red-100 text-red-800">
+              {error}
+            </div>
+          )}
+          {exito && (
+            <div className="rounded-lg px-4 py-2.5 text-sm font-medium text-center bg-green-100 text-green-800">
+              {exito}
+            </div>
+          )}
         </div>
       </div>
     </div>

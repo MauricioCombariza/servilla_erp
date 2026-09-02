@@ -3,6 +3,11 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+def normalizar_serial(v: str) -> str:
+    v = v.strip()
+    return v.split("-", 1)[0]
+
+
 class EscaneoCarrytCreate(BaseModel):
     serial: str = Field(min_length=1, max_length=50)
     cod_men: str = Field(min_length=4, max_length=4)
@@ -10,9 +15,13 @@ class EscaneoCarrytCreate(BaseModel):
 
     @field_validator("serial")
     @classmethod
-    def normalizar_serial(cls, v: str) -> str:
-        v = v.strip()
-        return v.split("-", 1)[0]
+    def _normalizar_serial(cls, v: str) -> str:
+        return normalizar_serial(v)
+
+
+class EscaneoCarrytReasignar(BaseModel):
+    cod_men: str = Field(min_length=4, max_length=4)
+    nombre_mensajero: str = Field(min_length=1)
 
 
 class EscaneoCarrytRead(BaseModel):
