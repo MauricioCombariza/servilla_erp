@@ -42,18 +42,28 @@ Soporta tres formatos de origen:
     + 'serial' sin columna 'orden'):
     Columnas origen: Cliente, fecha, serial, cod_men, nombre_mensajero
     (mismo shape que exporta escaneos_carryt_service.py + columna Cliente).
-    A diferencia de los otros 3 flujos, este NO crea seriales_gestion/ordenes
-    nuevos — solo confirma la entrega de seriales ya cargados por otra vía:
+    Es el único flujo donde el mismo archivo crea Y confirma entrega: no trae
+    orden/tipo_servicio/ambito, así que si el serial no existe todavía se
+    sintetizan (orden='CARRYT'+fecha AAAAMMDD, tipo_servicio='paquete',
+    ambito='bogota' — fijos, iguales a los ya configurados en precios_cliente
+    para Carryt) y se crea ya con tipo_gestion='Entrega' directamente (no
+    tiene sentido crearlo 'pendiente de entrega' cuando el archivo que lo
+    origina es justamente la confirmación de que se entregó).
       - Busca el serial (normalizado cortando en el primer guion, igual que
         app/schemas/escaneos_carryt.normalizar_serial) contra
         split_part(seriales_gestion.serial, '-', 1).
-      - Sin match, match ambiguo (colisión de normalización), cod_men no
-        resuelto en personal activo, o cliente que no coincide con el del
-        serial encontrado → la fila se omite y se cuenta como advertencia.
+      - Cliente no resuelto (clientes_by_name/mapeo_clientes) o cod_men no
+        resuelto en personal activo → la fila se omite y se cuenta como
+        advertencia, sin crear ni actualizar nada (a diferencia del flujo 1,
+        aquí si no se puede confirmar quién entregó no tiene sentido crear
+        el registro).
+      - Match ambiguo (colisión de normalización) → advertencia, no se toca.
+      - Sin match → CREATE (seriales_gestion + orden acumulada).
       - Match único, no bloqueado (estado='pendiente' AND
-        editado_manualmente=FALSE) → UPDATE de cod_men, mensajero_id y
-        tipo_gestion='Entrega' (equivalente a "marcar como entregado"; el
-        esquema no tiene un estado 'entregado' propio). estado no se toca.
+        editado_manualmente=FALSE) y cliente coincide con el del serial
+        encontrado → UPDATE de cod_men, mensajero_id y tipo_gestion='Entrega'.
+        estado no se toca. Si el cliente no coincide → advertencia, no se
+        toca.
       - Igual que los demás flujos, respeta DATE_CORTE.
     Ver _procesar_carryt_entrega.
 
@@ -462,6 +472,84 @@ def _resolver_cod_men_imile(
     return df["_da_nombre"].apply(_resolver)
 
 
+async def _upsert_ordenes(
+    db: AsyncSession,
+    ordenes_acum: dict[tuple[str, date, str, str], list[int]],
+    clientes_by_name: dict,
+    precios_cli: dict,
+) -> tuple[int, int, list[str]]:
+    """Consolida por número de orden (ordenes.numero_orden es UNIQUE: un mismo
+    número que aparezca con varias fechas o tipos debe consolidarse en una
+    fila, o el INSERT del lote entero falla por duplicate key) e inserta o
+    actualiza. Devuelve (nuevas, actualizadas, errores)."""
+    errores: list[str] = []
+    por_numero: dict[str, dict] = {}
+    for (num_orden, fecha_parsed, cliente_nom, tipo_ser), (c_local, c_nac) in ordenes_acum.items():
+        id_cliente = clientes_by_name.get(cliente_nom.lower())
+        if not id_cliente:
+            continue
+        p_local = precios_cli.get((id_cliente, tipo_ser, "bogota"),   0.0)
+        p_nac   = precios_cli.get((id_cliente, tipo_ser, "nacional"), 0.0)
+        valor   = (c_local * p_local) + (c_nac * p_nac)
+
+        fila = por_numero.get(num_orden)
+        if fila is None:
+            por_numero[num_orden] = {
+                "num": num_orden, "cli": id_cliente, "fecha": fecha_parsed,
+                "tipo": tipo_ser, "total": c_local + c_nac, "valor": valor,
+            }
+        else:
+            fila["total"] += c_local + c_nac
+            fila["valor"] += valor
+            fila["fecha"] = min(fila["fecha"], fecha_parsed)
+
+    orden_rows = list(por_numero.values())
+    nuevas = actualizadas = 0
+    if orden_rows:
+        nums = [r["num"] for r in orden_rows]
+        rows = (await db.execute(_ORDEN_EXISTS, {"nums": nums})).fetchall()
+        existing_ordenes = {r[0]: r[1] for r in rows}
+
+        new_orden_params = [r for r in orden_rows if r["num"] not in existing_ordenes]
+        upd_orden_params = [
+            {"total": r["total"], "valor": r["valor"], "id": existing_ordenes[r["num"]]}
+            for r in orden_rows if r["num"] in existing_ordenes
+        ]
+
+        if new_orden_params:
+            try:
+                await db.execute(
+                    text("""
+                        INSERT INTO ordenes
+                            (numero_orden, cliente_id, fecha_recepcion, f_esc, tipo_servicio,
+                             cantidad_total, cantidad_recibido, valor_total, estado)
+                        VALUES (:num, :cli, :fecha, :fecha, :tipo, :total, :total, :valor, 'activa')
+                    """),
+                    new_orden_params,
+                )
+                nuevas = len(new_orden_params)
+            except Exception as e:
+                errores.append(f"Error en batch ordenes nuevas: {e}")
+
+        if upd_orden_params:
+            try:
+                await db.execute(
+                    text("""
+                        UPDATE ordenes
+                        SET cantidad_total    = :total,
+                            cantidad_recibido = :total,
+                            valor_total       = :valor
+                        WHERE id = :id
+                    """),
+                    upd_orden_params,
+                )
+                actualizadas = len(upd_orden_params)
+            except Exception as e:
+                errores.append(f"Error en batch ordenes actualizadas: {e}")
+
+    return nuevas, actualizadas, errores
+
+
 def _normalizar_serial_carryt(serie: pd.Series) -> pd.Series:
     """Cortar en el primer guion, igual que
     app/schemas/escaneos_carryt.normalizar_serial — reimplementado localmente
@@ -475,20 +563,23 @@ async def _procesar_carryt_entrega(
     filename: str,
     db: AsyncSession,
 ) -> CargaMasivaResult:
-    """Flujo 4: confirma entrega de seriales Carryt ya existentes (ver
-    docstring del módulo). Solo UPDATE — nunca crea seriales_gestion/ordenes."""
+    """Flujo 4: crea (si no existe) y confirma entrega de seriales Carryt en
+    un solo paso (ver docstring del módulo)."""
     errores: list[str] = []
     total_filas = 0
     filas_ignoradas = 0
+    filas_sin_serial = 0
+    sg_nuevos = 0
     sg_actualizados = 0
     sg_bloqueados = 0
-    sin_match: Counter[str] = Counter()
     ambiguos: Counter[str] = Counter()
     cod_men_no_resueltos: Counter[str] = Counter()
     clientes_no_encontrados: Counter[str] = Counter()
     clientes_no_coinciden: Counter[str] = Counter()
+    # (orden, fecha, nombre_cliente, tipo_servicio) → [cant_local, cant_nacional]
+    ordenes_acum: dict[tuple[str, date, str, str], list[int]] = {}
 
-    clientes_by_name, _, _, personal_by_code, _ = await _cargar_maestros(db)
+    clientes_by_name, precios_cli, precios_men, personal_by_code, _ = await _cargar_maestros(db)
 
     chunks = _iter_chunks(origen, filename)
     while True:
@@ -516,6 +607,7 @@ async def _procesar_carryt_entrega(
         chunk = chunk[vigentes].copy()
         if chunk.empty:
             continue
+        chunk["k_fecha"] = fechas[vigentes].dt.date
 
         # Prefijo k_ (no guion bajo inicial) a propósito: itertuples() renombra a
         # posicional cualquier columna cuyo nombre no sea un identificador válido
@@ -529,35 +621,31 @@ async def _procesar_carryt_entrega(
         for i in range(0, len(chunk), LOTE_UPSERT):
             lote = chunk.iloc[i:i + LOTE_UPSERT]
             normalizados = [n for n in lote["k_norm"].tolist() if n]
-            if not normalizados:
-                sin_match["(serial vacío)"] += len(lote)
-                continue
 
-            rows = (
-                await db.execute(_CARRYT_MATCH_QUERY, {"normalizados": normalizados})
-            ).fetchall()
             matches_by_norm: dict[str, list] = {}
-            for r in rows:
-                matches_by_norm.setdefault(r.norm, []).append(r)
+            if normalizados:
+                rows = (
+                    await db.execute(_CARRYT_MATCH_QUERY, {"normalizados": normalizados})
+                ).fetchall()
+                for r in rows:
+                    matches_by_norm.setdefault(r.norm, []).append(r)
 
-            a_procesar: list[dict] = []
+            a_actualizar: list[dict] = []
+            a_crear: list[dict] = []
             for fila in lote.itertuples(index=False):
                 norm = fila.k_norm
                 if not norm:
-                    sin_match["(serial vacío)"] += 1
+                    filas_sin_serial += 1
                     continue
 
-                candidatos = matches_by_norm.get(norm, [])
-                if not candidatos:
-                    sin_match[norm] += 1
-                    continue
-                if len(candidatos) > 1:
-                    ambiguos[norm] += 1
-                    continue
-
-                row = candidatos[0]
-                if row.estado != "pendiente" or row.editado_manualmente:
-                    sg_bloqueados += 1
+                # Cliente y cod_men se exigen tanto para actualizar como para
+                # crear: si no se puede confirmar quién entregó, no tiene
+                # sentido crear el registro (a diferencia del flujo 1, donde
+                # el pedido puede existir antes de saber quién lo entregará).
+                cliente_txt = fila.k_cliente_txt
+                id_cliente = clientes_by_name.get(cliente_txt.lower())
+                if not id_cliente:
+                    clientes_no_encontrados[cliente_txt] += 1
                     continue
 
                 cod_men_val = fila.k_cod_men
@@ -566,42 +654,87 @@ async def _procesar_carryt_entrega(
                     cod_men_no_resueltos[f"{cod_men_val or '(vacío)'} / {fila.nombre_mensajero}"] += 1
                     continue
 
-                cliente_txt = fila.k_cliente_txt
-                id_cliente = clientes_by_name.get(cliente_txt.lower())
-                if not id_cliente:
-                    clientes_no_encontrados[cliente_txt] += 1
-                    continue
-                if id_cliente != row.cliente_id:
-                    clientes_no_coinciden[norm] += 1
+                candidatos = matches_by_norm.get(norm, [])
+                if len(candidatos) > 1:
+                    ambiguos[norm] += 1
                     continue
 
-                sg_actualizados += 1
-                a_procesar.append({
-                    "id": row.id, "cod_men": cod_men_val,
-                    "mensajero_id": men_info["id"],
+                if candidatos:
+                    row = candidatos[0]
+                    if row.estado != "pendiente" or row.editado_manualmente:
+                        sg_bloqueados += 1
+                        continue
+                    if id_cliente != row.cliente_id:
+                        clientes_no_coinciden[norm] += 1
+                        continue
+
+                    sg_actualizados += 1
+                    a_actualizar.append({
+                        "id": row.id, "cod_men": cod_men_val,
+                        "mensajero_id": men_info["id"],
+                    })
+                    continue
+
+                # Sin match → crear seriales_gestion ya confirmado como
+                # entregado, y acumular la orden sintética (agrupada por día).
+                tipo_men = men_info["tipo_personal"]
+                precio_cli = precios_cli.get((id_cliente, "paquete", "bogota"), 0.0)
+                precio_men = (
+                    men_info["precio_local"] if tipo_men == "courier_externo"
+                    else precios_men.get((id_cliente, "paquete", "bogota"), 0.0)
+                )
+                orden_num = f"CARRYT{fila.k_fecha.strftime('%Y%m%d')}"
+
+                sg_nuevos += 1
+                a_crear.append({
+                    "serial": norm, "orden": orden_num,
+                    "planilla": "", "f_emi": fila.k_fecha, "f_esc": fila.k_fecha,
+                    "cod_men": cod_men_val, "mensajero_id": men_info["id"],
+                    "cliente_id": id_cliente, "tipo_gestion": "Entrega",
+                    "tipo_envio": "paquete", "ambito": "bogota",
+                    "precio_cli": precio_cli, "precio_men": precio_men,
+                    "db_estado": "pendiente",
                 })
+                key = (orden_num, fila.k_fecha, cliente_txt, "paquete")
+                acum = ordenes_acum.setdefault(key, [0, 0])
+                acum[0] += 1  # ambito fijo 'bogota' → siempre cuenta como local
 
-            if a_procesar:
+            if a_actualizar:
                 try:
-                    await db.execute(text("SAVEPOINT sp_batch_carryt"))
-                    await db.execute(_CARRYT_ENTREGA_UPDATE, a_procesar)
-                    await db.execute(text("RELEASE SAVEPOINT sp_batch_carryt"))
+                    await db.execute(text("SAVEPOINT sp_batch_carryt_upd"))
+                    await db.execute(_CARRYT_ENTREGA_UPDATE, a_actualizar)
+                    await db.execute(text("RELEASE SAVEPOINT sp_batch_carryt_upd"))
                 except Exception as e:
-                    await db.execute(text("ROLLBACK TO SAVEPOINT sp_batch_carryt"))
-                    logger.error("Error en batch carryt entrega: %s", e)
+                    await db.execute(text("ROLLBACK TO SAVEPOINT sp_batch_carryt_upd"))
+                    logger.error("Error en batch carryt entrega (actualización): %s", e)
                     if len(errores) < MAX_ERRORES:
-                        errores.append(f"Error en batch carryt entrega: {e}")
+                        errores.append(f"Error en batch carryt entrega (actualización): {e}")
+
+            if a_crear:
+                try:
+                    await db.execute(text("SAVEPOINT sp_batch_carryt_new"))
+                    await db.execute(_SERIAL_UPSERT, a_crear)
+                    await db.execute(text("RELEASE SAVEPOINT sp_batch_carryt_new"))
+                except Exception as e:
+                    await db.execute(text("ROLLBACK TO SAVEPOINT sp_batch_carryt_new"))
+                    logger.error("Error en batch carryt entrega (nuevos): %s", e)
+                    if len(errores) < MAX_ERRORES:
+                        errores.append(f"Error en batch carryt entrega (nuevos): {e}")
 
         await db.commit()
+
+    ordenes_nuevas, ordenes_actualizadas, errores_ordenes = await _upsert_ordenes(
+        db, ordenes_acum, clientes_by_name, precios_cli
+    )
+    errores.extend(errores_ordenes)
+    await db.commit()
 
     if clientes_no_encontrados:
         errores.insert(0, _resumen_conteo(
             clientes_no_encontrados, "filas Carryt con cliente no encontrado"
         ))
-    if sin_match:
-        errores.append(_resumen_conteo(
-            sin_match, "seriales Carryt sin coincidencia en seriales_gestion (no se creó ninguno)"
-        ))
+    if filas_sin_serial:
+        errores.append(f"{filas_sin_serial} filas Carryt sin serial (omitidas)")
     if ambiguos:
         errores.append(_resumen_conteo(
             ambiguos, "seriales Carryt ambiguos (más de una fila coincide, no se actualizó ninguna)"
@@ -617,17 +750,19 @@ async def _procesar_carryt_entrega(
         ))
 
     logger.info(
-        "Carga masiva Carryt entrega: actualizados=%d bloqueados=%d ignoradas=%d errores=%d",
-        sg_actualizados, sg_bloqueados, filas_ignoradas, len(errores),
+        "Carga masiva Carryt entrega: nuevos=%d actualizados=%d bloqueados=%d "
+        "ordenes_nuevas=%d ordenes_actualizadas=%d ignoradas=%d errores=%d",
+        sg_nuevos, sg_actualizados, sg_bloqueados,
+        ordenes_nuevas, ordenes_actualizadas, filas_ignoradas, len(errores),
     )
     return CargaMasivaResult(
         total_filas=total_filas,
         filas_ignoradas=filas_ignoradas,
-        seriales_nuevos=0,
+        seriales_nuevos=sg_nuevos,
         seriales_actualizados=sg_actualizados,
         seriales_bloqueados=sg_bloqueados,
-        ordenes_nuevas=0,
-        ordenes_actualizadas=0,
+        ordenes_nuevas=ordenes_nuevas,
+        ordenes_actualizadas=ordenes_actualizadas,
         errores=errores[:MAX_ERRORES],
     )
 
@@ -809,79 +944,12 @@ async def procesar_csv(
         # archivo deja lo ya procesado consistente y reintentar es inocuo.
         await db.commit()
 
-    # ── Ordenes: un solo upsert al final con el acumulado ─────────────────────
-    ordenes_nuevas = 0
-    ordenes_actualizadas = 0
-
-    # El acumulado se agrupa por (orden, fecha, cliente, tipo) porque el precio
-    # depende del tipo de servicio, pero ordenes.numero_orden es UNIQUE: un mismo
-    # número que aparezca con varias fechas o tipos debe consolidarse en una fila,
-    # o el INSERT del lote entero falla por duplicate key y no se crea ninguna orden.
-    por_numero: dict[str, dict] = {}
-    for (num_orden, fecha_parsed, cliente_nom, tipo_ser), (c_local, c_nac) in ordenes_acum.items():
-        id_cliente = clientes_by_name.get(cliente_nom.lower())
-        if not id_cliente:
-            continue
-        p_local = precios_cli.get((id_cliente, tipo_ser, "bogota"),   0.0)
-        p_nac   = precios_cli.get((id_cliente, tipo_ser, "nacional"), 0.0)
-        valor   = (c_local * p_local) + (c_nac * p_nac)
-
-        fila = por_numero.get(num_orden)
-        if fila is None:
-            por_numero[num_orden] = {
-                "num": num_orden, "cli": id_cliente, "fecha": fecha_parsed,
-                "tipo": tipo_ser, "total": c_local + c_nac, "valor": valor,
-            }
-        else:
-            fila["total"] += c_local + c_nac
-            fila["valor"] += valor
-            fila["fecha"] = min(fila["fecha"], fecha_parsed)
-
-    orden_rows = list(por_numero.values())
-
-    if orden_rows:
-        # 1 query para saber cuáles ya existen
-        nums = [r["num"] for r in orden_rows]
-        rows = (await db.execute(_ORDEN_EXISTS, {"nums": nums})).fetchall()
-        existing_ordenes = {r[0]: r[1] for r in rows}
-
-        new_orden_params = [r for r in orden_rows if r["num"] not in existing_ordenes]
-        upd_orden_params = [
-            {"total": r["total"], "valor": r["valor"], "id": existing_ordenes[r["num"]]}
-            for r in orden_rows if r["num"] in existing_ordenes
-        ]
-
-        if new_orden_params:
-            try:
-                await db.execute(
-                    text("""
-                        INSERT INTO ordenes
-                            (numero_orden, cliente_id, fecha_recepcion, f_esc, tipo_servicio,
-                             cantidad_total, cantidad_recibido, valor_total, estado)
-                        VALUES (:num, :cli, :fecha, :fecha, :tipo, :total, :total, :valor, 'activa')
-                    """),
-                    new_orden_params,
-                )
-                ordenes_nuevas = len(new_orden_params)
-            except Exception as e:
-                errores.append(f"Error en batch ordenes nuevas: {e}")
-
-        if upd_orden_params:
-            try:
-                await db.execute(
-                    text("""
-                        UPDATE ordenes
-                        SET cantidad_total    = :total,
-                            cantidad_recibido = :total,
-                            valor_total       = :valor
-                        WHERE id = :id
-                    """),
-                    upd_orden_params,
-                )
-                ordenes_actualizadas = len(upd_orden_params)
-            except Exception as e:
-                errores.append(f"Error en batch ordenes actualizadas: {e}")
-
+    # ── Ordenes: un solo upsert al final con el acumulado (agrupado por orden,
+    # fecha, cliente, tipo porque el precio depende del tipo de servicio) ─────
+    ordenes_nuevas, ordenes_actualizadas, errores_ordenes = await _upsert_ordenes(
+        db, ordenes_acum, clientes_by_name, precios_cli
+    )
+    errores.extend(errores_ordenes)
     await db.commit()
 
     # ── Errores agregados ─────────────────────────────────────────────────────

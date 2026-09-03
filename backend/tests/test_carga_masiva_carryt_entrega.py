@@ -1,8 +1,10 @@
 """
-Tests del flujo 4 de carga-masiva: confirmación de entrega Carryt.
+Tests del flujo 4 de carga-masiva: crear (si no existe) y confirmar entrega Carryt.
 
-Formato: Cliente, fecha, serial, cod_men, nombre_mensajero — solo actualiza
-seriales_gestion ya existentes (nunca crea seriales/órdenes nuevos).
+Formato: Cliente, fecha, serial, cod_men, nombre_mensajero — actualiza
+seriales_gestion ya existentes, o los crea (orden sintética 'CARRYT'+fecha,
+tipo_servicio='paquete', ambito='bogota') ya confirmados como Entrega si no
+existían.
 """
 import io
 from datetime import date
@@ -100,15 +102,18 @@ async def maestros():
         await db.commit()
 
 
+async def _limpiar_seriales_y_ordenes():
+    async with AsyncSessionLocal() as db:
+        await db.execute(text("DELETE FROM seriales_gestion WHERE serial LIKE 'ctst%'"))
+        await db.execute(text("DELETE FROM ordenes WHERE numero_orden LIKE 'CARRYT%'"))
+        await db.commit()
+
+
 @pytest.fixture(autouse=True)
 async def limpiar_seriales_por_test(maestros):
-    async with AsyncSessionLocal() as db:
-        await db.execute(text("DELETE FROM seriales_gestion WHERE serial LIKE 'ctst%'"))
-        await db.commit()
+    await _limpiar_seriales_y_ordenes()
     yield
-    async with AsyncSessionLocal() as db:
-        await db.execute(text("DELETE FROM seriales_gestion WHERE serial LIKE 'ctst%'"))
-        await db.commit()
+    await _limpiar_seriales_y_ordenes()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -227,13 +232,59 @@ async def test_normalizacion_serial_ya_corto_en_db(client, auth_headers, maestro
 
 
 @pytest.mark.asyncio
-async def test_sin_match_no_crea_nada_y_reporta_advertencia(client, auth_headers, maestros):
+async def test_sin_match_crea_serial_y_orden_confirmando_entrega(client, auth_headers, maestros):
     data = await _subir(client, auth_headers, [
         (_CLIENTE_NOMBRE, _FECHA, "ctst0003-noexiste", _COD_MEN, _MENSAJERO_NOMBRE),
     ])
     assert data["seriales_actualizados"] == 0
-    assert data["seriales_nuevos"] == 0
-    assert any("sin coincidencia" in e for e in data["errores"])
+    assert data["seriales_nuevos"] == 1
+    assert data["ordenes_nuevas"] == 1
+
+    # Se guarda ya normalizado (cortado en el primer guion), no el valor crudo del archivo.
+    row = await _leer_serial("ctst0003")
+    assert row is not None
+    assert row.tipo_gestion == "Entrega"
+    assert row.cod_men == _COD_MEN
+    assert row.mensajero_id == maestros["mensajero_id"]
+    assert row.estado == "pendiente"
+
+    orden_num = f"CARRYT{_FECHA.replace('-', '')}"
+    async with AsyncSessionLocal() as db:
+        orden = (await db.execute(
+            text("SELECT cliente_id, tipo_servicio, cantidad_total FROM ordenes WHERE numero_orden = :n"),
+            {"n": orden_num},
+        )).one_or_none()
+    assert orden is not None
+    assert orden.cliente_id == maestros["cliente_id"]
+    assert orden.tipo_servicio == "paquete"
+    assert orden.cantidad_total == 1
+
+
+@pytest.mark.asyncio
+async def test_reenvio_del_mismo_archivo_no_duplica(client, auth_headers, maestros):
+    """El mismo archivo, subido dos veces (caso real: Carryt reenvía el lote):
+    la primera crea, la segunda solo actualiza — no debe duplicar serial ni orden."""
+    rows = [(_CLIENTE_NOMBRE, _FECHA, "ctst0011-nuevo", _COD_MEN, _MENSAJERO_NOMBRE)]
+
+    primera = await _subir(client, auth_headers, rows)
+    assert primera["seriales_nuevos"] == 1
+    assert primera["ordenes_nuevas"] == 1
+
+    segunda = await _subir(client, auth_headers, rows)
+    assert segunda["seriales_nuevos"] == 0
+    assert segunda["seriales_actualizados"] == 1
+    assert segunda["ordenes_nuevas"] == 0
+
+    orden_num = f"CARRYT{_FECHA.replace('-', '')}"
+    async with AsyncSessionLocal() as db:
+        cnt = (await db.execute(
+            text("SELECT count(*) FROM ordenes WHERE numero_orden = :n"), {"n": orden_num}
+        )).scalar_one()
+        cantidad = (await db.execute(
+            text("SELECT cantidad_total FROM ordenes WHERE numero_orden = :n"), {"n": orden_num}
+        )).scalar_one()
+    assert cnt == 1
+    assert cantidad == 1  # no se duplica el conteo en el reenvío
 
 
 @pytest.mark.asyncio
@@ -286,6 +337,7 @@ async def test_cod_men_no_resuelto_no_actualiza(client, auth_headers, maestros):
         (_CLIENTE_NOMBRE, _FECHA, serial, "9999", "Nadie Registrado"),
     ])
     assert data["seriales_actualizados"] == 0
+    assert data["seriales_nuevos"] == 0
     assert any("cod_men no resuelto" in e for e in data["errores"])
     row = await _leer_serial(serial)
     assert row.tipo_gestion == "Devolucion"  # no hubo actualización parcial
@@ -314,6 +366,7 @@ async def test_cliente_no_encontrado_no_actualiza(client, auth_headers, maestros
         ("Cliente Que No Existe", _FECHA, serial, _COD_MEN, _MENSAJERO_NOMBRE),
     ])
     assert data["seriales_actualizados"] == 0
+    assert data["seriales_nuevos"] == 0
     assert any("cliente no encontrado" in e for e in data["errores"])
 
 

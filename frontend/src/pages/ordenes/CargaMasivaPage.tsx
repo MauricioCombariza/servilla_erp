@@ -71,7 +71,7 @@ export function CargaMasivaPage() {
         </p>
         <p><span className="font-medium">Carryt entrega:</span>{" "}
           <code className="bg-gray-100 px-1 rounded text-xs">Cliente, fecha, serial, cod_men, nombre_mensajero</code>
-          {" "}— actualiza seriales ya existentes (no crea nuevos): asigna cod_men/mensajero y marca la gestión como Entrega
+          {" "}— crea el serial si no existe (orden sintética por día, paquete/bogotá) y asigna cod_men/mensajero marcando la gestión como Entrega
         </p>
         <p className="text-gray-400">Opcionales: <code className="bg-gray-100 px-1 rounded text-xs">planilla, cod_men</code> · Solo filas con fecha ≥ 2026-01-01</p>
       </div>
