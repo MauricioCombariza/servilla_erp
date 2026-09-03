@@ -82,15 +82,15 @@ def construir_pdf_devolucion(items: list[DevolucionDocumentoItem], fecha: date) 
     elementos.append(Paragraph(f"Fecha: {_fecha_es(fecha)}", sub_style))
     elementos.append(Spacer(1, 18))
 
-    data = [["Serial", "Nombre", "Dirección", "Localidad"]]
-    for item in items:
+    data = [["N°", "Serial", "Nombre", "Dirección", "Localidad"]]
+    for numero, item in enumerate(items, start=1):
         nombre = _truncar(item.nombre or "", _MAX_NOMBRE_CHARS)
         direccion = _truncar(item.direccion or "", _MAX_DIRECCION_CHARS)
-        data.append([item.serial, nombre, direccion, item.localidad or ""])
+        data.append([str(numero), item.serial, nombre, direccion, item.localidad or ""])
 
     tabla = Table(
         data,
-        colWidths=[1.4 * inch, 1.7 * inch, 2.4 * inch, 1.4 * inch],
+        colWidths=[0.35 * inch, 1.35 * inch, 1.65 * inch, 2.3 * inch, 1.35 * inch],
         repeatRows=1,
     )
     tabla.setStyle(TableStyle([
