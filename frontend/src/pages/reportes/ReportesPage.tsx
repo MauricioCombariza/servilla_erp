@@ -231,10 +231,10 @@ function TabOperacional() {
                 <tr key={r.cliente} className="hover:bg-gray-50">
                   <td className="px-4 py-2.5 font-medium text-gray-900 max-w-[180px] truncate">{r.cliente}</td>
                   <td className="px-4 py-2.5 text-gray-700">{r.total_seriales.toLocaleString()}</td>
-                  <td className="px-4 py-2.5"><CurrencyCell value={r.ingreso_cliente} /></td>
-                  <td className="px-4 py-2.5"><CurrencyCell value={r.costo_mensajero} /></td>
-                  <td className="px-4 py-2.5"><CurrencyCell value={r.costo_flete} /></td>
-                  <td className="px-4 py-2.5"><CurrencyCell value={r.margen} /></td>
+                  <td className="px-4 py-2.5"><CurrencyCell value={r.ingreso_cliente} negativeRed /></td>
+                  <td className="px-4 py-2.5"><CurrencyCell value={r.costo_mensajero} negativeRed /></td>
+                  <td className="px-4 py-2.5"><CurrencyCell value={r.costo_flete} negativeRed /></td>
+                  <td className="px-4 py-2.5"><CurrencyCell value={r.margen} negativeRed /></td>
                   <td className="px-4 py-2.5">
                     <span className={`text-xs font-medium ${(r.margen_pct ?? 0) >= 0 ? "text-green-700" : "text-red-600"}`}>
                       {pct(r.margen_pct)}
@@ -319,9 +319,9 @@ function TabMensajeros() {
                     <td className="px-4 py-2.5 text-green-700">{r.entregas ? r.entregas.toLocaleString() : "—"}</td>
                     <td className="px-4 py-2.5 text-orange-600">{r.devoluciones ? r.devoluciones.toLocaleString() : "—"}</td>
                     <td className="px-4 py-2.5 text-gray-700">{r.total_seriales ? r.total_seriales.toLocaleString() : "—"}</td>
-                    <td className="px-4 py-2.5"><CurrencyCell value={r.total_mensajero} /></td>
-                    <td className="px-4 py-2.5"><CurrencyCell value={r.costo_alistamiento} /></td>
-                    <td className="px-4 py-2.5 font-medium"><CurrencyCell value={r.total_mensajero + r.costo_alistamiento} /></td>
+                    <td className="px-4 py-2.5"><CurrencyCell value={r.total_mensajero} negativeRed /></td>
+                    <td className="px-4 py-2.5"><CurrencyCell value={r.costo_alistamiento} negativeRed /></td>
+                    <td className="px-4 py-2.5 font-medium"><CurrencyCell value={r.total_mensajero + r.costo_alistamiento} negativeRed /></td>
                   </tr>
                 ))}
               </tbody>
@@ -471,8 +471,8 @@ function TabFacturacion() {
                 <tr key={r.cliente} className="hover:bg-gray-50">
                   <td className="px-4 py-2.5 font-medium text-gray-900 max-w-[180px] truncate">{r.cliente}</td>
                   <td className="px-4 py-2.5 text-gray-600">{r.num_facturas}</td>
-                  <td className="px-4 py-2.5"><CurrencyCell value={r.total_facturado} /></td>
-                  <td className="px-4 py-2.5"><CurrencyCell value={r.total_cobrado} /></td>
+                  <td className="px-4 py-2.5"><CurrencyCell value={r.total_facturado} negativeRed /></td>
+                  <td className="px-4 py-2.5"><CurrencyCell value={r.total_cobrado} negativeRed /></td>
                   <td className="px-4 py-2.5">
                     <span className={r.pendiente > 0 ? "text-amber-600 font-medium" : "text-gray-400"}>
                       {fmt(r.pendiente)}
@@ -571,9 +571,9 @@ function TabTendencias() {
                     <td className="px-4 py-2.5 text-green-700">{r.entregas.toLocaleString()}</td>
                     <td className="px-4 py-2.5 text-orange-600">{r.devoluciones.toLocaleString()}</td>
                     <td className="px-4 py-2.5 text-gray-700">{r.total_seriales.toLocaleString()}</td>
-                    <td className="px-4 py-2.5"><CurrencyCell value={r.ingreso_estimado} /></td>
-                    <td className="px-4 py-2.5"><CurrencyCell value={r.costo_mensajero} /></td>
-                    <td className="px-4 py-2.5"><CurrencyCell value={r.ingreso_estimado - r.costo_mensajero} /></td>
+                    <td className="px-4 py-2.5"><CurrencyCell value={r.ingreso_estimado} negativeRed /></td>
+                    <td className="px-4 py-2.5"><CurrencyCell value={r.costo_mensajero} negativeRed /></td>
+                    <td className="px-4 py-2.5"><CurrencyCell value={r.ingreso_estimado - r.costo_mensajero} negativeRed /></td>
                   </tr>
                 ))}
               </tbody>
