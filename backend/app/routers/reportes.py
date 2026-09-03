@@ -69,7 +69,7 @@ async def get_operacional(
         ing = float(r["ingreso_cliente"])
         cos = float(r["costo_mensajero"])
         fle = float(r["costo_flete"])
-        mar = ing - cos
+        mar = ing - cos - fle
         result.append(ResumenClienteRow(
             cliente=r["cliente"],
             cliente_id=r["cliente_id"],
