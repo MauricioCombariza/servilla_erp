@@ -34,6 +34,7 @@ PAGE_CATALOG: list[PageDef] = [
     PageDef("devoluciones_scan", "Escaneo Devoluciones", "/escaneo-devoluciones"),
     PageDef("escaneo_carryt", "Escaneo Carryt", "/escaneo-carryt"),
     PageDef("imile_offload_scan", "Escaneo Offloading iMile", "/imile-offload-scan"),
+    PageDef("geocercas", "Geocercas Barrios Unidos", "/geocercas"),
 ]
 
 PAGE_KEYS: set[str] = {p.key for p in PAGE_CATALOG}

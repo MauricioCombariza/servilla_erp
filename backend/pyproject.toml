@@ -21,6 +21,8 @@ dependencies = [
     "holidays>=0.75",
     "python-docx>=1.2.0",
     "reportlab>=4.0",
+    "shapely>=2.0",
+    "pyproj>=3.6",
 ]
 
 [project.optional-dependencies]

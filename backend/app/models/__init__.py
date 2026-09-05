@@ -12,3 +12,4 @@ from app.models.gestiones import SerialGestion  # noqa: F401
 from app.models.planillas_revisadas import PlanillaRevisada  # noqa: F401
 from app.models.escaneos_carryt import EscaneoCarryt  # noqa: F401
 from app.models.devoluciones import Devolucion  # noqa: F401
+from app.models.geocercas import Geocerca  # noqa: F401

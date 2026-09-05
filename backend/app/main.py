@@ -24,6 +24,7 @@ from app.routers.escaneos_carryt import router as escaneos_carryt_router
 from app.routers.escaneos_imile_offload import router as escaneos_imile_offload_router
 from app.routers.usuarios_admin import router as usuarios_admin_router
 from app.routers.devoluciones import router as devoluciones_router
+from app.routers.geocercas import router as geocercas_router
 from app.config import settings
 from app.database import engine
 from app.services.imile_automation import imile_automation
@@ -71,6 +72,7 @@ app.include_router(escaneos_carryt_router)
 app.include_router(escaneos_imile_offload_router)
 app.include_router(usuarios_admin_router)
 app.include_router(devoluciones_router)
+app.include_router(geocercas_router)
 
 
 @app.get("/health")
