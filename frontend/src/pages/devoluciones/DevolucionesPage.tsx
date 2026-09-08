@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Upload, AlertCircle, CheckCircle, FileText, FileDown, Search, Download, Plus, X } from "lucide-react";
 import { devolucionesApi } from "@/api/devoluciones";
+import { VerificarSerialesTab } from "./VerificarSerialesTab";
 
 const ESTADOS_SUGERIDOS = ["transito", "entregado", "no_ubicado", "reasignado", "devolucion"];
 
@@ -169,7 +170,10 @@ function NuevaDevolucionForm({ onClose, onCreated }: { onClose: () => void; onCr
   );
 }
 
+type Tab = "lista" | "verificar";
+
 export function DevolucionesPage() {
+  const [tab, setTab] = useState<Tab>("lista");
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState("");
@@ -301,6 +305,29 @@ export function DevolucionesPage() {
         </button>
       </div>
 
+      <div className="flex border-b border-gray-200 mb-4">
+        <button
+          onClick={() => setTab("lista")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            tab === "lista" ? "border-primary text-primary" : "border-transparent text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          Lista de devoluciones
+        </button>
+        <button
+          onClick={() => setTab("verificar")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            tab === "verificar" ? "border-primary text-primary" : "border-transparent text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          Verificar seriales
+        </button>
+      </div>
+
+      {tab === "verificar" && <VerificarSerialesTab />}
+
+      {tab === "lista" && (
+        <>
       {/* Reporte del día */}
       <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6 flex items-center gap-3 flex-wrap">
         <label className="text-sm font-medium text-gray-700">
@@ -530,6 +557,8 @@ export function DevolucionesPage() {
             </tbody>
           </table>
         </div>
+      )}
+        </>
       )}
 
       {showNuevaDevolucion && (

@@ -15,10 +15,17 @@ from app.schemas.devoluciones import (
     DevolucionDocumentoRequest,
     DevolucionEstadoUpdate,
     DevolucionRead,
+    VerificarSerialesRequest,
+    VerificarSerialesResult,
 )
 from app.services.devoluciones_docx import DOCX_MEDIA_TYPE, construir_docx_devolucion
 from app.services.devoluciones_pdf import PDF_MEDIA_TYPE, construir_pdf_devolucion
 from app.services.devoluciones_service import procesar_excel_devoluciones
+from app.services.verificacion_seriales_service import (
+    EXCEL_MEDIA_TYPE,
+    clasificar_seriales,
+    procesar_excel_verificacion,
+)
 
 router = APIRouter(prefix="/api/devoluciones", tags=["devoluciones"])
 _auth = Depends(require_page("devoluciones"))
@@ -47,6 +54,59 @@ async def list_devoluciones(
     query = query.limit(limit).offset(offset)
     result = await db.execute(query)
     return result.scalars().all()
+
+
+@router.post("/verificar-seriales", response_model=VerificarSerialesResult)
+async def verificar_seriales(
+    body: VerificarSerialesRequest, db: AsyncSession = Depends(get_db), _=_auth
+):
+    # Dedup preservando el orden de entrada.
+    seriales: list[str] = []
+    vistos: set[str] = set()
+    for s in body.seriales:
+        s = s.strip()
+        if s and s not in vistos:
+            vistos.add(s)
+            seriales.append(s)
+    if not seriales:
+        raise HTTPException(status_code=400, detail="No se recibió ningún serial válido")
+
+    items = await clasificar_seriales(seriales, db)
+
+    return VerificarSerialesResult(
+        items=items,
+        total_devoluciones=sum(1 for i in items if i.clasificacion == "devolucion"),
+        total_entregas=sum(1 for i in items if i.clasificacion == "entrega"),
+        total_ninguna=sum(1 for i in items if i.clasificacion == "ninguna"),
+    )
+
+
+@router.post("/verificar-seriales-excel")
+async def verificar_seriales_excel(
+    file: UploadFile, db: AsyncSession = Depends(get_db), _=_auth
+):
+    fname = (file.filename or "").lower()
+    if not fname.endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Solo se aceptan archivos Excel (.xlsx)")
+
+    contenido = await file.read()
+    if len(contenido) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Archivo demasiado grande (máximo {MAX_UPLOAD_BYTES // (1024 * 1024)} MB).",
+        )
+
+    try:
+        resultado = await procesar_excel_verificacion(contenido, db)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    nombre_archivo = f"seriales_verificados_{date.today().isoformat()}.xlsx"
+    return Response(
+        content=resultado,
+        media_type=EXCEL_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'},
+    )
 
 
 @router.post("/", response_model=DevolucionRead, status_code=status.HTTP_201_CREATED)

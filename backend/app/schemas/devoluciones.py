@@ -1,4 +1,5 @@
-from datetime import datetime
+from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -46,3 +47,25 @@ class DevolucionDocumentoItem(BaseModel):
 
 class DevolucionDocumentoRequest(BaseModel):
     items: list[DevolucionDocumentoItem] = Field(min_length=1)
+
+
+class VerificarSerialesRequest(BaseModel):
+    seriales: list[str] = Field(min_length=1, max_length=500)
+
+
+class SerialVerificado(BaseModel):
+    serial: str
+    clasificacion: Literal["entrega", "devolucion", "ninguna"]
+    fuente: Literal["seriales_gestion", "devoluciones"] | None = None
+    estado_detalle: str | None = None
+    cliente: str | None = None
+    planilla: str | None = None
+    cod_men: str | None = None
+    fecha: date | None = None
+
+
+class VerificarSerialesResult(BaseModel):
+    items: list[SerialVerificado]
+    total_devoluciones: int
+    total_entregas: int
+    total_ninguna: int

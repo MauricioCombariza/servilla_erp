@@ -19,6 +19,24 @@ export interface CargaMasivaDevolucionesResult {
   errores: string[];
 }
 
+export interface SerialVerificado {
+  serial: string;
+  clasificacion: "entrega" | "devolucion" | "ninguna";
+  fuente: "seriales_gestion" | "devoluciones" | null;
+  estado_detalle: string | null;
+  cliente: string | null;
+  planilla: string | null;
+  cod_men: string | null;
+  fecha: string | null;
+}
+
+export interface VerificarSerialesResult {
+  items: SerialVerificado[];
+  total_devoluciones: number;
+  total_entregas: number;
+  total_ninguna: number;
+}
+
 export const devolucionesApi = {
   list: (params?: { estado?: string; q?: string; limit?: number; offset?: number }) =>
     api.get<Devolucion[]>("/devoluciones/", { params }),
@@ -54,4 +72,16 @@ export const devolucionesApi = {
 
   reporteDia: (fecha: string) =>
     api.get("/devoluciones/reporte-dia", { params: { fecha }, responseType: "blob" }),
+
+  verificarSeriales: (seriales: string[]) =>
+    api.post<VerificarSerialesResult>("/devoluciones/verificar-seriales", { seriales }),
+
+  verificarSerialesExcel: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.post("/devoluciones/verificar-seriales-excel", form, {
+      headers: { "Content-Type": "multipart/form-data" },
+      responseType: "blob",
+    });
+  },
 };
