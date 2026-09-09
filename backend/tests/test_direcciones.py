@@ -101,10 +101,37 @@ def test_ajustar_dir_leonisa_ca_es_carrera():
     assert ajustar_dir_leonisa("CA 82A 30 57 AP 401") == "KRA 82A 30 57 APTO 401"
 
 
+@pytest.mark.parametrize("raw,esperado", [
+    ("CRA50A 22 51CA152", "KRA 50A 22 51 CS 152"),
+    ("CRA50A 22 51C152", "KRA 50A 22 51 CS 152"),
+])
+def test_ajustar_dir_leonisa_ca_pegada_entre_numeros_es_casa(raw, esperado):
+    # A diferencia de "CA" como token inicial (Carrera, ver test anterior),
+    # cuando "CA"/"C" viene pegada SIN espacios entre dos números
+    # ("51CA152"/"51C152") es el tipo de vivienda Casa + su número — formato
+    # específico del archivo Vehigrupo.
+    assert ajustar_dir_leonisa(raw) == esperado
+
+
 def test_ajustar_dir_leonisa_to_ya_abreviado_se_reconoce():
     # "TO" (Torre ya abreviada, como viene en el archivo Vehigrupo) debe
     # reconocerse igual que "TORRE"/"TRR", no solo la palabra completa.
     assert ajustar_dir_leonisa("carrera 15 40 20 apto 501 to 2") == "KRA 15 40 20 APTO 501 TO 2"
+
+
+def test_ajustar_dir_leonisa_t_suelto_es_torre():
+    # "T" suelto (una sola letra) también se usa como abreviatura de Torre en
+    # algunos archivos; debe reconocerse igual que "TORRE"/"TRR"/"TO" y no
+    # fundirse con la coordenada anterior (a diferencia de otras letras
+    # sueltas como "K" en "78 K"→"78K").
+    assert ajustar_dir_leonisa("carrera 15 40 20 apto 501 t 2") == "KRA 15 40 20 APTO 501 TO 2"
+    assert ajustar_dir_leonisa("KRA 50A 22 51 T 2") == "KRA 50A 22 51 TO 2"
+
+
+def test_ajustar_dir_leonisa_in_es_interior():
+    # "IN" se usa como abreviatura de Interior en algunos archivos; debe
+    # reconocerse igual que "INTERIOR"/"INT".
+    assert ajustar_dir_leonisa("kra 15 40 20 in 5") == "KRA 15 40 20 INT 5"
 
 
 @pytest.mark.parametrize("raw,esperado", [
@@ -314,6 +341,23 @@ def test_procesar_archivo_vehigrupo_normaliza_direccion_y_preserva_resto():
     # Los demás campos quedan intactos (con su padding de ancho fijo original)
     assert resultado.filas[0][1].strip() == "RAMIREZ GIRALDO JOHN OLIVER"
     assert resultado.filas[1][4].strip() == "AMAGA"
+
+
+def test_procesar_archivo_vehigrupo_ca_pegada_es_casa():
+    # "CA" pegada entre números en la dirección Vehigrupo se interpreta como
+    # Casa (CS) + número, no como Carrera.
+    linea = _linea_vhg(
+        doc="CC00000000000000000000000000004263000001",
+        nombre="RAMIREZ GIRALDO JOHN OLIVER",
+        direccion="CRA 50A 22 51CA152",
+        barrio="EL HOSPITAL",
+        ciudad="",
+        depto="",
+        cola="1I",
+    )
+    contenido = (linea + "\r\n").encode("latin-1")
+    resultado = procesar_archivo_vehigrupo(contenido)
+    assert resultado.filas[0][2] == "KRA 50A 22 51 CS 152"
 
 
 def test_procesar_archivo_vehigrupo_linea_corta_lanza_error():

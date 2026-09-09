@@ -98,10 +98,10 @@ _VIA_PEGADA_RE = re.compile(
 # Abreviaciones canónicas para keywords de complemento
 _COMP_ABBREV: dict[str, str] = {
     'APARTAMENTO': 'APTO', 'APTO': 'APTO', 'AP': 'APTO', 'APT': 'APTO',
-    'TORRE': 'TO', 'TRR': 'TO', 'TO': 'TO',
+    'TORRE': 'TO', 'TRR': 'TO', 'TO': 'TO', 'T': 'TO',
     'PISO': 'PS', 'PS': 'PS', 'P': 'PS',
     'BLOQUE': 'BL', 'BLQ': 'BL', 'BL': 'BL',
-    'INTERIOR': 'INT', 'INT': 'INT',
+    'INTERIOR': 'INT', 'INT': 'INT', 'IN': 'INT',
     'LOCAL': 'LC', 'LC': 'LC',
     'CASA': 'CS', 'CS': 'CS',
     'MZA': 'MZA', 'MZ': 'MZA',
@@ -257,6 +257,10 @@ def ajustar_dir_leonisa(raw: str) -> str:
       "cll 80 45"  (sin placa: solo 2 coordenadas)                          → "CLL 80 45" (mayúsculas, sin reordenar)
       "GUAYACAN DE LA PLAZACL 48 SUR 39 57 AP 566"  (tipo de vía pegado
        al nombre del conjunto, sin espacio)                                → "CLL 48 SUR 39 57 APTO 566"
+      "CRA50A 22 51CA152"  (Banco Vehigrupo: "CA"/"C" pegada entre
+       números = tipo de vivienda Casa, no Carrera)                        → "KRA 50A 22 51 CS 152"
+      "kra 15 40 20 apto 501 t 2"  ("T" abreviatura de Torre)               → "KRA 15 40 20 APTO 501 TO 2"
+      "kra 15 40 20 in 5"  ("IN" abreviatura de Interior)                   → "KRA 15 40 20 INT 5"
     """
     if not isinstance(raw, str) or not raw.strip():
         return ""
@@ -282,6 +286,16 @@ def ajustar_dir_leonisa(raw: str) -> str:
     #    resolver cadenas como "93-B-08" en un solo paso sin perder el segundo guión.
     text = re.sub(r'(?<=[A-Z0-9])\s*-\s*(?=[A-Z0-9])', ' ', text)
 
+    # 3b. "<dígitos>CA<dígitos>" o "<dígitos>C<dígitos>" pegado (sin espacios) →
+    #     tipo de vivienda "Casa" + su número. Formato específico de los archivos
+    #     de Banco Vehigrupo: "51CA152" / "51C152" → "51 CS 152". Debe ir ANTES
+    #     de la sustitución de tipo de vía (más abajo), que de lo contrario
+    #     trataría "CA"/"C" como Carrera/Calle abreviada. No choca con el uso de
+    #     "CA" como Carrera (token inicial "CA 82A 30 57...", ver
+    #     test_ajustar_dir_leonisa_ca_es_carrera) porque ahí no hay dígito pegado
+    #     antes de "CA".
+    text = re.sub(r'(\d+)CA?(\d+)', r'\1 CS \2', text)
+
     # 4. Insertar espacio entre letra y dígito contiguos
     #    ("CALLE56F" → "CALLE 56F", "99D19" → "99D 19", "49C27" → "49C 27")
     text = re.sub(r'([A-Z])(\d)', r'\1 \2', text)
@@ -305,10 +319,11 @@ def ajustar_dir_leonisa(raw: str) -> str:
     text = re.sub(rf'(\d+)({_KW_PATTERN})\b', r'\2 \1', text)
 
     # 8. Unir número + letra suelta: "78 K" → "78K", "87 D" → "87D"
-    #    Excluye "P": es la abreviatura de "PISO" (ver _COMP_ABBREV) y debe
-    #    quedar como token de complemento separado, no fundirse en la
-    #    coordenada anterior ("60 P 7" → "60 P 7", no "60P 7").
-    text = re.sub(r'(\d+)\s+([A-OQ-Z])(?!\w)', r'\1\2', text)
+    #    Excluye "P" y "T": son abreviatura de "PISO" y "TORRE" respectivamente
+    #    (ver _COMP_ABBREV) y deben quedar como token de complemento separado,
+    #    no fundirse en la coordenada anterior ("60 P 7" → "60 P 7", no
+    #    "60P 7"; "51 T 2" → "51 T 2", no "51T 2").
+    text = re.sub(r'(\d+)\s+([A-OQ-SU-Z])(?!\w)', r'\1\2', text)
 
     # 8b. Unir número + token "letras+BIS": "81 GBIS" → "81GBIS"
     #     Cubre el caso donde el BIS viene pegado a la letra del número ("GBis" como un token)
@@ -322,8 +337,8 @@ def ajustar_dir_leonisa(raw: str) -> str:
 
     # 10. Unir alfanumérico + letra suelta: "88IBIS A"→"88IBISA", "57ABIS B"→"57ABISB"
     #     Corre después de BIS para capturar la letra que le sigue al BIS.
-    #     Excluye "P" por la misma razón que el paso 8.
-    text = re.sub(r'(\d+[A-Z]+)\s+([A-OQ-Z])(?!\w)', r'\1\2', text)
+    #     Excluye "P" y "T" por la misma razón que el paso 8.
+    text = re.sub(r'(\d+[A-Z]+)\s+([A-OQ-SU-Z])(?!\w)', r'\1\2', text)
 
     # 11. Colapsar espacios
     text = re.sub(r'\s+', ' ', text).strip()
