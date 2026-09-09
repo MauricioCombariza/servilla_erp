@@ -30,6 +30,7 @@ def _fecha_es(d: date) -> str:
 def construir_docx_devolucion(
     items: list[DevolucionDocumentoItem],
     generado_por: str | None = None,
+    fecha: date | None = None,
 ) -> bytes:
     doc = Document()
 
@@ -51,7 +52,7 @@ def construir_docx_devolucion(
 
     subtitulo = doc.add_paragraph()
     subtitulo.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    subtitulo.add_run(f"Fecha: {_fecha_es(date.today())}")
+    subtitulo.add_run(f"Fecha: {_fecha_es(fecha or date.today())}")
 
     if generado_por:
         generado = doc.add_paragraph()

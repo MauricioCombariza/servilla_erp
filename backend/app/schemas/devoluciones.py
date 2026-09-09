@@ -16,6 +16,12 @@ class DevolucionRead(BaseModel):
     estado: str
     fecha_carga: datetime
     fecha_actualizacion: datetime
+    fecha_escaneo: datetime | None = None
+
+
+class DevolucionEscaneoRead(DevolucionRead):
+    ya_escaneado: bool = False
+    escaneado_previamente_en: datetime | None = None
 
 
 class DevolucionCreate(BaseModel):

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
-import { FileDown } from "lucide-react";
+import { FileDown, RefreshCw } from "lucide-react";
 import { devolucionesApi, type Devolucion } from "@/api/devoluciones";
+import { extraerErrorBlob } from "@/utils/blobError";
 
 const SCANNER_ELEMENT_ID = "devoluciones-qr-reader";
 const SCAN_FORMATS = [
@@ -18,24 +19,56 @@ const SCAN_FORMATS = [
   Html5QrcodeSupportedFormats.CODABAR,
 ];
 
-type Feedback = { type: "success" | "error"; message: string } | null;
+const ESCANEADOS_DIA_KEY = ["devoluciones-escaneados-dia"];
+
+type Feedback = { type: "success" | "warning" | "error"; message: string } | null;
+
+function horaCorta(iso: string) {
+  return new Date(iso).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" });
+}
+
+function hoyISO() {
+  return new Date().toISOString().slice(0, 10);
+}
 
 export function EscaneoDevolucionesPage() {
-  const [escaneados, setEscaneados] = useState<Devolucion[]>([]);
+  const queryClient = useQueryClient();
+  const {
+    data: escaneados = [],
+    isLoading: cargandoLista,
+    refetch,
+  } = useQuery({
+    queryKey: ESCANEADOS_DIA_KEY,
+    queryFn: () => devolucionesApi.escaneadosDia().then((r) => r.data),
+    refetchOnWindowFocus: true,
+    refetchInterval: 30000,
+  });
   const [manualSerial, setManualSerial] = useState("");
   const [feedback, setFeedback] = useState<Feedback>(null);
-  const [generando, setGenerando] = useState(false);
+  const [descargando, setDescargando] = useState<"word" | "excel" | null>(null);
   const [errorDocumento, setErrorDocumento] = useState("");
   const lastScanRef = useRef<{ serial: string; at: number }>({ serial: "", at: 0 });
 
   const escanearMutation = useMutation({
     mutationFn: (serial: string) => devolucionesApi.escanearSerial(serial),
     onSuccess: (res) => {
-      setFeedback({ type: "success", message: `Serial ${res.data.serial} marcado como devolución` });
-      setEscaneados((prev) =>
-        prev.some((d) => d.serial === res.data.serial) ? prev : [res.data, ...prev]
+      const d = res.data;
+      if (d.ya_escaneado) {
+        const hora = d.escaneado_previamente_en ? horaCorta(d.escaneado_previamente_en) : null;
+        setFeedback({
+          type: "warning",
+          message: `${d.serial}: ya había sido escaneado antes${hora ? ` (a las ${hora})` : ""}`,
+        });
+        if (navigator.vibrate) navigator.vibrate([40, 40, 40]);
+      } else {
+        setFeedback({ type: "success", message: `Serial ${d.serial} marcado como devolución` });
+        if (navigator.vibrate) navigator.vibrate(80);
+      }
+      queryClient.setQueryData<Devolucion[]>(ESCANEADOS_DIA_KEY, (prev = []) =>
+        prev.some((x) => x.serial === d.serial)
+          ? prev.map((x) => (x.serial === d.serial ? d : x))
+          : [d, ...prev]
       );
-      if (navigator.vibrate) navigator.vibrate(80);
     },
     onError: (err: unknown, serial: string) => {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -93,29 +126,25 @@ export function EscaneoDevolucionesPage() {
     setManualSerial("");
   }
 
-  async function handleGenerarDocumento() {
-    setGenerando(true);
+  async function handleDescargarReporte(formato: "word" | "excel") {
+    setDescargando(formato);
     setErrorDocumento("");
     try {
-      const r = await devolucionesApi.generarDocumento(
-        escaneados.map((d) => ({
-          serial: d.serial,
-          nombre: d.nombre,
-          direccion: d.direccion,
-          localidad: d.localidad,
-        }))
-      );
+      const fecha = hoyISO();
+      const r =
+        formato === "word"
+          ? await devolucionesApi.reporteDiaWord(fecha)
+          : await devolucionesApi.reporteDiaExcel(fecha);
       const url = URL.createObjectURL(r.data as Blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `acta_devolucion_${new Date().toISOString().slice(0, 10)}.docx`;
+      a.download = `acta_devolucion_${fecha}.${formato === "word" ? "docx" : "xlsx"}`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setErrorDocumento(msg ?? "Error al generar el documento");
+      setErrorDocumento(await extraerErrorBlob(e));
     } finally {
-      setGenerando(false);
+      setDescargando(null);
     }
   }
 
@@ -129,7 +158,7 @@ export function EscaneoDevolucionesPage() {
       <div className="p-4 flex flex-col gap-4 flex-1 overflow-hidden">
         <div className="text-center">
           <span className="inline-block bg-primary/10 text-primary font-semibold px-4 py-1.5 rounded-full text-sm">
-            {escaneados.length} paquete{escaneados.length === 1 ? "" : "s"} escaneado{escaneados.length === 1 ? "" : "s"}
+            {escaneados.length} paquete{escaneados.length === 1 ? "" : "s"} escaneado{escaneados.length === 1 ? "" : "s"} hoy
           </span>
         </div>
 
@@ -138,7 +167,11 @@ export function EscaneoDevolucionesPage() {
         {feedback && (
           <div
             className={`rounded-lg px-4 py-2.5 text-sm font-medium text-center ${
-              feedback.type === "success" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
+              feedback.type === "success"
+                ? "bg-green-100 text-green-800"
+                : feedback.type === "warning"
+                  ? "bg-amber-100 text-amber-800"
+                  : "bg-red-100 text-red-800"
             }`}
           >
             {feedback.message}
@@ -162,8 +195,11 @@ export function EscaneoDevolucionesPage() {
         </form>
 
         <div className="flex-1 overflow-y-auto bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
-          {escaneados.length === 0 && (
-            <p className="text-center text-sm text-gray-400 py-6">Aún no hay paquetes escaneados</p>
+          {cargandoLista && (
+            <p className="text-center text-sm text-gray-400 py-6">Cargando lo escaneado hoy…</p>
+          )}
+          {!cargandoLista && escaneados.length === 0 && (
+            <p className="text-center text-sm text-gray-400 py-6">Aún no hay paquetes escaneados hoy</p>
           )}
           {escaneados.map((d) => (
             <div key={d.serial} className="px-4 py-2.5 text-sm">
@@ -179,25 +215,35 @@ export function EscaneoDevolucionesPage() {
           </div>
         )}
 
-        <button
-          type="button"
-          onClick={handleGenerarDocumento}
-          disabled={escaneados.length === 0 || generando}
-          className="w-full inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary-hover text-white font-medium py-3 rounded-xl text-sm transition-colors disabled:opacity-40"
-        >
-          <FileDown size={16} />
-          {generando ? "Generando..." : "Finalizar y generar documento"}
-        </button>
-
-        {escaneados.length > 0 && (
+        <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
-            onClick={() => setEscaneados([])}
-            className="text-xs text-gray-400 hover:text-gray-600 text-center"
+            onClick={() => handleDescargarReporte("word")}
+            disabled={escaneados.length === 0 || descargando !== null}
+            className="inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary-hover text-white font-medium py-3 rounded-xl text-sm transition-colors disabled:opacity-40"
           >
-            Limpiar lista y empezar un lote nuevo
+            <FileDown size={16} />
+            {descargando === "word" ? "Generando..." : "Acta (Word)"}
           </button>
-        )}
+          <button
+            type="button"
+            onClick={() => handleDescargarReporte("excel")}
+            disabled={escaneados.length === 0 || descargando !== null}
+            className="inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary-hover text-white font-medium py-3 rounded-xl text-sm transition-colors disabled:opacity-40"
+          >
+            <FileDown size={16} />
+            {descargando === "excel" ? "Generando..." : "Acta (Excel)"}
+          </button>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => refetch()}
+          className="inline-flex items-center justify-center gap-1.5 text-xs text-gray-400 hover:text-gray-600 text-center"
+        >
+          <RefreshCw size={12} />
+          Actualizar lista
+        </button>
       </div>
     </div>
   );

@@ -2,25 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Upload, AlertCircle, CheckCircle, FileText, FileDown, Search, Download, Plus, X } from "lucide-react";
 import { devolucionesApi } from "@/api/devoluciones";
+import { extraerErrorBlob } from "@/utils/blobError";
 import { VerificarSerialesTab } from "./VerificarSerialesTab";
 
 const ESTADOS_SUGERIDOS = ["transito", "entregado", "no_ubicado", "reasignado", "devolucion"];
 
 function formatFecha(iso: string) {
   return new Date(iso).toLocaleString("es-CO", { dateStyle: "short", timeStyle: "short" });
-}
-
-async function extraerErrorBlob(e: unknown): Promise<string> {
-  const data = (e as { response?: { data?: unknown } })?.response?.data;
-  if (data instanceof Blob) {
-    try {
-      const parsed = JSON.parse(await data.text());
-      if (typeof parsed?.detail === "string") return parsed.detail;
-    } catch {
-      // no era JSON, cae al mensaje genérico
-    }
-  }
-  return "Error al generar el reporte";
 }
 
 function EstadoSelect({ id, estado }: { id: number; estado: string }) {

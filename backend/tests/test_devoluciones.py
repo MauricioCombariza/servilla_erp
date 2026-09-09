@@ -1,9 +1,11 @@
 """Tests de integración para /api/devoluciones."""
 import io
+from datetime import date
 
 import pandas as pd
 import pytest
 from docx import Document
+from openpyxl import load_workbook
 from sqlalchemy import delete
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -157,6 +159,30 @@ async def test_carga_masiva_columnas_faltantes(client, headers):
     assert "faltantes" in r.json()["detail"].lower()
 
 
+@pytest.mark.asyncio
+async def test_carga_masiva_telefono_demasiado_largo(client, headers):
+    """Un campo que excede el límite de columna se reporta por fila (200 +
+    errores[]), no debe tumbar toda la carga con un 500."""
+    contenido = _xlsx([{
+        "serial": "DEV-TEST-LARGO",
+        "nombre": "X",
+        "telefono": "3001234567 / 3009876543",  # 24 chars, excede VARCHAR(20)
+        "direccion": "Cra 1",
+        "localidad": "Bogota",
+    }])
+    r = await client.post(
+        "/api/devoluciones/carga-masiva",
+        files={"file": ("dev.xlsx", io.BytesIO(contenido),
+                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["nuevas"] == 0
+    assert data["actualizadas"] == 0
+    assert any("telefono" in e.lower() for e in data["errores"])
+
+
 # ── PATCH estado ─────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -220,7 +246,7 @@ async def test_escanear_serial_inexistente_404(client, headers):
 
 
 @pytest.mark.asyncio
-async def test_escanear_serial_es_idempotente(client, headers, limpiar_devoluciones):
+async def test_escanear_serial_avisa_ya_escaneado(client, headers, limpiar_devoluciones):
     contenido = _xlsx([
         {"serial": "DEV-TEST-001", "nombre": "Juan", "telefono": "1", "direccion": "A", "localidad": "B"},
     ])
@@ -231,12 +257,127 @@ async def test_escanear_serial_es_idempotente(client, headers, limpiar_devolucio
         headers=headers,
     )
 
-    for _ in range(2):
-        r = await client.patch(
-            "/api/devoluciones/serial/DEV-TEST-001", json={"estado": "devolucion"}, headers=headers
-        )
-        assert r.status_code == 200, r.text
-        assert r.json()["estado"] == "devolucion"
+    r1 = await client.patch(
+        "/api/devoluciones/serial/DEV-TEST-001", json={"estado": "devolucion"}, headers=headers
+    )
+    assert r1.status_code == 200, r1.text
+    data1 = r1.json()
+    assert data1["estado"] == "devolucion"
+    assert data1["ya_escaneado"] is False
+    assert data1["escaneado_previamente_en"] is None
+    assert data1["fecha_escaneo"] is not None
+
+    r2 = await client.patch(
+        "/api/devoluciones/serial/DEV-TEST-001", json={"estado": "devolucion"}, headers=headers
+    )
+    assert r2.status_code == 200, r2.text
+    data2 = r2.json()
+    assert data2["estado"] == "devolucion"
+    assert data2["ya_escaneado"] is True
+    assert data2["escaneado_previamente_en"] == data1["fecha_escaneo"]
+
+
+# ── Reporte del día (JSON + exportaciones) ─────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_escaneados_dia_filtra_por_fecha_y_estado(client, headers, limpiar_devoluciones):
+    contenido = _xlsx([
+        {"serial": "DEV-TEST-001", "nombre": "Juan", "telefono": "1", "direccion": "A", "localidad": "B"},
+    ])
+    await client.post(
+        "/api/devoluciones/carga-masiva",
+        files={"file": ("dev.xlsx", io.BytesIO(contenido),
+                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        headers=headers,
+    )
+    await client.patch(
+        "/api/devoluciones/serial/DEV-TEST-001", json={"estado": "devolucion"}, headers=headers
+    )
+
+    r = await client.get("/api/devoluciones/escaneados-dia", headers=headers)
+    assert r.status_code == 200, r.text
+    assert any(f["serial"] == "DEV-TEST-001" for f in r.json())
+
+    r = await client.get(
+        "/api/devoluciones/escaneados-dia", params={"fecha": "2020-01-01"}, headers=headers
+    )
+    assert r.status_code == 200, r.text
+    assert all(f["serial"] != "DEV-TEST-001" for f in r.json())
+
+
+@pytest.mark.asyncio
+async def test_reporte_dia_word(client, headers, limpiar_devoluciones):
+    contenido = _xlsx([
+        {"serial": "DEV-TEST-001", "nombre": "Juan", "telefono": "1", "direccion": "A", "localidad": "B"},
+    ])
+    await client.post(
+        "/api/devoluciones/carga-masiva",
+        files={"file": ("dev.xlsx", io.BytesIO(contenido),
+                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        headers=headers,
+    )
+    await client.patch(
+        "/api/devoluciones/serial/DEV-TEST-001", json={"estado": "devolucion"}, headers=headers
+    )
+
+    r = await client.get(
+        "/api/devoluciones/reporte-dia/word",
+        params={"fecha": date.today().isoformat()},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    doc = Document(io.BytesIO(r.content))
+    seriales = [row.cells[0].text for row in doc.tables[0].rows[1:]]
+    assert "DEV-TEST-001" in seriales
+
+
+@pytest.mark.asyncio
+async def test_reporte_dia_word_404_sin_datos(client, headers):
+    r = await client.get(
+        "/api/devoluciones/reporte-dia/word", params={"fecha": "1999-01-01"}, headers=headers
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_reporte_dia_excel(client, headers, limpiar_devoluciones):
+    contenido = _xlsx([
+        {"serial": "DEV-TEST-001", "nombre": "Juan", "telefono": "1", "direccion": "A", "localidad": "B"},
+    ])
+    await client.post(
+        "/api/devoluciones/carga-masiva",
+        files={"file": ("dev.xlsx", io.BytesIO(contenido),
+                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        headers=headers,
+    )
+    await client.patch(
+        "/api/devoluciones/serial/DEV-TEST-001", json={"estado": "devolucion"}, headers=headers
+    )
+
+    r = await client.get(
+        "/api/devoluciones/reporte-dia/excel",
+        params={"fecha": date.today().isoformat()},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    wb = load_workbook(io.BytesIO(r.content))
+    ws = wb.active
+    valores = [c.value for row in ws.iter_rows() for c in row]
+    assert "DEV-TEST-001" in valores
+
+
+@pytest.mark.asyncio
+async def test_reporte_dia_excel_404_sin_datos(client, headers):
+    r = await client.get(
+        "/api/devoluciones/reporte-dia/excel", params={"fecha": "1999-01-01"}, headers=headers
+    )
+    assert r.status_code == 404
 
 
 # ── Generación de acta .docx ────────────────────────────────────────────────

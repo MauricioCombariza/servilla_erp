@@ -10,6 +10,12 @@ export interface Devolucion {
   estado: string;
   fecha_carga: string;
   fecha_actualizacion: string;
+  fecha_escaneo: string | null;
+}
+
+export interface DevolucionEscaneo extends Devolucion {
+  ya_escaneado: boolean;
+  escaneado_previamente_en: string | null;
 }
 
 export interface CargaMasivaDevolucionesResult {
@@ -62,8 +68,13 @@ export const devolucionesApi = {
     api.patch<Devolucion>(`/devoluciones/${id}`, { estado }),
 
   escanearSerial: (serial: string) =>
-    api.patch<Devolucion>(`/devoluciones/serial/${encodeURIComponent(serial)}`, {
+    api.patch<DevolucionEscaneo>(`/devoluciones/serial/${encodeURIComponent(serial)}`, {
       estado: "devolucion",
+    }),
+
+  escaneadosDia: (fecha?: string) =>
+    api.get<Devolucion[]>("/devoluciones/escaneados-dia", {
+      params: fecha ? { fecha } : undefined,
     }),
 
   generarDocumento: (
@@ -72,6 +83,12 @@ export const devolucionesApi = {
 
   reporteDia: (fecha: string) =>
     api.get("/devoluciones/reporte-dia", { params: { fecha }, responseType: "blob" }),
+
+  reporteDiaWord: (fecha: string) =>
+    api.get("/devoluciones/reporte-dia/word", { params: { fecha }, responseType: "blob" }),
+
+  reporteDiaExcel: (fecha: string) =>
+    api.get("/devoluciones/reporte-dia/excel", { params: { fecha }, responseType: "blob" }),
 
   verificarSeriales: (seriales: string[]) =>
     api.post<VerificarSerialesResult>("/devoluciones/verificar-seriales", { seriales }),

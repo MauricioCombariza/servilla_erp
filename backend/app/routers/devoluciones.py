@@ -1,7 +1,7 @@
-from datetime import date
+from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +13,7 @@ from app.schemas.devoluciones import (
     DevolucionCreate,
     DevolucionDocumentoItem,
     DevolucionDocumentoRequest,
+    DevolucionEscaneoRead,
     DevolucionEstadoUpdate,
     DevolucionRead,
     VerificarSerialesRequest,
@@ -20,7 +21,12 @@ from app.schemas.devoluciones import (
 )
 from app.services.devoluciones_docx import DOCX_MEDIA_TYPE, construir_docx_devolucion
 from app.services.devoluciones_pdf import PDF_MEDIA_TYPE, construir_pdf_devolucion
-from app.services.devoluciones_service import procesar_excel_devoluciones
+from app.services.devoluciones_service import (
+    construir_excel_reporte_devolucion,
+    get_devoluciones_del_dia,
+    procesar_excel_devoluciones,
+)
+from app.services.excel_utils import XLSX_MEDIA_TYPE
 from app.services.verificacion_seriales_service import (
     EXCEL_MEDIA_TYPE,
     clasificar_seriales,
@@ -163,12 +169,14 @@ async def actualizar_estado(
         raise HTTPException(status_code=404, detail="Devolución no encontrada")
 
     devolucion.estado = body.estado
+    if body.estado == "devolucion":
+        devolucion.fecha_escaneo = datetime.now(UTC)
     await db.commit()
     await db.refresh(devolucion)
     return devolucion
 
 
-@router.patch("/serial/{serial}", response_model=DevolucionRead)
+@router.patch("/serial/{serial}", response_model=DevolucionEscaneoRead)
 async def actualizar_estado_por_serial(
     serial: str,
     body: DevolucionEstadoUpdate,
@@ -180,10 +188,30 @@ async def actualizar_estado_por_serial(
     if devolucion is None:
         raise HTTPException(status_code=404, detail="Serial no encontrado en devoluciones")
 
+    estado_anterior = devolucion.estado
+    fecha_escaneo_anterior = devolucion.fecha_escaneo
+    ya_escaneado = body.estado == "devolucion" and estado_anterior == "devolucion"
+
     devolucion.estado = body.estado
+    if body.estado == "devolucion":
+        devolucion.fecha_escaneo = datetime.now(UTC)
     await db.commit()
     await db.refresh(devolucion)
-    return devolucion
+
+    return DevolucionEscaneoRead(
+        **DevolucionRead.model_validate(devolucion).model_dump(),
+        ya_escaneado=ya_escaneado,
+        escaneado_previamente_en=fecha_escaneo_anterior if ya_escaneado else None,
+    )
+
+
+@router.get("/escaneados-dia", response_model=list[DevolucionRead])
+async def escaneados_dia(
+    fecha: date = Query(default_factory=date.today),
+    db: AsyncSession = Depends(get_db),
+    _=_auth_scan,
+):
+    return await get_devoluciones_del_dia(db, fecha, orden_desc=True)
 
 
 @router.post("/documento")
@@ -203,16 +231,7 @@ async def reporte_dia(
     db: AsyncSession = Depends(get_db),
     _=_auth,
 ):
-    query = (
-        select(Devolucion)
-        .where(
-            Devolucion.estado == "devolucion",
-            func.date(Devolucion.fecha_actualizacion) == fecha,
-        )
-        .order_by(Devolucion.fecha_actualizacion)
-    )
-    result = await db.execute(query)
-    devoluciones = result.scalars().all()
+    devoluciones = await get_devoluciones_del_dia(db, fecha)
     if not devoluciones:
         raise HTTPException(
             status_code=404,
@@ -230,5 +249,55 @@ async def reporte_dia(
     return Response(
         content=contenido,
         media_type=PDF_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'},
+    )
+
+
+@router.get("/reporte-dia/word")
+async def reporte_dia_word(
+    fecha: date = Query(default_factory=date.today),
+    db: AsyncSession = Depends(get_db),
+    _=_auth_scan,
+):
+    devoluciones = await get_devoluciones_del_dia(db, fecha)
+    if not devoluciones:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No hay devoluciones marcadas como 'devolucion' el {fecha.isoformat()}.",
+        )
+
+    items = [
+        DevolucionDocumentoItem(
+            serial=d.serial, nombre=d.nombre, direccion=d.direccion, localidad=d.localidad
+        )
+        for d in devoluciones
+    ]
+    contenido = construir_docx_devolucion(items, fecha=fecha)
+    nombre_archivo = f"acta_devolucion_{fecha.isoformat()}.docx"
+    return Response(
+        content=contenido,
+        media_type=DOCX_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'},
+    )
+
+
+@router.get("/reporte-dia/excel")
+async def reporte_dia_excel(
+    fecha: date = Query(default_factory=date.today),
+    db: AsyncSession = Depends(get_db),
+    _=_auth_scan,
+):
+    devoluciones = await get_devoluciones_del_dia(db, fecha)
+    if not devoluciones:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No hay devoluciones marcadas como 'devolucion' el {fecha.isoformat()}.",
+        )
+
+    contenido = construir_excel_reporte_devolucion(fecha, devoluciones)
+    nombre_archivo = f"acta_devolucion_{fecha.isoformat()}.xlsx"
+    return Response(
+        content=contenido,
+        media_type=XLSX_MEDIA_TYPE,
         headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'},
     )

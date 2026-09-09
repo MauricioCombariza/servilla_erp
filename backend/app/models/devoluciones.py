@@ -23,3 +23,4 @@ class Devolucion(Base):
     fecha_actualizacion: Mapped[datetime] = mapped_column(
         _ts, server_default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP")
     )
+    fecha_escaneo: Mapped[datetime | None] = mapped_column(_ts, nullable=True)
