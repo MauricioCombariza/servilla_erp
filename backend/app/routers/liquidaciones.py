@@ -154,11 +154,43 @@ async def planillas_pendientes_mensajero(
 # ── Helpers de selección explícita (planillas / fechas) ────────────────────────
 
 def _predicado_planillas(planillas: list[str] | None, mes: int, anio: int) -> tuple[str, dict]:
-    """Predicado SQL para seriales_gestion: por planillas explícitas o por mes/año (legado)."""
+    """Predicado SQL para seriales_gestion: por planillas explícitas o por mes/año (legado).
+
+    El camino legado (mes/año) restringe qué seriales puede barrer, por dos motivos
+    que se combinan con AND:
+
+    1. Excluye seriales con planilla aún sin asignar ('' / 'nan'): el dashboard.csv
+       completa la columna planilla progresivamente a medida que el courier procesa
+       el lote, así que un serial "pendiente" del mes puede no tener todavía su
+       planilla real. Si se liquida en ese estado, el guard de _SERIAL_UPSERT (solo
+       re-etiqueta planilla en estado='pendiente') lo deja congelado sin planilla
+       para siempre — bug reportado en planilla 401218 (ver ordenes_service.py,
+       _SERIAL_UPSERT).
+    2. Regla de negocio: solo planillas que empiezan por '7', o que empiezan por
+       '4' y ya están bloqueadas (todos sus seriales con editado_manualmente=TRUE
+       — mismo criterio que el badge "Bloqueada" de /planillas, ver
+       planillas_service.resumen_planillas). Una planilla 4xxx recién llegada del
+       CSV puede seguir recibiendo/corrigiendo seriales; liquidarla antes de
+       bloquearla arriesga dejar el mismo tipo de dato huérfano que el punto 1.
+
+    El camino explícito por planilla (`planillas` dado) no aplica ninguna de las
+    dos restricciones: el usuario ya eligió planillas conocidas a propósito.
+    """
     if planillas is not None:
         return "AND sg.planilla = ANY(:planillas)", {"planillas": planillas}
     return (
-        "AND EXTRACT(MONTH FROM sg.f_esc) = :mes AND EXTRACT(YEAR FROM sg.f_esc) = :anio",
+        "AND EXTRACT(MONTH FROM sg.f_esc) = :mes AND EXTRACT(YEAR FROM sg.f_esc) = :anio"
+        " AND sg.planilla NOT IN ('', 'nan')"
+        " AND ("
+        "   sg.planilla LIKE '7%'"
+        "   OR ("
+        "     sg.planilla LIKE '4%'"
+        "     AND NOT EXISTS ("
+        "       SELECT 1 FROM seriales_gestion sg2"
+        "       WHERE sg2.planilla = sg.planilla AND sg2.editado_manualmente = FALSE"
+        "     )"
+        "   )"
+        " )",
         {"mes": mes, "anio": anio},
     )
 

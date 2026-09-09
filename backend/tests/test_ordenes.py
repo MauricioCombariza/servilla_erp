@@ -296,6 +296,64 @@ async def test_carga_masiva_planilla_texto_nan_no_se_guarda(client, headers, set
 
 
 @pytest.mark.asyncio
+async def test_carga_masiva_corrige_planilla_de_serial_liquidado(client, headers, setup_maestros):
+    """Un serial ya 'liquidado' con planilla rota ('') debe recibir la planilla
+    real del CSV en una carga posterior, sin que cambien su estado ni sus precios.
+
+    Regresión: _SERIAL_UPSERT solo re-etiqueta planilla cuando estado='pendiente',
+    así que un serial liquidado antes de que el CSV le asignara su planilla real
+    quedaba congelado con planilla='' para siempre (bug reportado: planilla 401218
+    mostraba 109/206 seriales en /planillas porque los 97 restantes, ya
+    liquidados, nunca recibieron su planilla)."""
+    from sqlalchemy import text as sqltext
+
+    from app.database import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as db:
+            await db.execute(sqltext("""
+                INSERT INTO seriales_gestion
+                    (serial, orden, planilla, f_emi, f_esc, cod_men, tipo_gestion,
+                     tipo_envio, ambito, precio_cliente, precio_mensajero, estado, origen)
+                VALUES
+                    ('SER-LIQ-001', 'ORD-LIQ-001', '', '2026-06-01', '2026-06-01', '',
+                     'Entrega', 'sobre', 'bogota', 4000, 1300, 'liquidado', 'manual')
+            """))
+            await db.commit()
+
+        csv_content = (
+            "orden,serial,fecha_recepcion,nombre_cliente,tipo_servicio,ambito,planilla\n"
+            "ORD-LIQ-001,SER-LIQ-001,2026-06-01,Cliente Ordenes Test,sobre,bogota,401218\n"
+        )
+        r = await client.post(
+            "/api/ordenes/carga-masiva",
+            files={"file": ("liquidado.csv", io.BytesIO(csv_content.encode()), "text/csv")},
+            headers=headers,
+        )
+        assert r.status_code == 200, r.text
+
+        async with AsyncSessionLocal() as db:
+            row = (
+                await db.execute(
+                    sqltext(
+                        "SELECT planilla, estado, precio_cliente, precio_mensajero "
+                        "FROM seriales_gestion WHERE serial = 'SER-LIQ-001'"
+                    )
+                )
+            ).one()
+        planilla, estado, precio_cliente, precio_mensajero = row
+        assert planilla == "401218"
+        assert estado == "liquidado"
+        assert float(precio_cliente) == 4000
+        assert float(precio_mensajero) == 1300
+    finally:
+        async with AsyncSessionLocal() as db:
+            await db.execute(sqltext("DELETE FROM seriales_gestion WHERE serial = 'SER-LIQ-001'"))
+            await db.execute(sqltext("DELETE FROM ordenes WHERE numero_orden = 'ORD-LIQ-001'"))
+            await db.commit()
+
+
+@pytest.mark.asyncio
 async def test_carga_masiva_historico_f_esc_independiente_de_f_emi(client, headers, setup_maestros):
     """Flujo iMile histórico (dashboard.csv): cuando el archivo trae f_esc, esa es
     la que debe quedar en seriales_gestion.f_esc (fecha real de escáner), y f_emi

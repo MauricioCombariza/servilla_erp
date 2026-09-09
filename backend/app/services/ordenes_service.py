@@ -287,6 +287,20 @@ _SERIAL_EXISTS = (
     .bindparams(bindparam("serials", type_=ARRAY(String)))
 )
 
+# Corrige SOLO la planilla de seriales que _SERIAL_UPSERT no toca porque ya
+# salieron de 'pendiente' (liquidado/anulado) y no están bloqueados manualmente.
+# Sin esto, un serial liquidado antes de que el dashboard.csv le asignara su
+# planilla real queda con planilla='' para siempre (bug reportado: planilla
+# 401218 mostraba 109/206 seriales porque los 97 restantes, ya liquidados,
+# nunca recibieron su planilla). planilla es una etiqueta de lote, no un dato
+# financiero — corregirla no reabre ni recalcula la liquidación.
+_PLANILLA_FIX_UPDATE = text("""
+    UPDATE seriales_gestion
+    SET planilla = :planilla
+    WHERE serial = :serial
+      AND planilla IN ('', 'nan')
+""")
+
 _ORDEN_EXISTS = (
     text("SELECT numero_orden, id FROM ordenes WHERE numero_orden = ANY(:nums)")
     .bindparams(bindparam("nums", type_=ARRAY(String)))
@@ -780,7 +794,7 @@ async def procesar_csv(
     total_filas = 0
     filas_ignoradas = 0
     n_excluidos_courier = 0
-    sg_nuevos = sg_actualizados = sg_bloqueados = 0
+    sg_nuevos = sg_actualizados = sg_bloqueados = sg_planilla_corregida = 0
     clientes_no_encontrados: Counter[str] = Counter()
     da_no_resueltos: Counter[str] = Counter()
     # (numero_orden, fecha, nombre_cliente, tipo_servicio) → [cant_local, cant_nacional]
@@ -902,6 +916,7 @@ async def procesar_csv(
             existing_map = {r[0]: (r[1], r[2]) for r in rows}  # serial → (estado, editado_manualmente)
 
             a_procesar: list[dict] = []
+            a_fix_planilla: list[dict] = []
             for p in lote:
                 estado_actual = existing_map.get(p["serial"])
                 if estado_actual is None:
@@ -912,7 +927,12 @@ async def procesar_csv(
                     a_procesar.append(p)
                 elif estado_actual[1]:  # editado_manualmente=True → planilla fija, no se toca
                     sg_bloqueados += 1
-                # else: estado != pendiente → no-op silencioso
+                elif p["planilla"]:
+                    # estado != 'pendiente' (liquidado/anulado), no bloqueado: el upsert
+                    # no lo toca, pero sí corregimos la planilla si venía rota (ver
+                    # docstring de _PLANILLA_FIX_UPDATE).
+                    a_fix_planilla.append({"serial": p["serial"], "planilla": p["planilla"]})
+                # else: estado != pendiente y sin planilla nueva que aportar → no-op silencioso
 
             if a_procesar:
                 try:
@@ -924,6 +944,18 @@ async def procesar_csv(
                     logger.error("Error en batch seriales: %s", e)
                     if len(errores) < MAX_ERRORES:
                         errores.append(f"Error en batch seriales: {e}")
+
+            if a_fix_planilla:
+                try:
+                    await db.execute(text("SAVEPOINT sp_batch_fix_planilla"))
+                    await db.execute(_PLANILLA_FIX_UPDATE, a_fix_planilla)
+                    sg_planilla_corregida += len(a_fix_planilla)
+                    await db.execute(text("RELEASE SAVEPOINT sp_batch_fix_planilla"))
+                except Exception as e:
+                    await db.execute(text("ROLLBACK TO SAVEPOINT sp_batch_fix_planilla"))
+                    logger.error("Error en batch fix planilla: %s", e)
+                    if len(errores) < MAX_ERRORES:
+                        errores.append(f"Error en batch fix planilla: {e}")
 
         # ── Acumular el resumen de órdenes entre chunks ───────────────────────
         resumen = (
@@ -969,12 +1001,17 @@ async def procesar_csv(
         errores.append(
             f"{n_excluidos_courier} filas excluidas: courier no permitido (Lecta/Prindel)"
         )
+    if sg_planilla_corregida:
+        errores.append(
+            f"{sg_planilla_corregida} seriales liquidados/anulados con planilla rota "
+            "('' o 'nan') corregidos con la planilla del CSV (sin tocar estado ni precios)"
+        )
 
     logger.info(
         "Carga masiva: órdenes_nuevas=%d actualizadas=%d "
-        "seriales_nuevos=%d actualizados=%d bloqueados=%d ignoradas=%d errores=%d",
+        "seriales_nuevos=%d actualizados=%d bloqueados=%d planilla_corregida=%d ignoradas=%d errores=%d",
         ordenes_nuevas, ordenes_actualizadas, sg_nuevos, sg_actualizados,
-        sg_bloqueados, filas_ignoradas, len(errores),
+        sg_bloqueados, sg_planilla_corregida, filas_ignoradas, len(errores),
     )
     return CargaMasivaResult(
         total_filas=total_filas,

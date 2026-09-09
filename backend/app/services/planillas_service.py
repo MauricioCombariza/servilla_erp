@@ -37,19 +37,49 @@ async def resumen_planillas(
     planilla: str | None = None,
     mensajero_id: int | None = None,
 ) -> list[PlanillaResumen]:
-    q = select(SerialGestion)
-    if fecha_desde:
-        q = q.where(SerialGestion.f_esc >= fecha_desde)
-    if fecha_hasta:
-        q = q.where(SerialGestion.f_esc <= fecha_hasta)
-    if cod_men:
-        q = q.where(SerialGestion.cod_men == cod_men)
-    if planilla:
-        q = q.where(SerialGestion.planilla == planilla)
-    if mensajero_id is not None:
-        q = q.where(SerialGestion.mensajero_id == mensajero_id)
+    """Trae los seriales a resumir por planilla.
 
-    seriales = list((await db.execute(q)).scalars().all())
+    Una planilla puede tener seriales con f_esc fuera del rango usado para
+    descubrirla: reintentos/devoluciones en otra fecha, o — el caso reportado en
+    planilla 401218 — seriales que quedaron liquidados en un mes distinto al de
+    los que siguen pendientes de la misma planilla física, porque el dashboard.csv
+    completa la columna planilla progresivamente. Filtrar por f_esc fila a fila
+    subcontaba esas planillas (mismo bug ya corregido en pagos_ciudades.py,
+    commit f6de2a8). Por eso, si hay filtro de fecha, primero se descubren las
+    planillas con actividad en el rango y luego se traen TODOS sus seriales sin
+    acotar por fecha. Si se pide una planilla exacta, se ignora la fecha: se
+    quiere el total real de esa planilla, no una porción.
+    """
+    if planilla:
+        q = select(SerialGestion).where(SerialGestion.planilla == planilla)
+        if cod_men:
+            q = q.where(SerialGestion.cod_men == cod_men)
+        if mensajero_id is not None:
+            q = q.where(SerialGestion.mensajero_id == mensajero_id)
+        seriales = list((await db.execute(q)).scalars().all())
+    else:
+        dq = select(SerialGestion.planilla).distinct()
+        if fecha_desde:
+            dq = dq.where(SerialGestion.f_esc >= fecha_desde)
+        if fecha_hasta:
+            dq = dq.where(SerialGestion.f_esc <= fecha_hasta)
+        if cod_men:
+            dq = dq.where(SerialGestion.cod_men == cod_men)
+        if mensajero_id is not None:
+            dq = dq.where(SerialGestion.mensajero_id == mensajero_id)
+
+        if fecha_desde or fecha_hasta:
+            planillas_en_rango = (await db.execute(dq)).scalars().all()
+            if not planillas_en_rango:
+                return []
+            q = select(SerialGestion).where(SerialGestion.planilla.in_(planillas_en_rango))
+        else:
+            q = select(SerialGestion)
+        if cod_men:
+            q = q.where(SerialGestion.cod_men == cod_men)
+        if mensajero_id is not None:
+            q = q.where(SerialGestion.mensajero_id == mensajero_id)
+        seriales = list((await db.execute(q)).scalars().all())
 
     # Cargar planillas revisadas para lookup O(1)
     revisadas_rows = (await db.execute(select(PlanillaRevisada.lot_esc))).scalars().all()
