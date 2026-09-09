@@ -22,12 +22,18 @@ export interface PendientesEntregaResumen {
   personas: PendientesEntregaRow[];
 }
 
+export interface PlanillaMesRow {
+  planilla: string;
+  pendientes: number;
+}
+
 export interface ResumenMensualRow {
   anomes: string;
   mes: string;
   courier_externo: number;
   mensajero: number;
   total: number;
+  planillas: PlanillaMesRow[];
 }
 
 export interface ResumenMensualResponse {

@@ -174,7 +174,8 @@ def _fetch_pendientes_courier_sync(codigos: list[int], corte: str) -> list[dict]
                 cur.execute(
                     f"""
                     SELECT serial, orden, cod_men, f_emi, no_entidad, nombred,
-                           dirdes1, cod_sec, ciudad1, dpto1, retorno, ret_esc, motivo
+                           dirdes1, cod_sec, ciudad1, dpto1, retorno, ret_esc, motivo,
+                           NULLIF(TRIM(planilla), '') AS planilla
                     FROM histo
                     WHERE CAST(TRIM(cod_men) AS UNSIGNED) IN ({placeholders})
                       AND f_emi >= %s

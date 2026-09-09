@@ -21,12 +21,18 @@ class PendientesEntregaResumen(BaseModel):
     personas: list[PendientesEntregaRow]
 
 
+class PlanillaMesRow(BaseModel):
+    planilla: str
+    pendientes: int
+
+
 class ResumenMensualRow(BaseModel):
     anomes: str
     mes: str
     courier_externo: int
     mensajero: int
     total: int
+    planillas: list[PlanillaMesRow]
 
 
 class ResumenMensualResponse(BaseModel):

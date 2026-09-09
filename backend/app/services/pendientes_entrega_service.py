@@ -17,7 +17,7 @@ _MESES_ES = [
 ]
 
 COLUMNAS_EXCEL = [
-    "serial", "orden", "cod_men", "f_emi", "no_entidad", "nombred",
+    "serial", "orden", "cod_men", "planilla", "f_emi", "no_entidad", "nombred",
     "dirdes1", "cod_sec", "ciudad1", "dpto1", "retorno", "ret_esc", "motivo",
 ]
 
@@ -112,6 +112,14 @@ def calcular_desglose_mensual(rows: list[dict]) -> list[dict]:
     return desglose
 
 
+def calcular_desglose_planillas(rows: list[dict]) -> list[dict]:
+    conteo: dict[str, int] = defaultdict(int)
+    for row in rows:
+        planilla = row.get("planilla") or "(sin planilla)"
+        conteo[planilla] += 1
+    return [{"planilla": planilla, "pendientes": conteo[planilla]} for planilla in sorted(conteo)]
+
+
 async def get_pendientes_por_personal(
     db: AsyncSession, tipo_personal: str, dias_corte: int = 60,
 ) -> list[dict]:
@@ -154,12 +162,14 @@ async def get_resumen_mensual(db: AsyncSession, dias_corte: int = 60) -> list[di
     agrupado = _agrupar_por_cod_men(rows)
 
     conteo: dict[str, dict[str, int]] = defaultdict(lambda: {"courier_externo": 0, "mensajero": 0})
+    filas_por_mes: dict[str, list[dict]] = defaultdict(list)
     for codigo, persona in codigos_map.items():
         for fila in agrupado.get(str(codigo), []):
             anomes = (fila.get("f_emi") or "")[:7]
             if not _anomes_valido(anomes):
                 continue
             conteo[anomes][persona.tipo_personal] += 1
+            filas_por_mes[anomes].append(fila)
 
     resultado = []
     for anomes in sorted(conteo):
@@ -173,6 +183,7 @@ async def get_resumen_mensual(db: AsyncSession, dias_corte: int = 60) -> list[di
             "courier_externo": c["courier_externo"],
             "mensajero": c["mensajero"],
             "total": c["courier_externo"] + c["mensajero"],
+            "planillas": calcular_desglose_planillas(filas_por_mes[anomes]),
         })
     return resultado
 
@@ -232,11 +243,11 @@ def nombre_archivo_excel(persona: Personal) -> str:
 
 def construir_excel_courier(nombre: str, filas: list[dict]) -> bytes:
     titulo = "Pendientes de entrega" + (f" - {nombre}" if nombre else "")
-    widths = [16, 10, 10, 12, 26, 26, 30, 10, 16, 12, 10, 10, 20]
+    widths = [16, 10, 10, 12, 12, 26, 26, 30, 10, 16, 12, 10, 10, 20]
     return construir_excel(titulo, COLUMNAS_EXCEL, filas, widths)
 
 
 def construir_excel_mensual(mes_label: str, filas: list[dict]) -> bytes:
     titulo = f"Pendientes de entrega - {mes_label}"
-    widths = [16, 26, 16, 10, 10, 12, 26, 26, 30, 10, 16, 12, 10, 10, 20]
+    widths = [16, 26, 16, 10, 10, 12, 12, 26, 26, 30, 10, 16, 12, 10, 10, 20]
     return construir_excel(titulo, COLUMNAS_EXCEL_MENSUAL, filas, widths)

@@ -11,6 +11,7 @@ const TABS: { value: TipoPersonalPendientes; label: string }[] = [
 export function PendientesEntregaPage() {
   const [tipo, setTipo] = useState<TipoPersonalPendientes>("courier_externo");
   const [expandidos, setExpandidos] = useState<Set<string>>(new Set());
+  const [expandidosMes, setExpandidosMes] = useState<Set<string>>(new Set());
   const [descargando, setDescargando] = useState<Record<string, boolean>>({});
   const [error, setError] = useState("");
   const [descargandoMes, setDescargandoMes] = useState<Record<string, boolean>>({});
@@ -41,6 +42,15 @@ export function PendientesEntregaPage() {
       const next = new Set(prev);
       if (next.has(codMen)) next.delete(codMen);
       else next.add(codMen);
+      return next;
+    });
+  }
+
+  function toggleExpandidoMes(anomes: string) {
+    setExpandidosMes((prev) => {
+      const next = new Set(prev);
+      if (next.has(anomes)) next.delete(anomes);
+      else next.add(anomes);
       return next;
     });
   }
@@ -120,6 +130,7 @@ export function PendientesEntregaPage() {
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 text-gray-500 text-xs">
+                  <th className="text-left px-3 py-2 font-medium w-8"></th>
                   <th className="text-left px-3 py-2 font-medium">Mes</th>
                   <th className="text-right px-3 py-2 font-medium">Courier Externo</th>
                   <th className="text-right px-3 py-2 font-medium">Mensajeros</th>
@@ -128,24 +139,57 @@ export function PendientesEntregaPage() {
                 </tr>
               </thead>
               <tbody>
-                {meses.map((m) => (
-                  <tr key={m.anomes} className="border-t border-gray-100">
-                    <td className="px-3 py-2 text-gray-900">{m.mes}</td>
-                    <td className="px-3 py-2 text-right text-gray-600">{m.courier_externo}</td>
-                    <td className="px-3 py-2 text-right text-gray-600">{m.mensajero}</td>
-                    <td className="px-3 py-2 text-right font-medium text-gray-900">{m.total}</td>
-                    <td className="px-3 py-2 text-right">
-                      <button
-                        onClick={() => handleDescargarMes(m.anomes)}
-                        disabled={descargandoMes[m.anomes]}
-                        className="inline-flex items-center gap-1.5 bg-primary hover:bg-primary-hover text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
-                      >
-                        <Download size={14} />
-                        {descargandoMes[m.anomes] ? "Generando..." : "Excel"}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {meses.map((m) => {
+                  const abierto = expandidosMes.has(m.anomes);
+                  return (
+                    <Fragment key={m.anomes}>
+                      <tr className="border-t border-gray-100">
+                        <td className="px-3 py-2">
+                          <button onClick={() => toggleExpandidoMes(m.anomes)} className="text-gray-400 hover:text-gray-700">
+                            {abierto ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                          </button>
+                        </td>
+                        <td className="px-3 py-2 text-gray-900">{m.mes}</td>
+                        <td className="px-3 py-2 text-right text-gray-600">{m.courier_externo}</td>
+                        <td className="px-3 py-2 text-right text-gray-600">{m.mensajero}</td>
+                        <td className="px-3 py-2 text-right font-medium text-gray-900">{m.total}</td>
+                        <td className="px-3 py-2 text-right">
+                          <button
+                            onClick={() => handleDescargarMes(m.anomes)}
+                            disabled={descargandoMes[m.anomes]}
+                            className="inline-flex items-center gap-1.5 bg-primary hover:bg-primary-hover text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+                          >
+                            <Download size={14} />
+                            {descargandoMes[m.anomes] ? "Generando..." : "Excel"}
+                          </button>
+                        </td>
+                      </tr>
+                      {abierto && (
+                        <tr className="border-t border-gray-100 bg-gray-50">
+                          <td></td>
+                          <td colSpan={5} className="px-3 py-2">
+                            <table className="min-w-[240px] text-xs">
+                              <thead>
+                                <tr className="text-gray-500">
+                                  <th className="text-left py-1 pr-4 font-medium">Planilla</th>
+                                  <th className="text-right py-1 font-medium">Pendientes</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {m.planillas.map((p) => (
+                                  <tr key={p.planilla} className="border-t border-gray-200">
+                                    <td className="py-1 pr-4 text-gray-700">{p.planilla}</td>
+                                    <td className="py-1 text-right text-gray-900">{p.pendientes}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
