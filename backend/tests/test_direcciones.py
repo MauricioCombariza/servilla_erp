@@ -73,18 +73,22 @@ def test_ajustar_dir_leonisa_menos_de_3_coordenadas_queda_en_mayusculas():
 
 
 @pytest.mark.parametrize("raw,esperado", [
-    ("GUAYACAN DE LA PLAZACL 48 SUR 39 57 AP 566", "CLL 48 SUR 39 57 APTO 566"),
-    ("OCEANACL 39 52 95 AP 914", "CLL 39 52 95 APTO 914"),
-    ("REFUGIO VALLE VERDEAV 26 51 81 AP 1615 BL 2", "AV 26 51 81 APTO 1615 BL 2"),
-    ("NOGALES APARTAMENTOSCR 65 C 72 140 AP 1107 TO 1", "KRA 65C 72 140 APTO 1107 TO 1"),
-    # también pegado a un número (no solo a una palabra)
-    ("AP 1916CR 61 33 51", "KRA 61 33 51"),
-    ("CIVITACR 49A 48 200 TO 3 AP 3147", "KRA 49A 48 200 APTO 3147 TO 3"),
+    ("GUAYACAN DE LA PLAZACL 48 SUR 39 57 AP 566", "CLL 48 SUR 39 57 APTO 566 GUAYACAN DE LA PLAZA"),
+    ("OCEANACL 39 52 95 AP 914", "CLL 39 52 95 APTO 914 OCEANA"),
+    ("REFUGIO VALLE VERDEAV 26 51 81 AP 1615 BL 2", "AV 26 51 81 APTO 1615 BL 2 REFUGIO VALLE VERDE"),
+    ("NOGALES APARTAMENTOSCR 65 C 72 140 AP 1107 TO 1", "KRA 65C 72 140 APTO 1107 TO 1 NOGALES APARTAMENTOS"),
+    # también pegado a un número (no solo a una palabra): "AP 1916" es un
+    # complemento real que quedó mal ubicado antes del tipo de vía (no hay
+    # otro APTO más adelante) → se rescata como complemento, no como nombre.
+    ("AP 1916CR 61 33 51", "KRA 61 33 51 APTO 1916"),
+    ("CIVITACR 49A 48 200 TO 3 AP 3147", "KRA 49A 48 200 APTO 3147 TO 3 CIVITA"),
 ])
 def test_ajustar_dir_leonisa_tipo_via_pegado_al_nombre_anterior(raw, esperado):
     # El tipo de vía puede venir pegado (sin espacio) al nombre del
     # barrio/conjunto o a un número de complemento que lo precede — común
-    # en el archivo Vehigrupo.
+    # en el archivo Vehigrupo. El nombre del conjunto/barrio se conserva y
+    # se mueve al final; un complemento real que haya quedado mal ubicado
+    # ahí (p.ej. "AP 1916") se rescata como complemento, no se descarta.
     assert ajustar_dir_leonisa(raw) == esperado
 
 
@@ -199,6 +203,88 @@ def test_ajustar_dir_leonisa_oficina_se_reconoce(raw, esperado):
 def test_ajustar_dir_leonisa_consultorio_se_reconoce(raw, esperado):
     # "CONSULTORIO"/"CONSUL"/"CONS" (cualquier combinación de mayúsculas/
     # minúsculas) debe reconocerse como complemento y abreviarse a "CONS".
+    assert ajustar_dir_leonisa(raw) == esperado
+
+
+@pytest.mark.parametrize("raw,esperado", [
+    ("KRA 79F 45 46 SU AP 417", "KRA 79F 45 46 SUR APTO 417"),
+    ("KRA 50 40 30 S", "KRA 50 40 30 SUR"),
+])
+def test_ajustar_dir_leonisa_su_y_s_son_sur(raw, esperado):
+    # "SU" y "S" sueltos son abreviaturas frecuentes de "SUR"; siempre se
+    # normalizan a la palabra completa en la salida.
+    assert ajustar_dir_leonisa(raw) == esperado
+
+
+def test_ajustar_dir_leonisa_pi_es_piso():
+    # "PI" (pegada al número: "PI1") es abreviatura de "PISO".
+    assert ajustar_dir_leonisa("CR52D 65 53 PI1") == "KRA 52D 65 53 PS 1"
+
+
+def test_ajustar_dir_leonisa_ca_es_casa_fuera_del_primer_token():
+    # "CA" solo es Carrera cuando es el primer token de la dirección (ver
+    # test_ajustar_dir_leonisa_ca_es_carrera); en cualquier otra posición es
+    # "Casa", tanto pegada a un número como separada por espacios.
+    assert ajustar_dir_leonisa("CR50A 22 51 CA152") == "KRA 50A 22 51 CS 152"
+    # Sin 3 coordenadas después de "CA" no hay tipo de vía reconocido, pero
+    # la sustitución CA→CS igual debe aplicarse (no queda como "KRA").
+    assert ajustar_dir_leonisa("PARCELACION ASTURIAS CA 35") == "PARCELACION ASTURIAS CS 35"
+
+
+def test_ajustar_dir_leonisa_tr_es_transversal_solo_al_inicio():
+    # "TR" es Transversal solo cuando es el primer token...
+    assert ajustar_dir_leonisa("TR 45 26 220") == "TV 45 26 220"
+    # ...en cualquier otra posición es Torre.
+    assert ajustar_dir_leonisa("CR 45 26 220 APTO 303 TR 1") == "KRA 45 26 220 APTO 303 TO 1"
+
+
+def test_ajustar_dir_leonisa_to_pegada_entre_digitos():
+    # "801TO1" (Apto 801 + Torre 1, todo pegado) debe separarse correctamente.
+    assert ajustar_dir_leonisa("KRA 75A SUR 52E 105 AP 801TO1") == \
+        "KRA 75A SUR 52E 105 APTO 801 TO 1"
+
+
+@pytest.mark.parametrize("raw,esperado", [
+    ("CR 75AA SUR 52E 105", "KRA 75A SUR 52E 105"),   # letra repetida pegada
+    ("CL 11 AA SUR 55D 120", "CLL 11A SUR 55D 120"),  # letra repetida con espacio
+])
+def test_ajustar_dir_leonisa_deduplica_letra_repetida_en_coordenada(raw, esperado):
+    # Error de tipeo frecuente: la letra de la coordenada queda duplicada
+    # ("75AA" en vez de "75A"), venga pegada de origen o separada por espacio.
+    assert ajustar_dir_leonisa(raw) == esperado
+
+
+@pytest.mark.parametrize("raw,esperado", [
+    # Nombre de conjunto antes del tipo de vía (pegado) → se mueve al final.
+    ("CONJ ESPACIO 140CR 11 140 52 T2 AP305", "KRA 11 140 52 APTO 305 TO 2 CONJ ESPACIO 140"),
+    ("CL 146 7F 22 APTO 807 EDIFICIO ARIA", "CLL 146 7F 22 APTO 807 ED ARIA"),
+    # Nombre antes del tipo de vía, separado por espacio (no pegado).
+    ("CASA BLANCA 32 CR 79F 45 46 SU AP 417", "KRA 79F 45 46 SUR APTO 417 CASA BLANCA 32"),
+    ("TV 1 A 4 S 68 C 29", "TV 1A 4 SUR 68 CS 29"),
+    ("7CL 69 C 96 E 33 BL5 56 APTO 30", "CLL 69C 96E 33 APTO 30 BL 5"),
+    # Complemento mal ubicado antes del tipo de vía → se rescata como complemento real.
+    ("AP 1605 INT 3CR 75 150 50", "KRA 75 150 50 APTO 1605 INT 3"),
+    # Sin tipo de vía reconocido → no se modifica (sanity check).
+    ("DVDA CANOAS FCA 11 VIA EL ACUED", "DVDA CANOAS FCA 11 VIA EL ACUED"),
+    ("VRD LAS TOLDAS CONJ GUACA 13", "VRD LAS TOLDAS CONJ GUACA 13"),
+    ("CR52D 65 53 PI1", "KRA 52D 65 53 PS 1"),
+    # "URB" se descarta del nombre (palabra de relleno); "AP 503" duplicado
+    # del prefijo se descarta porque ya existe un "AP 503" real en el sufijo.
+    ("AP 503 URB ENTREVILLASCL 11 AA SUR 55D 120 AP 503", "CLL 11A SUR 55D 120 APTO 503 ENTREVILLAS"),
+    ("RIVERA DE SUR AMERICACR 75AA SUR 52E 105 AP 801TO1",
+     "KRA 75A SUR 52E 105 APTO 801 TO 1 RIVERA DE SUR AMERICA"),
+    ("SURAMERICA PARKCR 50A 24 51 AP 917", "KRA 50A 24 51 APTO 917 SURAMERICA PARK"),
+    ("CR50A 22 51 CA152", "KRA 50A 22 51 CS 152"),
+    ("PARCELACION ASTURIAS CA 35", "PARCELACION ASTURIAS CS 35"),
+    ("CR 45 26 220 APTO 303 TR 1", "KRA 45 26 220 APTO 303 TO 1"),
+    ("MANZANARES 2CL 27 13 134 CA 137", "CLL 27 13 134 CS 137 MANZANARES 2"),
+])
+def test_ajustar_dir_leonisa_casos_reales_reportados(raw, esperado):
+    # Casos reales reportados por el usuario (revisión de /direcciones,
+    # 2026-09-10): combinan todas las reglas nuevas (SU/S, PI, CA/TR según
+    # posición, deduplicación de letra repetida, conservación/promoción del
+    # nombre antes del tipo de vía) sin romper las direcciones que ya
+    # funcionaban bien.
     assert ajustar_dir_leonisa(raw) == esperado
 
 

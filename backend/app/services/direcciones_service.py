@@ -12,9 +12,9 @@ lo que cambia es el formato del archivo:
   latin-1, sin encabezado), dirección en las columnas 106-170
   (índice 105:170).
 
-Puerto directo de la herramienta Streamlit
-dashboard/pages_home/AjusteDireccionesLeonisa.py — misma lógica de
-normalización, sin cambios de comportamiento.
+Originalmente portado de la herramienta Streamlit
+dashboard/pages_home/AjusteDireccionesLeonisa.py; las reglas de
+normalización han seguido evolucionando desde entonces con casos reales.
 """
 
 from __future__ import annotations
@@ -63,13 +63,15 @@ _VIA_MAP = [
     (r"\bCRA\b",         "KRA"),
     (r"\bCR\b",          "KRA"),
     (r"\bKR\b",          "KRA"),
-    (r"\bCA\b",          "KRA"),   # abreviatura de Carrera usada en archivos bancarios (Vehigrupo)
+    # NOTA: "CA" y "TR" NO se mapean aquí — son ambiguas según posición
+    # (Carrera/Transversal solo si son el primer token; Casa/Torre en
+    # cualquier otra posición). Ver los pasos dedicados en
+    # ajustar_dir_leonisa (después del bucle de _VIA_MAP).
     (r"\bAK\b",          "KRA"),   # Autopista / Avenida Carrera abreviada
     (r"\bDIAGONAL\b",    "DG"),
     (r"\bDIAG\b",        "DG"),
     (r"\bTRANSVERSAL\b", "TV"),
     (r"\bTRANSV\b",      "TV"),
-    (r"\bTR\b",          "TV"),
     (r"\bAVENIDA\b",     "AV"),
 ]
 
@@ -83,11 +85,18 @@ _VIA_MAP = [
 # se inserta el espacio faltante para que _VIA_MAP sí pueda reconocerlo
 # después. Los patrones más largos van primero por la misma razón que en
 # _VIA_MAP (evitar matches parciales).
+#     "CA" y "TR" quedan FUERA de esta lista a propósito: ya no son
+#     sustituciones simples de tipo de vía (son ambiguas según posición, ver
+#     el paso 5b en ajustar_dir_leonisa), y muchas palabras españolas
+#     terminan en esas dos letras seguidas de un espacio ("BLANCA",
+#     "SURAMERICA", "FCA", "ASTUR"...) — si quedaran aquí, el lookbehind de
+#     letra/dígito + \b al final las partiría igual que a un tipo de vía
+#     pegado, insertando un espacio falso.
 _VIA_TOKENS_SIMPLES = (
-    "CARRETERA", "CARRERA", "CARERA", "CARR", "KRR", "CRA", "CR", "KRA", "KR", "CA", "AK",
+    "CARRETERA", "CARRERA", "CARERA", "CARR", "KRR", "CRA", "CR", "KRA", "KR", "AK",
     "CALLE", "CALE", "CLLE", "CLL", "CALL", "CL",
     "DIAGONAL", "DIAG", "DG",
-    "TRANSVERSAL", "TRANSV", "TR", "TV",
+    "TRANSVERSAL", "TRANSV", "TV",
     "AVENIDA", "AV",
 )
 _VIA_PEGADA_RE = re.compile(
@@ -99,11 +108,15 @@ _VIA_PEGADA_RE = re.compile(
 _COMP_ABBREV: dict[str, str] = {
     'APARTAMENTO': 'APTO', 'APTO': 'APTO', 'AP': 'APTO', 'APT': 'APTO',
     'TORRE': 'TO', 'TRR': 'TO', 'TO': 'TO', 'T': 'TO',
-    'PISO': 'PS', 'PS': 'PS', 'P': 'PS',
+    'PISO': 'PS', 'PS': 'PS', 'P': 'PS', 'PI': 'PS',
     'BLOQUE': 'BL', 'BLQ': 'BL', 'BL': 'BL',
     'INTERIOR': 'INT', 'INT': 'INT', 'IN': 'INT',
     'LOCAL': 'LC', 'LC': 'LC',
-    'CASA': 'CS', 'CS': 'CS',
+    # "C" suelto (una letra) solo llega hasta aquí cuando NO se fusionó como
+    # sufijo de coordenada (ver el bucle de coordenadas en _parse_y_limpiar):
+    # eso pasa justo cuando sigue a la 3ª coordenada ya completa, donde
+    # significa "Casa", igual que "CA"/"CASA".
+    'CASA': 'CS', 'CS': 'CS', 'C': 'CS',
     'MZA': 'MZA', 'MZ': 'MZA',
     'EDIFICIO': 'ED', 'EDIF': 'ED', 'ED': 'ED',
     'OFICINA': 'OF', 'OFI': 'OF', 'OF': 'OF',
@@ -111,28 +124,88 @@ _COMP_ABBREV: dict[str, str] = {
 }
 
 _CARDINALS_COMPOUND = ('SUR ESTE', 'SUR OESTE', 'NORTE ESTE', 'NORTE OESTE')
-_CARDINALS_SIMPLE   = ('SUR', 'NORTE', 'ESTE', 'OESTE')
+# Abreviaciones canónicas de cardinal simple: "SU"/"S" son formas cortas
+# frecuentes de "SUR" en los archivos de origen. Siempre se normalizan al
+# nombre completo en la salida (nunca queda "S" ni "SU").
+_CARDINAL_ABBREV: dict[str, str] = {
+    'SUR': 'SUR', 'SU': 'SUR', 'S': 'SUR',
+    'NORTE': 'NORTE',
+    'ESTE': 'ESTE',
+    'OESTE': 'OESTE',
+}
 
-_VIA_TYPE_RE   = re.compile(r'^(KRA|CLL|DG|TV|AV)$')
-_COORD_TOK_RE  = re.compile(r'^\d+[A-Z]*$')  # número con letras opcionales: 54C, 88I, 65, 79FBIS
-_COMP_VAL_RE   = re.compile(r'^\d+[A-Z]*$|^[A-Z]$')  # valor tras keyword: 1106, 4, A
-_NAME_TOK_RE   = re.compile(r'^[A-Z]+$')  # token alfabético (posible palabra de nombre propio)
+_VIA_TYPE_RE     = re.compile(r'^(KRA|CLL|DG|TV|AV)$')
+_COORD_TOK_RE    = re.compile(r'^\d+[A-Z]*$')  # número con letras opcionales: 54C, 88I, 65, 79FBIS
+_COMP_VAL_RE     = re.compile(r'^\d+[A-Z]*$|^[A-Z]$')  # valor tras keyword: 1106, 4, A
+_NAME_TOK_RE     = re.compile(r'^[A-Z]+$')  # token alfabético (posible palabra de nombre propio)
+_LETRA_SUELTA_RE = re.compile(r'^([A-Z])\1*$')  # una letra, opcionalmente repetida: "A", "AA"
+
+# Palabras de relleno sin valor identificador que pueden aparecer en el
+# nombre de conjunto/edificio antes del tipo de vía; se descartan en vez de
+# conservarse como parte del nombre (p.ej. "URB" de "urbanización").
+_NOMBRE_STOPWORDS = {'URB', 'URBANIZACION'}
 
 
 def _next_cardinal(tokens: list[str], i: int) -> tuple[str | None, int]:
-    """Devuelve (cardinal, nuevo_índice) o (None, i) si no hay cardinal en posición i."""
+    """Devuelve (cardinal, nuevo_índice) o (None, i) si no hay cardinal en posición i.
+
+    El cardinal devuelto siempre está en su forma canónica completa (p.ej.
+    "SUR"), incluso si el token original era una abreviatura ("SU"/"S").
+    """
     if i >= len(tokens):
         return None, i
     if i + 1 < len(tokens):
         comp = tokens[i] + ' ' + tokens[i + 1]
         if comp in _CARDINALS_COMPOUND:
             return comp, i + 2
-    if tokens[i] in _CARDINALS_SIMPLE:
-        return tokens[i], i + 1
+    if tokens[i] in _CARDINAL_ABBREV:
+        return _CARDINAL_ABBREV[tokens[i]], i + 1
     return None, i
 
 
+def _dedup_letra_final(tok: str) -> str:
+    """Colapsa una letra repetida al final de una coordenada: "75AA" → "75A"."""
+    return re.sub(r'([A-Z])\1+$', r'\1', tok)
+
+
 _SPLIT_COORD_RE = re.compile(r'^\d{4,5}$')  # bloque numérico de 4-5 dígitos → partir
+
+
+def _extraer_nombre_y_complementos_prefijo(prefix_tokens: list[str]) -> tuple[list[str], str | None]:
+    """
+    Procesa los tokens que aparecen ANTES del tipo de vía reconocido (barrio,
+    conjunto residencial, o un complemento que quedó mal ubicado en archivos
+    de banco). Retorna (complementos_candidatos, nombre_conjunto):
+
+      - Pares {keyword, valor} conocidos (p.ej. "AP 1605", "INT 3") se
+        extraen como complementos candidatos — pueden terminar siendo el
+        único lugar donde vino ese dato ("AP 1605 INT 3CR 75 150 50") o ser
+        un duplicado de un complemento que sí aparece después de las
+        coordenadas (se descarta en ese caso, ver _parse_y_limpiar).
+      - El resto de tokens (nombre real del conjunto/edificio, p.ej. "CONJ
+        ESPACIO 140") se conserva en su orden original, salvo palabras de
+        relleno sin valor identificador (_NOMBRE_STOPWORDS, p.ej. "URB").
+      - Si tras filtrar no queda ningún token alfabético (era solo un número
+        suelto / ruido de archivo), se descarta todo el nombre.
+    """
+    complementos_candidatos: list[str] = []
+    nombre_tokens: list[str] = []
+    i = 0
+    while i < len(prefix_tokens):
+        tok = prefix_tokens[i]
+        if tok in _COMP_ABBREV and i + 1 < len(prefix_tokens) and _COMP_VAL_RE.match(prefix_tokens[i + 1]):
+            complementos_candidatos.append(f"{_COMP_ABBREV[tok]} {prefix_tokens[i + 1]}")
+            i += 2
+        else:
+            if tok not in _NOMBRE_STOPWORDS:
+                nombre_tokens.append(tok)
+            i += 1
+
+    if not any(_NAME_TOK_RE.match(t) for t in nombre_tokens):
+        nombre_tokens = []
+
+    nombre = ' '.join(nombre_tokens) if nombre_tokens else None
+    return complementos_candidatos, nombre
 
 
 def _parse_y_limpiar(text: str) -> tuple[str, int]:
@@ -141,14 +214,24 @@ def _parse_y_limpiar(text: str) -> tuple[str, int]:
     Retorna (resultado, coord_count) donde coord_count es el número de tokens
     de coordenada encontrados (necesitamos al menos 3 para una dirección válida).
 
-      1. Busca el tipo de vía (KRA/CLL/…) en cualquier posición — descarta lo anterior
-         (barrios, localidades, etc. que preceden a la dirección)
+      1. Busca el tipo de vía (KRA/CLL/…) en cualquier posición. Lo que la
+         precede (barrio/conjunto, o un complemento mal ubicado) se procesa
+         con _extraer_nombre_y_complementos_prefijo en vez de descartarse.
       2. Hasta 3 tokens de coordenada (\\d+[A-Z]*), con cardinales intercalados
          • Si un token es un bloque de 4-5 dígitos puros, lo divide: últimos 2 = placa,
            el resto = número de cruce  ("4977" → "49" + "77")
+         • Una letra suelta (o repetida: "A"/"AA") que sigue a un número se
+           fusiona como sufijo de esa coordenada SOLO si todavía faltan
+           coordenadas por completar (1ª o 2ª de 3) — si el número que se
+           lee completa la 3ª coordenada, la letra se deja intacta para la
+           fase de complementos (podría ser Torre/Casa/Piso, no un sufijo).
       3. Cardinal final opcional
       4. Solo keywords de complemento + su valor (TORRE 4, APTO 1106, PS 1…)
          — el resto (nombres de conjuntos, instrucciones) se descarta
+      5. Los complementos candidatos extraídos del prefijo (paso 1) se
+         agregan si no duplican una abreviatura ya encontrada en el paso 4;
+         el nombre de conjunto/edificio del prefijo se agrega al final,
+         igual que el nombre propio capturado tras "EDIFICIO".
     """
     tokens = text.split()
     if not tokens:
@@ -158,6 +241,8 @@ def _parse_y_limpiar(text: str) -> tuple[str, int]:
     via_start = next((idx for idx, t in enumerate(tokens) if _VIA_TYPE_RE.match(t)), None)
     if via_start is None:
         return text, 0  # sin tipo de vía reconocido → no modificar
+
+    complementos_prefijo, nombre_prefijo = _extraer_nombre_y_complementos_prefijo(tokens[:via_start])
 
     parts: list[str] = [tokens[via_start]]
     i = via_start + 1
@@ -185,10 +270,25 @@ def _parse_y_limpiar(text: str) -> tuple[str, int]:
                 if coord_count < 3:
                     parts.append(tok[-2:])  # últimos 2 → placa
                     coord_count += 1
+                i += 1
             else:
-                parts.append(tok)
+                # ¿La siguiente letra suelta (o repetida: "AA") debe
+                # fusionarse a esta coordenada? Solo si todavía no es la
+                # última (quedan coordenadas por completar) y no es un
+                # cardinal ni Piso/Torre (esos se resuelven en la fase de
+                # complementos, no como sufijo de coordenada).
+                if (
+                    coord_count + 1 < 3
+                    and i + 1 < len(tokens)
+                    and _LETRA_SUELTA_RE.match(tokens[i + 1])
+                    and tokens[i + 1] not in ('P', 'T')
+                    and _next_cardinal(tokens, i + 1)[0] is None
+                ):
+                    tok = tok + tokens[i + 1][0]
+                    i += 1
+                parts.append(_dedup_letra_final(tok))
                 coord_count += 1
-            i += 1
+                i += 1
         else:
             break  # token no reconocido → fin del bloque de coordenadas
 
@@ -227,6 +327,15 @@ def _parse_y_limpiar(text: str) -> tuple[str, int]:
         else:
             i += 1  # descartar: nombre de conjunto, instrucción, etc.
 
+    # Los complementos candidatos del prefijo (p.ej. "AP 1605" antes del tipo
+    # de vía) se agregan solo si su abreviatura no duplica una ya encontrada
+    # después de las coordenadas (esa sí es la fuente confiable).
+    abrevs_existentes = {c.split()[0] for c in complementos}
+    for candidato in complementos_prefijo:
+        if candidato.split()[0] not in abrevs_existentes:
+            complementos.append(candidato)
+            abrevs_existentes.add(candidato.split()[0])
+
     # APTO siempre primero entre los complementos (antes de bloque, torre,
     # piso, etc.), sin importar en qué orden aparecieron en el texto original.
     # sort() es estable: preserva el orden relativo entre los demás complementos.
@@ -234,6 +343,8 @@ def _parse_y_limpiar(text: str) -> tuple[str, int]:
     parts.extend(complementos)
     if nombre_edificio:
         parts.append(nombre_edificio)
+    if nombre_prefijo:
+        parts.append(nombre_prefijo)
 
     return ' '.join(parts), coord_count
 
@@ -255,10 +366,21 @@ def ajustar_dir_leonisa(raw: str) -> str:
       "carrera 15 40 20 bloque 2 apto 501"                                  → "KRA 15 40 20 APTO 501 BL 2"
       "carrera 15 40 20 edificio 5 apto 302"                                → "KRA 15 40 20 APTO 302 ED 5"
       "cll 80 45"  (sin placa: solo 2 coordenadas)                          → "CLL 80 45" (mayúsculas, sin reordenar)
-      "GUAYACAN DE LA PLAZACL 48 SUR 39 57 AP 566"  (tipo de vía pegado
-       al nombre del conjunto, sin espacio)                                → "CLL 48 SUR 39 57 APTO 566"
+      "GUAYACAN DE LA PLAZACL 48 SUR 39 57 AP 566"  (tipo de vía pegado al
+       nombre del conjunto, sin espacio; el nombre se conserva al final)    → "CLL 48 SUR 39 57 APTO 566 GUAYACAN DE LA PLAZA"
+      "CONJ ESPACIO 140CR 11 140 52 T2 AP305"  (nombre de conjunto antes
+       del tipo de vía → se mueve al final)                                → "KRA 11 140 52 APTO 305 TO 2 CONJ ESPACIO 140"
+      "AP 1605 INT 3CR 75 150 50"  (complemento mal ubicado antes del tipo
+       de vía → se rescata como complemento real, no como nombre)          → "KRA 75 150 50 APTO 1605 INT 3"
       "CRA50A 22 51CA152"  (Banco Vehigrupo: "CA"/"C" pegada entre
        números = tipo de vivienda Casa, no Carrera)                        → "KRA 50A 22 51 CS 152"
+      "PARCELACION ASTURIAS CA 35"  ("CA" solo es Carrera si es el primer
+       token; en cualquier otra posición es Casa)                          → "PARCELACION ASTURIAS CS 35"
+      "CR 45 26 220 APTO 303 TR 1"  ("TR" solo es Transversal al inicio;
+       si no, es Torre)                                                    → "KRA 45 26 220 APTO 303 TO 1"
+      "TV 1 A 4 S 68 C 29"  ("S" abreviatura de Sur; "C" tras completar
+       las 3 coordenadas es Casa, no sufijo de coordenada)                 → "TV 1A 4 SUR 68 CS 29"
+      "CR52D 65 53 PI1"  ("PI" abreviatura de Piso)                        → "KRA 52D 65 53 PS 1"
       "kra 15 40 20 apto 501 t 2"  ("T" abreviatura de Torre)               → "KRA 15 40 20 APTO 501 TO 2"
       "kra 15 40 20 in 5"  ("IN" abreviatura de Interior)                   → "KRA 15 40 20 INT 5"
     """
@@ -296,6 +418,11 @@ def ajustar_dir_leonisa(raw: str) -> str:
     #     antes de "CA".
     text = re.sub(r'(\d+)CA?(\d+)', r'\1 CS \2', text)
 
+    # 3c. "<dígitos>TO<dígitos>" o "<dígitos>TRR<dígitos>" pegado (sin espacios) →
+    #     tipo de complemento "Torre" + su número: "801TO1" → "801 TO 1".
+    #     Análogo a 3b pero para Torre en vez de Casa.
+    text = re.sub(r'(\d+)(TO|TRR)(\d+)', r'\1 TO \3', text)
+
     # 4. Insertar espacio entre letra y dígito contiguos
     #    ("CALLE56F" → "CALLE 56F", "99D19" → "99D 19", "49C27" → "49C 27")
     text = re.sub(r'([A-Z])(\d)', r'\1 \2', text)
@@ -308,6 +435,17 @@ def ajustar_dir_leonisa(raw: str) -> str:
     for pattern, repl in _VIA_MAP:
         text = re.sub(pattern, repl, text)
 
+    # 5b. "CA" y "TR" son ambiguas según su posición: al INICIO de la dirección
+    #     son Carrera/Transversal abreviada; en cualquier otra posición son
+    #     Casa/Torre (complemento). Por eso no están en _VIA_MAP (que se
+    #     aplicaría sin importar la posición): primero se resuelve el caso
+    #     "es el primer token" con anclaje ^, y lo que quede se trata como
+    #     complemento.
+    text = re.sub(r'^CA\b', 'KRA', text)
+    text = re.sub(r'\bCA\b', 'CS', text)
+    text = re.sub(r'^TR\b', 'TV', text)
+    text = re.sub(r'\bTR\b', 'TO', text)
+
     # 6. Separar dígito pegado a cardinal: "27SUR" → "27 SUR", "16NORTE" → "16 NORTE"
     text = re.sub(
         r'(\d+)(SUR\s+ESTE|SUR\s+OESTE|NORTE\s+ESTE|NORTE\s+OESTE|SUR|NORTE|ESTE|OESTE)\b',
@@ -319,11 +457,14 @@ def ajustar_dir_leonisa(raw: str) -> str:
     text = re.sub(rf'(\d+)({_KW_PATTERN})\b', r'\2 \1', text)
 
     # 8. Unir número + letra suelta: "78 K" → "78K", "87 D" → "87D"
-    #    Excluye "P" y "T": son abreviatura de "PISO" y "TORRE" respectivamente
-    #    (ver _COMP_ABBREV) y deben quedar como token de complemento separado,
-    #    no fundirse en la coordenada anterior ("60 P 7" → "60 P 7", no
-    #    "60P 7"; "51 T 2" → "51 T 2", no "51T 2").
-    text = re.sub(r'(\d+)\s+([A-OQ-SU-Z])(?!\w)', r'\1\2', text)
+    #    Excluye "P", "T", "S" y "C": son abreviatura de "PISO", "TORRE",
+    #    "SUR" y "CASA" respectivamente y deben quedar como token separado
+    #    ("60 P 7" → "60 P 7", no "60P 7"; "51 T 2" → "51 T 2", no "51T 2").
+    #    "S" y "C" se resuelven en el parser (_parse_y_limpiar), que sí sabe
+    #    si todavía faltan coordenadas por completar (ahí SÍ deben fusionarse
+    #    como sufijo, p.ej. "69 C" → "69C") o si ya se completaron las 3 (ahí
+    #    son Sur/Casa, no sufijo).
+    text = re.sub(r'(\d+)\s+([A-BD-OQ-RU-Z])(?!\w)', r'\1\2', text)
 
     # 8b. Unir número + token "letras+BIS": "81 GBIS" → "81GBIS"
     #     Cubre el caso donde el BIS viene pegado a la letra del número ("GBis" como un token)
@@ -337,8 +478,8 @@ def ajustar_dir_leonisa(raw: str) -> str:
 
     # 10. Unir alfanumérico + letra suelta: "88IBIS A"→"88IBISA", "57ABIS B"→"57ABISB"
     #     Corre después de BIS para capturar la letra que le sigue al BIS.
-    #     Excluye "P" y "T" por la misma razón que el paso 8.
-    text = re.sub(r'(\d+[A-Z]+)\s+([A-OQ-SU-Z])(?!\w)', r'\1\2', text)
+    #     Excluye "P", "T", "S" y "C" por la misma razón que el paso 8.
+    text = re.sub(r'(\d+[A-Z]+)\s+([A-BD-OQ-RU-Z])(?!\w)', r'\1\2', text)
 
     # 11. Colapsar espacios
     text = re.sub(r'\s+', ' ', text).strip()
