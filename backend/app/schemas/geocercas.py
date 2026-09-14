@@ -48,3 +48,9 @@ class GeocercaCreate(BaseModel):
 class GeocercaUpdate(BaseModel):
     nombre: str | None = Field(default=None, min_length=1, max_length=100)
     activo: bool | None = None
+    poligono: dict | None = None
+
+    @field_validator("poligono")
+    @classmethod
+    def validar_poligono(cls, v: dict | None) -> dict | None:
+        return _validar_poligono(v) if v is not None else None

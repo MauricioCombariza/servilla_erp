@@ -70,6 +70,9 @@ async def actualizar_geocerca(
         geocerca.nombre = body.nombre.strip()
     if body.activo is not None:
         geocerca.activo = body.activo
+    if body.poligono is not None:
+        geocerca.poligono = body.poligono
+        geocerca.area_m2 = calcular_area_m2(body.poligono)
 
     await db.commit()
     await db.refresh(geocerca)
