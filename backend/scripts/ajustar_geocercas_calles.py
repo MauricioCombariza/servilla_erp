@@ -5,11 +5,16 @@ datos de OpenStreetMap (Overpass API). El polígono original — forma libre dib
 mano en /geocercas — se reemplaza por un rectángulo alineado a los 4 cardinales que
 aproxima la cuadra real.
 
-Requiere salida a internet (hacia overpass-api.de) desde donde se ejecute.
+Requiere salida a internet (hacia overpass-api.de y sus espejos) desde donde se ejecute.
 
 Geocercas donde no se encuentra una vía cercana en algún lado, o donde el resultado
 cambia el área más de lo razonable, quedan marcadas para revisión manual y NO se
 tocan — no se fuerza un ajuste sobre datos insuficientes.
+
+Cada corrida (dry-run o --commit) escribe un CSV local `geocercas_limites_<timestamp>.csv`
+con la calle/carrera candidata y su distancia en metros para cada uno de los 4 lados de
+cada geocerca, más el estado — incluye las filas que quedaron para revisión manual, no
+solo las que se pueden aplicar automáticamente.
 
 Uso:
     python scripts/ajustar_geocercas_calles.py                        # dry-run, todas las activas
@@ -20,6 +25,7 @@ Uso:
 
 import argparse
 import asyncio
+import csv
 import json
 import math
 import re
@@ -36,13 +42,20 @@ from app.database import AsyncSessionLocal
 from app.models.geocercas import Geocerca
 from app.services.geocercas_service import calcular_area_m2
 
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+# overpass-api.de es el más completo pero se satura seguido (504); se intenta primero
+# y se cae a los espejos si falla — mismo lenguaje de consulta, distintos servidores.
+OVERPASS_URLS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.openstreetmap.ru/api/interpreter",
+]
 # Overpass rechaza con 406 las peticiones sin un User-Agent identificable (bloquea el
 # default de urllib "Python-urllib/x.y" como medida anti-abuso).
 _HEADERS = {"User-Agent": "servilla-erp-geocercas/1.0 (contacto: mcombarizav@gmail.com)"}
 MARGEN_GRADOS = 0.0025  # ~250 m en Bogotá, margen de búsqueda alrededor de cada geocerca
 RADIO_MAX_M = 400.0  # si la vía más cercana en un lado está más lejos que esto, no se ajusta
 UMBRAL_CAMBIO_AREA = 0.60  # si el área cambia más de 60%, se marca para revisión en vez de aplicar
+PAUSA_ENTRE_CONSULTAS_S = 2.0  # respeta el rate limit compartido de Overpass entre geocercas
 
 _RE_CALLE = re.compile(
     r"^(calle|cl\.?|cll\.?|diagonal|dg\.?|avenida\s*calle|av\.?\s*calle|av\.?\s*cl\.?)\s",
@@ -63,18 +76,19 @@ def _overpass_query(min_lon: float, min_lat: float, max_lon: float, max_lat: flo
     );
     out geom;
     """
-    req = urllib.request.Request(
-        OVERPASS_URL, data=query.encode("utf-8"), method="POST", headers=_HEADERS
-    )
+    data = query.encode("utf-8")
     ultimo_error: Exception | None = None
-    for _intento in range(2):
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                return json.loads(resp.read())
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as e:
-            ultimo_error = e
-            time.sleep(5)
-    raise RuntimeError(f"Overpass falló tras reintentos: {ultimo_error}")
+    backoffs = (5, 15, 30)
+    for url in OVERPASS_URLS:
+        for backoff in backoffs:
+            req = urllib.request.Request(url, data=data, method="POST", headers=_HEADERS)
+            try:
+                with urllib.request.urlopen(req, timeout=45) as resp:
+                    return json.loads(resp.read())
+            except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as e:
+                ultimo_error = e
+                time.sleep(backoff)
+    raise RuntimeError(f"Overpass falló tras reintentos en todos los espejos: {ultimo_error}")
 
 
 def _clasificar_vias(elementos: list[dict]) -> tuple[list[tuple[str, LineString]], list[tuple[str, LineString]]]:
@@ -141,7 +155,11 @@ def _ajustar_geocerca(geocerca: Geocerca) -> dict:
 
     faltantes = [lado for lado, c in candidatos.items() if c is None or c[2] > RADIO_MAX_M]
     if faltantes:
-        return {"estado": f"SIN_VIA_CERCANA_{'_'.join(faltantes)}", "geocerca": geocerca}
+        return {
+            "estado": f"SIN_VIA_CERCANA_{'_'.join(faltantes)}",
+            "geocerca": geocerca,
+            "lados": candidatos,
+        }
 
     nuevo_norte = candidatos["norte"][1].y
     nuevo_sur = candidatos["sur"][1].y
@@ -149,7 +167,11 @@ def _ajustar_geocerca(geocerca: Geocerca) -> dict:
     nuevo_occidente = candidatos["occidente"][1].x
 
     if not (nuevo_occidente < nuevo_oriente and nuevo_sur < nuevo_norte):
-        return {"estado": "REVISAR_rectangulo_degenerado", "geocerca": geocerca}
+        return {
+            "estado": "REVISAR_rectangulo_degenerado",
+            "geocerca": geocerca,
+            "lados": candidatos,
+        }
 
     nuevo_poligono = {
         "type": "Polygon",
@@ -162,7 +184,12 @@ def _ajustar_geocerca(geocerca: Geocerca) -> dict:
         ]],
     }
     if not shape(nuevo_poligono).contains(centroid):
-        return {"estado": "REVISAR_no_contiene_centroide", "geocerca": geocerca}
+        return {
+            "estado": "REVISAR_no_contiene_centroide",
+            "geocerca": geocerca,
+            "lados": candidatos,
+            "poligono_nuevo": nuevo_poligono,
+        }
 
     area_actual = float(geocerca.area_m2)
     area_nueva = calcular_area_m2(nuevo_poligono)
@@ -178,6 +205,39 @@ def _ajustar_geocerca(geocerca: Geocerca) -> dict:
         "cambio_pct": cambio * 100,
         "lados": candidatos,
     }
+
+
+def _exportar_csv(resultados: list[dict]) -> str:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    path = f"geocercas_limites_{timestamp}.csv"
+    columnas = [
+        "id", "nombre", "estado",
+        "area_actual_m2", "area_nueva_m2", "cambio_pct",
+        "norte_via", "norte_dist_m",
+        "sur_via", "sur_dist_m",
+        "oriente_via", "oriente_dist_m",
+        "occidente_via", "occidente_dist_m",
+    ]
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=columnas)
+        writer.writeheader()
+        for r in resultados:
+            g = r["geocerca"]
+            fila = {
+                "id": g.id,
+                "nombre": g.nombre,
+                "estado": r["estado"],
+                "area_actual_m2": r.get("area_actual", ""),
+                "area_nueva_m2": r.get("area_nueva", ""),
+                "cambio_pct": round(r["cambio_pct"], 1) if "cambio_pct" in r else "",
+            }
+            for lado in ("norte", "sur", "oriente", "occidente"):
+                c = r.get("lados", {}).get(lado)
+                fila[f"{lado}_via"] = c[0] if c else ""
+                fila[f"{lado}_dist_m"] = round(c[2]) if c else ""
+            writer.writerow(fila)
+    print(f"\nCSV con los límites calculados guardado en {path}")
+    return path
 
 
 async def _restaurar(archivo: str) -> None:
@@ -217,29 +277,36 @@ async def main(args: argparse.Namespace) -> None:
             return
 
         resultados = []
-        for g in geocercas:
+        for i, g in enumerate(geocercas):
             print(f"Consultando OSM para geocerca [{g.id}] {g.nombre} ...")
             try:
                 resultados.append(_ajustar_geocerca(g))
             except RuntimeError as e:
                 resultados.append({"estado": f"ERROR_OVERPASS: {e}", "geocerca": g})
+            if i < len(geocercas) - 1:
+                time.sleep(PAUSA_ENTRE_CONSULTAS_S)
 
         print("\n=== RESUMEN ===\n")
         aplicables = []
         for r in resultados:
             g = r["geocerca"]
             print(f"[{g.id}] {g.nombre}")
-            if r["estado"] == "OK":
+            if "area_actual" in r:
                 print(f"    Área actual:  {r['area_actual']:,.2f} m²")
                 print(f"    Área nueva:   {r['area_nueva']:,.2f} m²   ({r['cambio_pct']:+.1f}%)")
+            if "lados" in r:
                 for lado, c in r["lados"].items():
-                    nombre, _punto, dist = c
-                    print(f"    {lado.capitalize():10s} -> {nombre}  (dist. {dist:.0f} m)")
-                print("    Estado: OK")
-                aplicables.append(r)
-            else:
-                print(f"    Estado: {r['estado']}")
+                    if c is None:
+                        print(f"    {lado.capitalize():10s} -> (sin vía cercana)")
+                    else:
+                        nombre, _punto, dist = c
+                        print(f"    {lado.capitalize():10s} -> {nombre}  (dist. {dist:.0f} m)")
+            print(f"    Estado: {r['estado']}")
             print()
+            if r["estado"] == "OK":
+                aplicables.append(r)
+
+        _exportar_csv(resultados)
 
         if not args.commit:
             print("[DRY-RUN] Sin cambios aplicados. Use --commit --ids <lista> para aplicar.")
