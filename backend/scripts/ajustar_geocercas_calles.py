@@ -37,6 +37,9 @@ from app.models.geocercas import Geocerca
 from app.services.geocercas_service import calcular_area_m2
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+# Overpass rechaza con 406 las peticiones sin un User-Agent identificable (bloquea el
+# default de urllib "Python-urllib/x.y" como medida anti-abuso).
+_HEADERS = {"User-Agent": "servilla-erp-geocercas/1.0 (contacto: mcombarizav@gmail.com)"}
 MARGEN_GRADOS = 0.0025  # ~250 m en Bogotá, margen de búsqueda alrededor de cada geocerca
 RADIO_MAX_M = 400.0  # si la vía más cercana en un lado está más lejos que esto, no se ajusta
 UMBRAL_CAMBIO_AREA = 0.60  # si el área cambia más de 60%, se marca para revisión en vez de aplicar
@@ -60,7 +63,9 @@ def _overpass_query(min_lon: float, min_lat: float, max_lon: float, max_lat: flo
     );
     out geom;
     """
-    req = urllib.request.Request(OVERPASS_URL, data=query.encode("utf-8"), method="POST")
+    req = urllib.request.Request(
+        OVERPASS_URL, data=query.encode("utf-8"), method="POST", headers=_HEADERS
+    )
     ultimo_error: Exception | None = None
     for _intento in range(2):
         try:
