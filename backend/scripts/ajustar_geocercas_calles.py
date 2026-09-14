@@ -78,16 +78,19 @@ def _overpass_query(min_lon: float, min_lat: float, max_lon: float, max_lat: flo
     """
     data = query.encode("utf-8")
     ultimo_error: Exception | None = None
-    backoffs = (5, 15, 30)
-    for url in OVERPASS_URLS:
-        for backoff in backoffs:
+    # Ronda por los 3 espejos sin pausa (si uno está caído, probar el siguiente de
+    # inmediato es más barato que insistir 3 veces contra el mismo servidor saturado).
+    # Solo se espera con backoff creciente entre rondas completas.
+    for backoff in (0, 5, 15, 30):
+        if backoff:
+            time.sleep(backoff)
+        for url in OVERPASS_URLS:
             req = urllib.request.Request(url, data=data, method="POST", headers=_HEADERS)
             try:
                 with urllib.request.urlopen(req, timeout=45) as resp:
                     return json.loads(resp.read())
             except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as e:
                 ultimo_error = e
-                time.sleep(backoff)
     raise RuntimeError(f"Overpass falló tras reintentos en todos los espejos: {ultimo_error}")
 
 
