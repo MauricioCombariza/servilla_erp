@@ -14,7 +14,9 @@ tocan — no se fuerza un ajuste sobre datos insuficientes.
 Cada corrida (dry-run o --commit) escribe un CSV local `geocercas_limites_<timestamp>.csv`
 con la calle/carrera candidata y su distancia en metros para cada uno de los 4 lados de
 cada geocerca, más el estado — incluye las filas que quedaron para revisión manual, no
-solo las que se pueden aplicar automáticamente.
+solo las que se pueden aplicar automáticamente. El CSV se escribe fila por fila conforme
+se procesa cada geocerca (no solo al final), así que si el proceso se interrumpe o se
+mata a mitad de camino, el CSV parcial generado hasta ese punto queda íntegro en disco.
 
 Uso:
     python scripts/ajustar_geocercas_calles.py                        # dry-run, todas las activas
@@ -26,8 +28,10 @@ Uso:
 import argparse
 import asyncio
 import csv
+import io
 import json
 import math
+import os
 import re
 import time
 import urllib.error
@@ -56,6 +60,8 @@ MARGEN_GRADOS = 0.0025  # ~250 m en Bogotá, margen de búsqueda alrededor de ca
 RADIO_MAX_M = 400.0  # si la vía más cercana en un lado está más lejos que esto, no se ajusta
 UMBRAL_CAMBIO_AREA = 0.60  # si el área cambia más de 60%, se marca para revisión en vez de aplicar
 PAUSA_ENTRE_CONSULTAS_S = 2.0  # respeta el rate limit compartido de Overpass entre geocercas
+TIMEOUT_HTTP_S = 15  # por intento — un servidor Overpass sano responde en segundos, no en 45s
+RONDAS_BACKOFF_S = (0, 10, 25)  # pausas entre rondas completas por los 3 espejos (no por espejo)
 
 _RE_CALLE = re.compile(
     r"^(calle|cl\.?|cll\.?|diagonal|dg\.?|avenida\s*calle|av\.?\s*calle|av\.?\s*cl\.?)\s",
@@ -81,13 +87,13 @@ def _overpass_query(min_lon: float, min_lat: float, max_lon: float, max_lat: flo
     # Ronda por los 3 espejos sin pausa (si uno está caído, probar el siguiente de
     # inmediato es más barato que insistir 3 veces contra el mismo servidor saturado).
     # Solo se espera con backoff creciente entre rondas completas.
-    for backoff in (0, 5, 15, 30):
+    for backoff in RONDAS_BACKOFF_S:
         if backoff:
             time.sleep(backoff)
         for url in OVERPASS_URLS:
             req = urllib.request.Request(url, data=data, method="POST", headers=_HEADERS)
             try:
-                with urllib.request.urlopen(req, timeout=45) as resp:
+                with urllib.request.urlopen(req, timeout=TIMEOUT_HTTP_S) as resp:
                     return json.loads(resp.read())
             except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as e:
                 ultimo_error = e
@@ -210,37 +216,45 @@ def _ajustar_geocerca(geocerca: Geocerca) -> dict:
     }
 
 
-def _exportar_csv(resultados: list[dict]) -> str:
+_CSV_COLUMNAS = [
+    "id", "nombre", "estado",
+    "area_actual_m2", "area_nueva_m2", "cambio_pct",
+    "norte_via", "norte_dist_m",
+    "sur_via", "sur_dist_m",
+    "oriente_via", "oriente_dist_m",
+    "occidente_via", "occidente_dist_m",
+]
+
+
+def _abrir_csv() -> tuple[str, "csv.DictWriter", "io.TextIOWrapper"]:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     path = f"geocercas_limites_{timestamp}.csv"
-    columnas = [
-        "id", "nombre", "estado",
-        "area_actual_m2", "area_nueva_m2", "cambio_pct",
-        "norte_via", "norte_dist_m",
-        "sur_via", "sur_dist_m",
-        "oriente_via", "oriente_dist_m",
-        "occidente_via", "occidente_dist_m",
-    ]
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=columnas)
-        writer.writeheader()
-        for r in resultados:
-            g = r["geocerca"]
-            fila = {
-                "id": g.id,
-                "nombre": g.nombre,
-                "estado": r["estado"],
-                "area_actual_m2": r.get("area_actual", ""),
-                "area_nueva_m2": r.get("area_nueva", ""),
-                "cambio_pct": round(r["cambio_pct"], 1) if "cambio_pct" in r else "",
-            }
-            for lado in ("norte", "sur", "oriente", "occidente"):
-                c = r.get("lados", {}).get(lado)
-                fila[f"{lado}_via"] = c[0] if c else ""
-                fila[f"{lado}_dist_m"] = round(c[2]) if c else ""
-            writer.writerow(fila)
-    print(f"\nCSV con los límites calculados guardado en {path}")
-    return path
+    f = open(path, "w", newline="", encoding="utf-8")
+    writer = csv.DictWriter(f, fieldnames=_CSV_COLUMNAS)
+    writer.writeheader()
+    f.flush()
+    return path, writer, f
+
+
+def _escribir_fila_csv(writer: "csv.DictWriter", f: "io.TextIOWrapper", r: dict) -> None:
+    g = r["geocerca"]
+    fila = {
+        "id": g.id,
+        "nombre": g.nombre,
+        "estado": r["estado"],
+        "area_actual_m2": r.get("area_actual", ""),
+        "area_nueva_m2": r.get("area_nueva", ""),
+        "cambio_pct": round(r["cambio_pct"], 1) if "cambio_pct" in r else "",
+    }
+    for lado in ("norte", "sur", "oriente", "occidente"):
+        c = r.get("lados", {}).get(lado)
+        fila[f"{lado}_via"] = c[0] if c else ""
+        fila[f"{lado}_dist_m"] = round(c[2]) if c else ""
+    writer.writerow(fila)
+    # Se escribe fila por fila (no al final) para no perder el trabajo ya hecho si el
+    # proceso se interrumpe a mitad de las ~30 consultas a Overpass, cada una lenta.
+    f.flush()
+    os.fsync(f.fileno())
 
 
 async def _restaurar(archivo: str) -> None:
@@ -279,37 +293,43 @@ async def main(args: argparse.Namespace) -> None:
             print("No hay geocercas activas para procesar.")
             return
 
+        csv_path, csv_writer, csv_file = _abrir_csv()
+        print(f"Escribiendo resultados incrementalmente en {csv_path}\n", flush=True)
+
         resultados = []
-        for i, g in enumerate(geocercas):
-            print(f"Consultando OSM para geocerca [{g.id}] {g.nombre} ...")
-            try:
-                resultados.append(_ajustar_geocerca(g))
-            except RuntimeError as e:
-                resultados.append({"estado": f"ERROR_OVERPASS: {e}", "geocerca": g})
-            if i < len(geocercas) - 1:
-                time.sleep(PAUSA_ENTRE_CONSULTAS_S)
-
-        print("\n=== RESUMEN ===\n")
         aplicables = []
-        for r in resultados:
-            g = r["geocerca"]
-            print(f"[{g.id}] {g.nombre}")
-            if "area_actual" in r:
-                print(f"    Área actual:  {r['area_actual']:,.2f} m²")
-                print(f"    Área nueva:   {r['area_nueva']:,.2f} m²   ({r['cambio_pct']:+.1f}%)")
-            if "lados" in r:
-                for lado, c in r["lados"].items():
-                    if c is None:
-                        print(f"    {lado.capitalize():10s} -> (sin vía cercana)")
-                    else:
-                        nombre, _punto, dist = c
-                        print(f"    {lado.capitalize():10s} -> {nombre}  (dist. {dist:.0f} m)")
-            print(f"    Estado: {r['estado']}")
-            print()
-            if r["estado"] == "OK":
-                aplicables.append(r)
+        try:
+            for i, g in enumerate(geocercas):
+                print(f"Consultando OSM para geocerca [{g.id}] {g.nombre} ...", flush=True)
+                try:
+                    r = _ajustar_geocerca(g)
+                except RuntimeError as e:
+                    r = {"estado": f"ERROR_OVERPASS: {e}", "geocerca": g}
+                resultados.append(r)
+                _escribir_fila_csv(csv_writer, csv_file, r)
 
-        _exportar_csv(resultados)
+                print(f"[{g.id}] {g.nombre}")
+                if "area_actual" in r:
+                    print(f"    Área actual:  {r['area_actual']:,.2f} m²")
+                    print(f"    Área nueva:   {r['area_nueva']:,.2f} m²   ({r['cambio_pct']:+.1f}%)")
+                if "lados" in r:
+                    for lado, c in r["lados"].items():
+                        if c is None:
+                            print(f"    {lado.capitalize():10s} -> (sin vía cercana)")
+                        else:
+                            nombre, _punto, dist = c
+                            print(f"    {lado.capitalize():10s} -> {nombre}  (dist. {dist:.0f} m)")
+                print(f"    Estado: {r['estado']}", flush=True)
+                print()
+                if r["estado"] == "OK":
+                    aplicables.append(r)
+
+                if i < len(geocercas) - 1:
+                    time.sleep(PAUSA_ENTRE_CONSULTAS_S)
+        finally:
+            csv_file.close()
+
+        print(f"\nCSV con los límites calculados guardado en {csv_path}")
 
         if not args.commit:
             print("[DRY-RUN] Sin cambios aplicados. Use --commit --ids <lista> para aplicar.")
