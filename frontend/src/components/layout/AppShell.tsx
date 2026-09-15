@@ -3,7 +3,7 @@ import {
   Users, UserCheck, ShoppingCart, FileText, BarChart2,
   Clock, DollarSign, Truck, Receipt, Wallet, Calculator, List, ClipboardCheck,
   LogOut, Menu, X, ArrowDownCircle, ArrowUpCircle, Search, Building2, MapPin, PackageCheck,
-  ScanLine, Radio, RotateCcw, ShieldCheck, Hexagon,
+  ScanLine, Radio, RotateCcw, ShieldCheck, Hexagon, Image as ImageIcon,
 } from "lucide-react";
 import { useState } from "react";
 import { useAuthStore } from "@/store/authStore";
@@ -28,6 +28,7 @@ const navItems = [
   { to: "/gestiones", label: "Detalle Gestiones", icon: List, pageKey: "gestiones" },
   { to: "/planillas", label: "Planillas", icon: ClipboardCheck, pageKey: "planillas" },
   { to: "/buscar", label: "Buscar Paquete", icon: Search, pageKey: "buscar" },
+  { to: "/imagenes", label: "Imágenes de Guía", icon: ImageIcon, pageKey: "imagenes" },
   { to: "/direcciones", label: "Ajuste Direcciones", icon: MapPin, pageKey: "direcciones" },
   { to: "/pendientes-entrega", label: "Pendientes Entrega", icon: PackageCheck, pageKey: "pendientes_entrega" },
   { to: "/devoluciones", label: "Devoluciones", icon: RotateCcw, pageKey: "devoluciones" },

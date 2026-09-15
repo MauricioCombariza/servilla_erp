@@ -25,6 +25,7 @@ import { LiquidacionesPage } from "@/pages/pagos/LiquidacionesPage";
 import { FacturasTransportePage } from "@/pages/transporte/FacturasTransportePage";
 import { PagosCiudadesPage } from "@/pages/pagos-ciudades/PagosCiudadesPage";
 import { BuscarPaquetePage } from "@/pages/buscar/BuscarPaquetePage";
+import { ImagenesPage } from "@/pages/imagenes/ImagenesPage";
 import { AjusteDireccionesPage } from "@/pages/direcciones/AjusteDireccionesPage";
 import { PendientesEntregaPage } from "@/pages/pendientes-entrega/PendientesEntregaPage";
 import { DevolucionesPage } from "@/pages/devoluciones/DevolucionesPage";
@@ -123,6 +124,7 @@ export default function App() {
             <Route path="/gestiones" element={<PageGuard pageKey="gestiones"><DetalleGestionesPage /></PageGuard>} />
             <Route path="/planillas" element={<PageGuard pageKey="planillas"><PlanillasPage /></PageGuard>} />
             <Route path="/buscar" element={<PageGuard pageKey="buscar"><BuscarPaquetePage /></PageGuard>} />
+            <Route path="/imagenes" element={<PageGuard pageKey="imagenes"><ImagenesPage /></PageGuard>} />
             <Route path="/direcciones" element={<PageGuard pageKey="direcciones"><AjusteDireccionesPage /></PageGuard>} />
             <Route path="/pendientes-entrega" element={<PageGuard pageKey="pendientes_entrega"><PendientesEntregaPage /></PageGuard>} />
             <Route path="/devoluciones" element={<PageGuard pageKey="devoluciones"><DevolucionesPage /></PageGuard>} />

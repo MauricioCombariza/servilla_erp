@@ -28,6 +28,7 @@ PAGE_CATALOG: list[PageDef] = [
     PageDef("gestiones", "Detalle Gestiones", "/gestiones"),
     PageDef("planillas", "Planillas", "/planillas"),
     PageDef("buscar", "Buscar Paquete", "/buscar"),
+    PageDef("imagenes", "Imágenes de Guía", "/imagenes"),
     PageDef("direcciones", "Ajuste Direcciones", "/direcciones"),
     PageDef("pendientes_entrega", "Pendientes Entrega", "/pendientes-entrega"),
     PageDef("devoluciones", "Devoluciones", "/devoluciones"),
