@@ -21,9 +21,22 @@ export interface ImagenGuia {
   comentario: string | null;
 }
 
+export interface ImagenListItem {
+  serial: string;
+  nombred: string | null;
+  dirdes1: string | null;
+  ciudad1: string | null;
+  f_emi: string | null;
+  cod_men: string | null;
+}
+
+export type ImagenesModo = "serial" | "nombre" | "direccion";
+
 export const imagenesApi = {
   obtenerImagen: (serial: string) =>
     api.get<ImagenGuia>(`/imagenes/${encodeURIComponent(serial)}`),
   obtenerFoto: (serial: string) =>
     api.get(`/imagenes/${encodeURIComponent(serial)}/foto`, { responseType: "blob" }),
+  buscarLista: (q: string, modo: "nombre" | "direccion") =>
+    api.get<ImagenListItem[]>("/imagenes", { params: { q, modo } }),
 };

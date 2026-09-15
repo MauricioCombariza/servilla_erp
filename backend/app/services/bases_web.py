@@ -137,6 +137,30 @@ def _buscar_histo_nombre_sync(termino: str) -> list[dict]:
         return []
 
 
+def _buscar_histo_direccion_sync(termino: str) -> list[dict]:
+    dsn = _parse_dsn()
+    if not dsn:
+        return []
+    try:
+        conn = pymysql.connect(
+            **dsn,
+            cursorclass=pymysql.cursors.DictCursor,
+            connect_timeout=5,
+            read_timeout=15,
+        )
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT serial, nombred, dirdes1, ciudad1, f_emi, cod_men, cod_esc "
+                    "FROM histo WHERE LOWER(dirdes1) LIKE %s ORDER BY f_emi DESC LIMIT 200",
+                    (f"%{termino.strip().lower()}%",),
+                )
+                return cur.fetchall()
+    except Exception as exc:
+        logger.error("Error buscando dirección en bases_web.histo: %s", exc)
+        return []
+
+
 def _buscar_histo_serial_exacto_sync(serial: str) -> dict | None:
     """Busca UNA fila por serial EXACTO en bases_web.histo (no LIKE)."""
     dsn = _parse_dsn()
@@ -173,6 +197,8 @@ async def buscar_histo(termino: str, modo: str) -> list[dict]:
         return await asyncio.to_thread(_buscar_histo_serial_sync, termino)
     elif modo == "nombre":
         return await asyncio.to_thread(_buscar_histo_nombre_sync, termino)
+    elif modo == "direccion":
+        return await asyncio.to_thread(_buscar_histo_direccion_sync, termino)
     return []
 
 

@@ -1,6 +1,15 @@
 from pydantic import BaseModel
 
 
+class ImagenListItem(BaseModel):
+    serial: str
+    nombred: str | None = None
+    dirdes1: str | None = None
+    ciudad1: str | None = None
+    f_emi: str | None = None
+    cod_men: str | None = None
+
+
 class ImagenGuia(BaseModel):
     serial: str
     encontrado: bool

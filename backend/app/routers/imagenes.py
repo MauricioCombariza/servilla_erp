@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Path, Response
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
 
 from app.auth.dependencies import require_page
-from app.schemas.imagenes import ImagenGuia
-from app.services.bases_web import buscar_histo_serial_exacto
+from app.schemas.imagenes import ImagenGuia, ImagenListItem
+from app.services.bases_web import buscar_histo, buscar_histo_serial_exacto
 from app.services.imagenes import construir_image_url, fetch_imagen_bytes
 
 router = APIRouter(prefix="/api/imagenes", tags=["imagenes"])
@@ -14,6 +14,27 @@ def _fmt(v) -> str | None:
         return None
     v = str(v).strip()
     return v or None
+
+
+@router.get("", response_model=list[ImagenListItem])
+async def buscar_imagenes(
+    q: str = Query(min_length=2, max_length=200),
+    modo: str = Query(default="nombre", pattern="^(nombre|direccion)$"),
+    _=_auth,
+):
+    rows = await buscar_histo(q.strip(), modo)
+    return [
+        ImagenListItem(
+            serial=str(row["serial"]),
+            nombred=_fmt(row.get("nombred")),
+            dirdes1=_fmt(row.get("dirdes1")),
+            ciudad1=_fmt(row.get("ciudad1")),
+            f_emi=_fmt(row.get("f_emi")),
+            cod_men=_fmt(row.get("cod_men")),
+        )
+        for row in rows
+        if row.get("serial")
+    ]
 
 
 @router.get("/{serial}", response_model=ImagenGuia)
