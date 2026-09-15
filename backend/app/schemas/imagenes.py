@@ -8,6 +8,8 @@ class ImagenListItem(BaseModel):
     ciudad1: str | None = None
     f_emi: str | None = None
     cod_men: str | None = None
+    ret_esc: str | None = None
+    motivo: str | None = None
 
 
 class ImagenGuia(BaseModel):

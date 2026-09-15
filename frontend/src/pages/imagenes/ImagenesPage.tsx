@@ -176,6 +176,7 @@ export function ImagenesPage() {
                   <th className="text-left px-4 py-3 font-medium text-gray-600">Ciudad</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">Fecha</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">Mensajero</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Estado</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -194,6 +195,9 @@ export function ImagenesPage() {
                     <td className="px-4 py-3 text-gray-700">{item.ciudad1 ?? "—"}</td>
                     <td className="px-4 py-3 text-gray-500">{item.f_emi ?? "—"}</td>
                     <td className="px-4 py-3 text-gray-600">{item.cod_men ?? "—"}</td>
+                    <td className="px-4 py-3 text-gray-700">
+                      {item.motivo || item.ret_esc || "—"}
+                    </td>
                   </tr>
                 ))}
               </tbody>

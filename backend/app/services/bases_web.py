@@ -127,7 +127,8 @@ def _buscar_histo_nombre_sync(termino: str) -> list[dict]:
                 cond = " AND ".join(["LOWER(nombred) LIKE %s"] * len(palabras))
                 params = tuple(f"%{p.lower()}%" for p in palabras)
                 cur.execute(
-                    f"SELECT serial, nombred, dirdes1, ciudad1, f_emi, cod_men, cod_esc "
+                    f"SELECT serial, nombred, dirdes1, ciudad1, f_emi, cod_men, cod_esc, "
+                    f"ret_esc, motivo "
                     f"FROM histo WHERE {cond} ORDER BY f_emi DESC LIMIT 200",
                     params,
                 )
@@ -151,7 +152,8 @@ def _buscar_histo_direccion_sync(termino: str) -> list[dict]:
         with conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT serial, nombred, dirdes1, ciudad1, f_emi, cod_men, cod_esc "
+                    "SELECT serial, nombred, dirdes1, ciudad1, f_emi, cod_men, cod_esc, "
+                    "ret_esc, motivo "
                     "FROM histo WHERE LOWER(dirdes1) LIKE %s ORDER BY f_emi DESC LIMIT 200",
                     (f"%{termino.strip().lower()}%",),
                 )

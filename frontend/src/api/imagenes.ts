@@ -28,6 +28,8 @@ export interface ImagenListItem {
   ciudad1: string | null;
   f_emi: string | null;
   cod_men: string | null;
+  ret_esc: string | null;
+  motivo: string | null;
 }
 
 export type ImagenesModo = "serial" | "nombre" | "direccion";

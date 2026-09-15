@@ -31,6 +31,8 @@ async def buscar_imagenes(
             ciudad1=_fmt(row.get("ciudad1")),
             f_emi=_fmt(row.get("f_emi")),
             cod_men=_fmt(row.get("cod_men")),
+            ret_esc=_fmt(row.get("ret_esc")),
+            motivo=_fmt(row.get("motivo")),
         )
         for row in rows
         if row.get("serial")
