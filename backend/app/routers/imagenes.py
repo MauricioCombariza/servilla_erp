@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, Path
+from fastapi import APIRouter, Depends, HTTPException, Path, Response
 
 from app.auth.dependencies import require_page
 from app.schemas.imagenes import ImagenGuia
 from app.services.bases_web import buscar_histo_serial_exacto
-from app.services.imagenes import construir_image_url
+from app.services.imagenes import construir_image_url, fetch_imagen_bytes
 
 router = APIRouter(prefix="/api/imagenes", tags=["imagenes"])
 _auth = Depends(require_page("imagenes"))
@@ -48,3 +48,16 @@ async def obtener_imagen_guia(
         dir_num=_fmt(row.get("dir_num")),
         comentario=_fmt(row.get("comentario")),
     )
+
+
+@router.get("/{serial}/foto")
+async def obtener_foto_guia(
+    serial: str = Path(min_length=1, max_length=20),
+    _=_auth,
+):
+    serial = serial.strip()
+    resultado = await fetch_imagen_bytes(serial)
+    if resultado is None:
+        raise HTTPException(status_code=404, detail="Imagen no disponible en el servidor de guías")
+    contenido, content_type = resultado
+    return Response(content=contenido, media_type=content_type)

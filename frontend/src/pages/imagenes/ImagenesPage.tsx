@@ -32,7 +32,9 @@ function DetailCard({ data }: { data: ImagenGuia }) {
 export function ImagenesPage() {
   const [input, setInput] = useState("");
   const [q, setQ] = useState("");
-  const [imgError, setImgError] = useState(false);
+  const [fotoUrl, setFotoUrl] = useState<string | null>(null);
+  const [fotoError, setFotoError] = useState(false);
+  const [fotoLoading, setFotoLoading] = useState(false);
 
   const { data, isFetching, isError } = useQuery({
     queryKey: ["imagenes", q],
@@ -42,7 +44,32 @@ export function ImagenesPage() {
   });
 
   useEffect(() => {
-    setImgError(false);
+    setFotoUrl(null);
+    setFotoError(false);
+    if (!q) return;
+
+    let cancelado = false;
+    let urlCreada: string | null = null;
+    setFotoLoading(true);
+
+    imagenesApi
+      .obtenerFoto(q)
+      .then((r) => {
+        if (cancelado) return;
+        urlCreada = URL.createObjectURL(r.data);
+        setFotoUrl(urlCreada);
+      })
+      .catch(() => {
+        if (!cancelado) setFotoError(true);
+      })
+      .finally(() => {
+        if (!cancelado) setFotoLoading(false);
+      });
+
+    return () => {
+      cancelado = true;
+      if (urlCreada) URL.revokeObjectURL(urlCreada);
+    };
   }, [q]);
 
   function handleSearch(e: React.FormEvent) {
@@ -89,17 +116,19 @@ export function ImagenesPage() {
         </div>
       )}
 
-      {data && !imgError && (
+      {data && fotoLoading && (
+        <p className="text-sm text-gray-500 mb-4">Cargando imagen...</p>
+      )}
+      {data && fotoUrl && (
         <img
-          src={data.image_url}
+          src={fotoUrl}
           alt={`Guía ${data.serial}`}
-          onError={() => setImgError(true)}
           className="max-w-full border border-gray-200 rounded-lg"
         />
       )}
-      {data && imgError && (
+      {data && fotoError && (
         <p className="text-sm text-red-600">
-          No se pudo cargar la imagen ({data.image_url}).
+          No se pudo cargar la imagen desde el servidor de guías.
         </p>
       )}
 

@@ -24,4 +24,6 @@ export interface ImagenGuia {
 export const imagenesApi = {
   obtenerImagen: (serial: string) =>
     api.get<ImagenGuia>(`/imagenes/${encodeURIComponent(serial)}`),
+  obtenerFoto: (serial: string) =>
+    api.get(`/imagenes/${encodeURIComponent(serial)}/foto`, { responseType: "blob" }),
 };
