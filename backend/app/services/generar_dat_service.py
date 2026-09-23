@@ -3,7 +3,8 @@ Genera el informe .dat de BCS (ancho fijo, latin-1) cruzando los Excel de gesti�
 con los registros de la orden en bases_web.histo.
 
 Formato tomado del archivo BCS_CON_EXT_02_<fecha>.dat existente: encabezado de 312
-caracteres, registros de 375 y pie con el conteo + 'NOC'.
+caracteres, registros de 375 (centralizado) o de 44 (terceros: solo el bloque
+de gestión) y pie con el conteo + 'NOC'.
 """
 from __future__ import annotations
 
@@ -17,6 +18,10 @@ from app.services.excel_utils import construir_excel
 TIPO_DOC = "NI"
 MARCA_NOC = "NOC1"
 ANCHO_REGISTRO = 375
+ANCHO_TERCEROS = 44
+TIPO_CENTRALIZADO = "centralizado"
+TIPO_TERCEROS = "terceros"
+TIPOS_INFORME = (TIPO_CENTRALIZADO, TIPO_TERCEROS)
 ANCHO_ENCABEZADO = 312
 COLUMNAS_EXCEL = ["serial", "Estado", "Causal_Dev", "F_recepcio", "guias", "F_GESTION"]
 
@@ -76,29 +81,42 @@ def campo(valor, ancho: int, alinear: str = "izq", relleno: str = " ") -> str:
     return valor.ljust(ancho, relleno)[:ancho]
 
 
-def construir_linea(reg: dict, fecha_ini: str) -> str:
-    """Arma un registro de 375 caracteres."""
-    linea = "".join([
-        TIPO_DOC,
-        campo(reg["identdes"], 32, "der", "0"),
-        campo(reg["oficina"], 6, "der", "0"),
-        campo(reg["nombred"], 65),
-        campo(reg["dir_pred"], 65),
-        campo(reg["barrd1"], 35),
-        "0" * 11,
-        campo(reg["ciudad1"], 35),
-        campo(reg["dpto1"], 35),
+def _bloque_gestion(reg: dict, fecha_ini: str) -> str:
+    """fecha_ini + Estado + Causal_Dev + F_recepcio + guía (15) + F_GESTION: 44 caracteres."""
+    return "".join([
         campo(fecha_ini, 8),
         campo(reg["Estado"], 3),
         campo(reg["Causal_Dev"], 2, "der", "0"),
         campo(reg["F_recepcio"], 8),
         campo(reg["guias"], 15, "der", "0"),
         campo(reg["F_GESTION"], 8),
-        MARCA_NOC,
-        campo(reg["courrier"], 35),
-        campo(reg["orden"], 6, "der"),
     ])
-    if len(linea) != ANCHO_REGISTRO:
+
+
+def construir_linea(reg: dict, fecha_ini: str, tipo: str = TIPO_CENTRALIZADO) -> str:
+    """Centralizado: registro completo de 375 caracteres.
+    Terceros: solo el bloque de gestión (de fecha_ini hasta F_GESTION)."""
+    if tipo == TIPO_TERCEROS:
+        linea = _bloque_gestion(reg, fecha_ini)
+        ancho = ANCHO_TERCEROS
+    else:
+        linea = "".join([
+            TIPO_DOC,
+            campo(reg["identdes"], 32, "der", "0"),
+            campo(reg["oficina"], 6, "der", "0"),
+            campo(reg["nombred"], 65),
+            campo(reg["dir_pred"], 65),
+            campo(reg["barrd1"], 35),
+            "0" * 11,
+            campo(reg["ciudad1"], 35),
+            campo(reg["dpto1"], 35),
+            _bloque_gestion(reg, fecha_ini),
+            MARCA_NOC,
+            campo(reg["courrier"], 35),
+            campo(reg["orden"], 6, "der"),
+        ])
+        ancho = ANCHO_REGISTRO
+    if len(linea) != ancho:
         raise ValueError(f"Registro de {len(linea)} caracteres para el serial {reg.get('serial')}")
     return linea
 
@@ -108,8 +126,11 @@ def generar_dat(
     fecha_ini: str,
     archivos: list[tuple[str, bytes]],
     filas_histo: list[dict],
+    tipo: str = TIPO_CENTRALIZADO,
 ) -> ResultadoDat:
     """Cruza los Excel con histo y arma el contenido del .dat. fecha_ini en AAAAMMDD."""
+    if tipo not in TIPOS_INFORME:
+        raise ValueError(f"Tipo de informe inválido: {tipo}")
     if not filas_histo:
         raise ValueError(f"La orden {orden} no tiene registros en histo")
 
@@ -121,7 +142,7 @@ def generar_dat(
     df = df_excel.merge(df_histo, on="serial", how="inner").sort_values("oficina")
 
     lineas = [campo(f"*BCSEXTCON02{fecha_ini}", ANCHO_ENCABEZADO)]
-    lineas += [construir_linea(reg, fecha_ini) for reg in df.to_dict("records")]
+    lineas += [construir_linea(reg, fecha_ini, tipo) for reg in df.to_dict("records")]
     lineas.append(campo(f"*{str(len(df)).zfill(8)}", ANCHO_ENCABEZADO) + "NOC")
     contenido = ("\n".join(lineas) + "\n").encode("latin-1", errors="replace")
 

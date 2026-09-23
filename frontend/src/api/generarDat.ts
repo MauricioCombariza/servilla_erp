@@ -1,5 +1,7 @@
 import api from "./client";
 
+export type TipoInforme = "centralizado" | "terceros";
+
 export interface SerialError {
   serial: string;
   courrier: string;
@@ -8,6 +10,7 @@ export interface SerialError {
 export interface GenerarDatResult {
   orden: string;
   fecha_ini: string;
+  tipo: TipoInforme;
   registros: number;
   seriales_excel: number;
   seriales_orden: number;
@@ -21,10 +24,11 @@ export interface GenerarDatResult {
 }
 
 export const generarDatApi = {
-  generar: (orden: string, fechaIni: string, files: File[]) => {
+  generar: (orden: string, fechaIni: string, tipo: TipoInforme, files: File[]) => {
     const form = new FormData();
     form.append("orden", orden);
     form.append("fecha_ini", fechaIni);
+    form.append("tipo", tipo);
     files.forEach((f) => form.append("files", f));
     return api.post<GenerarDatResult>("/generar-dat", form, {
       headers: { "Content-Type": "multipart/form-data" },

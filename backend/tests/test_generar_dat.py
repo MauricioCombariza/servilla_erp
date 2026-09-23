@@ -83,3 +83,23 @@ def test_columnas_faltantes():
 def test_orden_sin_registros():
     with pytest.raises(ValueError, match="no tiene registros"):
         generar_dat("1", "20260731", [("a.xlsx", EXCEL_1)], [])
+
+
+def test_terceros_solo_bloque_de_gestion():
+    r = generar_dat(
+        "123791", "20260731", [("a.xlsx", EXCEL_1), ("b.xlsx", EXCEL_2)], HISTO, tipo="terceros"
+    )
+    lineas = r.contenido_dat.decode("latin-1").split("\n")
+
+    assert r.nombre_dat == "BCS_CON_EXT_02_20260731.dat"
+    assert lineas[0] == "*BCSEXTCON0220260731".ljust(312)
+    assert lineas[-2] == "*00000002".ljust(312) + "NOC"
+    assert lineas[1:-2] == [
+        "20260731DEV0520260806000150018205324" + " " * 8,
+        "20260731ENT0020260803000150018205327" + "20260806",
+    ]
+
+
+def test_tipo_invalido():
+    with pytest.raises(ValueError, match="Tipo de informe"):
+        generar_dat("123791", "20260731", [("a.xlsx", EXCEL_1)], HISTO, tipo="otro")

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from app.auth.dependencies import require_page
 from app.schemas.generar_dat import GenerarDatResult, SerialError
 from app.services.bases_web import fetch_histo_orden
-from app.services.generar_dat_service import construir_excel_errores, generar_dat
+from app.services.generar_dat_service import TIPOS_INFORME, construir_excel_errores, generar_dat
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,7 @@ def _normalizar_fecha(fecha: str) -> str:
 async def generar(
     orden: str = Form(...),
     fecha_ini: str = Form(...),
+    tipo: str = Form("centralizado"),
     files: list[UploadFile] = File(...),
     _=_auth,
 ):
@@ -41,6 +42,9 @@ async def generar(
     if not re.fullmatch(r"\d{1,10}", orden):
         raise HTTPException(status_code=400, detail="Número de orden inválido")
     fecha = _normalizar_fecha(fecha_ini)
+    tipo = tipo.strip().lower()
+    if tipo not in TIPOS_INFORME:
+        raise HTTPException(status_code=400, detail="Tipo de informe inválido (centralizado o terceros)")
 
     if not files:
         raise HTTPException(status_code=400, detail="Sube al menos un archivo Excel")
@@ -67,7 +71,7 @@ async def generar(
         raise HTTPException(status_code=502, detail="No se pudo consultar bases_web")
 
     try:
-        resultado = generar_dat(orden, fecha, archivos, filas_histo)
+        resultado = generar_dat(orden, fecha, archivos, filas_histo, tipo)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -80,6 +84,7 @@ async def generar(
     return GenerarDatResult(
         orden=orden,
         fecha_ini=fecha,
+        tipo=tipo,
         registros=resultado.registros,
         seriales_excel=resultado.seriales_excel,
         seriales_orden=resultado.seriales_orden,

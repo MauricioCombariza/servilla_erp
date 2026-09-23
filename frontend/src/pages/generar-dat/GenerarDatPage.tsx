@@ -1,9 +1,13 @@
 import { useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { AlertCircle, AlertTriangle, Download, FileCog, FileText, Upload, X } from "lucide-react";
-import { generarDatApi, type GenerarDatResult } from "@/api/generarDat";
+import { generarDatApi, type GenerarDatResult, type TipoInforme } from "@/api/generarDat";
 
 const MAX_ARCHIVOS = 5;
+const TIPOS: { value: TipoInforme; label: string; descripcion: string }[] = [
+  { value: "centralizado", label: "Centralizado", descripcion: "Registro completo (375 caracteres)" },
+  { value: "terceros", label: "Terceros", descripcion: "Solo de fecha inicial a F_GESTION" },
+];
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 function descargarBase64(base64: string, nombre: string, mime: string) {
@@ -20,7 +24,7 @@ function Resumen({ data }: { data: GenerarDatResult }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
       <h2 className="text-sm font-semibold text-gray-900 mb-4">
-        Orden {data.orden} — fecha inicial {data.fecha_ini}
+        Orden {data.orden} — fecha inicial {data.fecha_ini} — {data.tipo === "terceros" ? "Terceros" : "Centralizado"}
       </h2>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-5">
         <Stat label="Registros en el .dat" value={data.registros} />
@@ -116,12 +120,13 @@ function Aviso({ titulo, seriales }: { titulo: string; seriales: string[] }) {
 export function GenerarDatPage() {
   const [orden, setOrden] = useState("");
   const [fechaIni, setFechaIni] = useState("");
+  const [tipo, setTipo] = useState<TipoInforme>("centralizado");
   const [files, setFiles] = useState<File[]>([]);
   const [errorLocal, setErrorLocal] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const mutation = useMutation({
-    mutationFn: () => generarDatApi.generar(orden.trim(), fechaIni, files).then((r) => r.data),
+    mutationFn: () => generarDatApi.generar(orden.trim(), fechaIni, tipo, files).then((r) => r.data),
   });
 
   function agregarArchivos(nuevos: FileList | null) {
@@ -182,6 +187,31 @@ export function GenerarDatPage() {
               className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
             />
           </label>
+        </div>
+
+        <div className="mb-4">
+          <span className="text-xs font-medium text-gray-700">Tipo de informe</span>
+          <div className="mt-1 grid grid-cols-2 gap-2">
+            {TIPOS.map((t) => (
+              <button
+                key={t.value}
+                type="button"
+                onClick={() => {
+                  setTipo(t.value);
+                  mutation.reset();
+                }}
+                aria-pressed={tipo === t.value}
+                className={`text-left border rounded-lg px-3 py-2 transition-colors ${
+                  tipo === t.value
+                    ? "border-primary bg-blue-50 ring-2 ring-primary"
+                    : "border-gray-300 hover:border-primary"
+                }`}
+              >
+                <p className="text-sm font-medium text-gray-900">{t.label}</p>
+                <p className="text-xs text-gray-500">{t.descripcion}</p>
+              </button>
+            ))}
+          </div>
         </div>
 
         <p className="text-xs text-gray-500 mb-2">

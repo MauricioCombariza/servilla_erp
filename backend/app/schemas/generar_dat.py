@@ -9,6 +9,7 @@ class SerialError(BaseModel):
 class GenerarDatResult(BaseModel):
     orden: str
     fecha_ini: str
+    tipo: str
     registros: int
     seriales_excel: int
     seriales_orden: int
