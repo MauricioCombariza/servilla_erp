@@ -65,8 +65,8 @@ class ResultadoFormato:
     contenido: bytes
     filas: int
     excluidos: int
-    # [{serial, courrier, motivo}] de las filas que quedaron sin causal
-    sin_causal: list[dict] = field(default_factory=list)
+    # [{serial, courrier, motivo, falta}] de las filas a completar a mano
+    por_revisar: list[dict] = field(default_factory=list)
 
 
 def _normalizar(texto: str) -> str:
@@ -108,17 +108,24 @@ def causal_de_motivo(motivo: str) -> str:
     return ""
 
 
-def _sumar_dias(fecha: str, dias: int) -> str:
-    return (datetime.strptime(fecha, "%Y%m%d") + timedelta(days=dias)).strftime("%Y%m%d")
+def fecha_f_emi(f_emi: str | None) -> datetime | None:
+    """f_emi de histo ('AAAA.MM.DD'; se toleran '-' y '/') como fecha, o None si no es válida."""
+    digitos = re.sub(r"[.\-/]", "", (f_emi or "").strip())
+    if not re.fullmatch(r"\d{8}", digitos):
+        return None
+    try:
+        return datetime.strptime(digitos, "%Y%m%d")
+    except ValueError:
+        return None
 
 
 def generar_formato_servilla(
     orden: str,
-    f_recepcio: str,
     filas_histo: list[dict],
     rng: random.Random | None = None,
 ) -> ResultadoFormato:
-    """f_recepcio en AAAAMMDD. F_GESTION = F_recepcio + 2..6 días calendario por fila."""
+    """F_recepcio = f_emi del serial en AAAAMMDD; F_GESTION = F_recepcio + 2..6 días
+    calendario al azar por fila. Si f_emi no es válida, ambas quedan vacías."""
     if not filas_histo:
         raise ValueError(f"La orden {orden} no tiene registros en histo")
     rng = rng or random.Random()
@@ -137,13 +144,18 @@ def generar_formato_servilla(
             continue
         motivo = motivo_histo(fila)
         causal = causal_de_motivo(motivo)
+        recepcion = fecha_f_emi(fila.get("f_emi"))
+        gestion = (
+            recepcion + timedelta(days=rng.randint(DIAS_GESTION_MIN, DIAS_GESTION_MAX))
+            if recepcion else None
+        )
         filas.append({
             "serial": serial,
             "Estado": ("ENT" if causal == "00" else "DEV") if causal else "",
             "Causal_Dev": causal,
-            "F_recepcio": f_recepcio,
+            "F_recepcio": recepcion.strftime("%Y%m%d") if recepcion else "",
             "guias": serial,
-            "F_GESTION": _sumar_dias(f_recepcio, rng.randint(DIAS_GESTION_MIN, DIAS_GESTION_MAX)),
+            "F_GESTION": gestion.strftime("%Y%m%d") if gestion else "",
             "motivo": motivo,
             "courrier": courrier,
         })
@@ -152,22 +164,26 @@ def generar_formato_servilla(
         raise ValueError(f"La orden {orden} no tiene seriales fuera de PRINDEL y LECTA")
 
     filas.sort(key=lambda f: f["serial"])
-    sin_causal = [
-        {"serial": f["serial"], "courrier": f["courrier"], "motivo": f["motivo"]}
-        for f in filas if not f["Causal_Dev"]
-    ]
     return ResultadoFormato(
-        nombre=f"formato_servilla_{orden}_{f_recepcio}.xlsx",
+        nombre=f"formato_servilla_{orden}.xlsx",
         contenido=_construir_excel(filas),
         filas=len(filas),
         excluidos=excluidos,
-        sin_causal=sin_causal,
+        por_revisar=[
+            {"serial": f["serial"], "courrier": f["courrier"], "motivo": f["motivo"],
+             "falta": ", ".join(_faltantes(f))}
+            for f in filas if _faltantes(f)
+        ],
     )
+
+
+def _faltantes(fila: dict) -> list[str]:
+    return [c for c in ("Causal_Dev", "F_recepcio") if not fila[c]]
 
 
 def _construir_excel(filas: list[dict]) -> bytes:
     """Encabezados en la fila 1 (como espera leer_excels), todo en texto y las
-    filas sin causal resaltadas para completarlas a mano."""
+    filas incompletas (sin causal o sin fecha) resaltadas para completarlas a mano."""
     wb = Workbook()
     ws = wb.active
     ws.title = "Gestion"
@@ -181,7 +197,7 @@ def _construir_excel(filas: list[dict]) -> bytes:
         for col, nombre in enumerate(COLUMNAS_FORMATO, start=1):
             c = ws.cell(row=fila_idx, column=col, value=fila[nombre])
             c.number_format = "@"
-            if not fila["Causal_Dev"]:
+            if _faltantes(fila):
                 c.fill = resaltado
     ws.freeze_panes = "A2"
 

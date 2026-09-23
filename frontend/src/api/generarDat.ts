@@ -38,27 +38,26 @@ export const generarDatApi = {
   },
 };
 
-export interface SerialSinCausal {
+export interface SerialPorRevisar {
   serial: string;
   courrier: string;
   motivo: string;
+  falta: string;
 }
 
 export interface FormatoServillaResult {
   orden: string;
-  f_recepcio: string;
   filas: number;
   excluidos: number;
   nombre: string;
   excel_base64: string;
-  sin_causal: SerialSinCausal[];
+  por_revisar: SerialPorRevisar[];
 }
 
 export const formatoServillaApi = {
-  generar: (orden: string, fRecepcio: string) => {
+  generar: (orden: string) => {
     const form = new FormData();
     form.append("orden", orden);
-    form.append("f_recepcio", fRecepcio);
     return api.post<FormatoServillaResult>("/generar-dat/formato-servilla", form, {
       headers: { "Content-Type": "multipart/form-data" },
     });

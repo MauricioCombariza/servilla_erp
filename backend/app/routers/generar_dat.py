@@ -10,7 +10,7 @@ from app.schemas.generar_dat import (
     FormatoServillaResult,
     GenerarDatResult,
     SerialError,
-    SerialSinCausal,
+    SerialPorRevisar,
 )
 from app.services.bases_web import fetch_histo_orden
 from app.services.excel_utils import XLSX_MEDIA_TYPE
@@ -46,7 +46,7 @@ async def _consultar_orden(orden: str) -> list[dict]:
         raise HTTPException(status_code=502, detail="No se pudo consultar bases_web")
 
 
-def _normalizar_fecha(fecha: str, nombre: str = "Fecha inicial") -> str:
+def _normalizar_fecha(fecha: str) -> str:
     """Acepta AAAA-MM-DD (input date) o AAAAMMDD y devuelve AAAAMMDD."""
     fecha = fecha.strip()
     for fmt in ("%Y-%m-%d", "%Y%m%d"):
@@ -54,7 +54,7 @@ def _normalizar_fecha(fecha: str, nombre: str = "Fecha inicial") -> str:
             return datetime.strptime(fecha, fmt).strftime("%Y%m%d")
         except ValueError:
             continue
-    raise HTTPException(status_code=400, detail=f"{nombre} inválida (use AAAA-MM-DD)")
+    raise HTTPException(status_code=400, detail="Fecha inicial inválida (use AAAA-MM-DD)")
 
 
 @router.get("/formato")
@@ -69,25 +69,22 @@ async def descargar_formato(_=_auth):
 @router.post("/formato-servilla", response_model=FormatoServillaResult)
 async def formato_servilla(
     orden: str = Form(...),
-    f_recepcio: str = Form(...),
     _=_auth,
 ):
     orden = _validar_orden(orden)
-    fecha = _normalizar_fecha(f_recepcio, "F_recepcio")
     filas_histo = await _consultar_orden(orden)
     try:
-        resultado = generar_formato_servilla(orden, fecha, filas_histo)
+        resultado = generar_formato_servilla(orden, filas_histo)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     return FormatoServillaResult(
         orden=orden,
-        f_recepcio=fecha,
         filas=resultado.filas,
         excluidos=resultado.excluidos,
         nombre=resultado.nombre,
         excel_base64=base64.b64encode(resultado.contenido).decode(),
-        sin_causal=[SerialSinCausal(**s) for s in resultado.sin_causal],
+        por_revisar=[SerialPorRevisar(**s) for s in resultado.por_revisar],
     )
 
 

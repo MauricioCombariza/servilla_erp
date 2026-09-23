@@ -4,13 +4,6 @@ import { AlertCircle, AlertTriangle, Download, FileSpreadsheet } from "lucide-re
 import { formatoServillaApi, type FormatoServillaResult } from "@/api/generarDat";
 import { descargarBase64, XLSX_MIME } from "./descargas";
 
-function fechaValida(texto: string): boolean {
-  if (!/^\d{8}$/.test(texto)) return false;
-  const [a, m, d] = [+texto.slice(0, 4), +texto.slice(4, 6), +texto.slice(6, 8)];
-  const f = new Date(a, m - 1, d);
-  return f.getFullYear() === a && f.getMonth() === m - 1 && f.getDate() === d;
-}
-
 function Resultado({ data }: { data: FormatoServillaResult }) {
   return (
     <div className="mt-4 border-t border-gray-100 pt-4">
@@ -27,13 +20,14 @@ function Resultado({ data }: { data: FormatoServillaResult }) {
         Descargar {data.nombre}
       </button>
 
-      {data.sin_causal.length > 0 && (
+      {data.por_revisar.length > 0 && (
         <>
           <div className="mt-4 bg-yellow-50 border border-yellow-200 rounded-xl p-3 flex items-start gap-2">
             <AlertTriangle size={16} className="text-yellow-600 flex-shrink-0 mt-0.5" />
             <p className="text-sm text-yellow-800">
-              {data.sin_causal.length} serial(es) quedaron sin Causal_Dev ni Estado (resaltados en amarillo en el
-              Excel). Complétalos a mano antes de subirlo al generador.
+              {data.por_revisar.length} serial(es) quedaron incompletos (resaltados en amarillo en el Excel):
+              sin causal por no tener un motivo reconocido, o sin fechas por no tener un f_emi válido. Complétalos a
+              mano antes de subirlo al generador.
             </p>
           </div>
           <div className="mt-3 border border-gray-200 rounded-xl overflow-auto max-h-64">
@@ -43,14 +37,16 @@ function Resultado({ data }: { data: FormatoServillaResult }) {
                   <th className="text-left px-3 py-2 font-medium">Serial</th>
                   <th className="text-left px-3 py-2 font-medium">Courier</th>
                   <th className="text-left px-3 py-2 font-medium">Motivo</th>
+                  <th className="text-left px-3 py-2 font-medium">Falta</th>
                 </tr>
               </thead>
               <tbody>
-                {data.sin_causal.map((s) => (
+                {data.por_revisar.map((s) => (
                   <tr key={s.serial} className="border-t border-gray-100">
                     <td className="px-3 py-1.5 font-mono text-xs text-gray-900">{s.serial}</td>
                     <td className="px-3 py-1.5 text-gray-600">{s.courrier || "—"}</td>
                     <td className="px-3 py-1.5 text-gray-600">{s.motivo || "Sin motivo"}</td>
+                    <td className="px-3 py-1.5 text-gray-600">{s.falta}</td>
                   </tr>
                 ))}
               </tbody>
@@ -64,17 +60,15 @@ function Resultado({ data }: { data: FormatoServillaResult }) {
 
 export function FormatoServillaCard() {
   const [orden, setOrden] = useState("");
-  const [fRecepcio, setFRecepcio] = useState("");
   const [errorLocal, setErrorLocal] = useState("");
 
   const mutation = useMutation({
-    mutationFn: () => formatoServillaApi.generar(orden.trim(), fRecepcio.trim()).then((r) => r.data),
+    mutationFn: () => formatoServillaApi.generar(orden.trim()).then((r) => r.data),
   });
 
   function handleGenerar() {
     setErrorLocal("");
     if (!/^\d+$/.test(orden.trim())) return setErrorLocal("Ingresa un número de orden válido");
-    if (!fechaValida(fRecepcio.trim())) return setErrorLocal("F_recepcio debe ser una fecha válida en formato AAAAMMDD");
     mutation.mutate();
   }
 
@@ -91,9 +85,9 @@ export function FormatoServillaCard() {
       </h2>
       <p className="text-xs text-gray-500 mb-3">
         Genera el Excel de gestión de la orden con todos los courriers menos PRINDEL y LECTA. La causal sale del
-        motivo en bases_web y F_GESTION es F_recepcio más 2 a 6 días al azar.
+        motivo en bases_web, F_recepcio es el f_emi del serial y F_GESTION es F_recepcio más 2 a 6 días al azar.
       </p>
-      <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-end">
+      <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3 items-end">
         <label className="block">
           <span className="text-xs font-medium text-gray-700">Número de orden</span>
           <input
@@ -105,19 +99,6 @@ export function FormatoServillaCard() {
             inputMode="numeric"
             placeholder="Ej: 123791"
             className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
-          />
-        </label>
-        <label className="block">
-          <span className="text-xs font-medium text-gray-700">F_recepcio (AAAAMMDD)</span>
-          <input
-            value={fRecepcio}
-            onChange={(e) => {
-              setFRecepcio(e.target.value.replace(/\D/g, "").slice(0, 8));
-              mutation.reset();
-            }}
-            inputMode="numeric"
-            placeholder="Ej: 20260803"
-            className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-primary outline-none"
           />
         </label>
         <button

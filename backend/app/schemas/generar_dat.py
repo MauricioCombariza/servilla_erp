@@ -22,17 +22,17 @@ class GenerarDatResult(BaseModel):
     duplicados_en_excel: list[str]
 
 
-class SerialSinCausal(BaseModel):
+class SerialPorRevisar(BaseModel):
     serial: str
     courrier: str
     motivo: str
+    falta: str
 
 
 class FormatoServillaResult(BaseModel):
     orden: str
-    f_recepcio: str
     filas: int
     excluidos: int
     nombre: str
     excel_base64: str
-    sin_causal: list[SerialSinCausal]
+    por_revisar: list[SerialPorRevisar]

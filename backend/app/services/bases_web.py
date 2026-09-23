@@ -211,7 +211,7 @@ def _fetch_histo_orden_sync(orden: str) -> list[dict]:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT identdes, oficina, nombred, dir_pred, barrd1, ciudad1, dpto1, "
-                "serial, courrier, orden, retorno, ret_esc, motivo, cod_sec "
+                "serial, courrier, orden, retorno, ret_esc, motivo, cod_sec, f_emi "
                 "FROM histo WHERE orden = %s",
                 (orden,),
             )
