@@ -20,3 +20,19 @@ class GenerarDatResult(BaseModel):
     errores_base64: str | None = None
     no_encontrados_en_orden: list[str]
     duplicados_en_excel: list[str]
+
+
+class SerialSinCausal(BaseModel):
+    serial: str
+    courrier: str
+    motivo: str
+
+
+class FormatoServillaResult(BaseModel):
+    orden: str
+    f_recepcio: str
+    filas: int
+    excluidos: int
+    nombre: str
+    excel_base64: str
+    sin_causal: list[SerialSinCausal]

@@ -6,9 +6,15 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 
 from app.auth.dependencies import require_page
-from app.schemas.generar_dat import GenerarDatResult, SerialError
+from app.schemas.generar_dat import (
+    FormatoServillaResult,
+    GenerarDatResult,
+    SerialError,
+    SerialSinCausal,
+)
 from app.services.bases_web import fetch_histo_orden
 from app.services.excel_utils import XLSX_MEDIA_TYPE
+from app.services.formato_servilla_service import generar_formato_servilla
 from app.services.generar_dat_service import (
     TIPOS_INFORME,
     construir_excel_errores,
@@ -25,7 +31,22 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_ARCHIVOS = 5
 
 
-def _normalizar_fecha(fecha: str) -> str:
+def _validar_orden(orden: str) -> str:
+    orden = orden.strip()
+    if not re.fullmatch(r"\d{1,10}", orden):
+        raise HTTPException(status_code=400, detail="Número de orden inválido")
+    return orden
+
+
+async def _consultar_orden(orden: str) -> list[dict]:
+    try:
+        return await fetch_histo_orden(orden)
+    except Exception as exc:
+        logger.error("Error consultando la orden %s en bases_web.histo: %s", orden, exc)
+        raise HTTPException(status_code=502, detail="No se pudo consultar bases_web")
+
+
+def _normalizar_fecha(fecha: str, nombre: str = "Fecha inicial") -> str:
     """Acepta AAAA-MM-DD (input date) o AAAAMMDD y devuelve AAAAMMDD."""
     fecha = fecha.strip()
     for fmt in ("%Y-%m-%d", "%Y%m%d"):
@@ -33,7 +54,7 @@ def _normalizar_fecha(fecha: str) -> str:
             return datetime.strptime(fecha, fmt).strftime("%Y%m%d")
         except ValueError:
             continue
-    raise HTTPException(status_code=400, detail="Fecha inicial inválida (use AAAA-MM-DD)")
+    raise HTTPException(status_code=400, detail=f"{nombre} inválida (use AAAA-MM-DD)")
 
 
 @router.get("/formato")
@@ -45,6 +66,31 @@ async def descargar_formato(_=_auth):
     )
 
 
+@router.post("/formato-servilla", response_model=FormatoServillaResult)
+async def formato_servilla(
+    orden: str = Form(...),
+    f_recepcio: str = Form(...),
+    _=_auth,
+):
+    orden = _validar_orden(orden)
+    fecha = _normalizar_fecha(f_recepcio, "F_recepcio")
+    filas_histo = await _consultar_orden(orden)
+    try:
+        resultado = generar_formato_servilla(orden, fecha, filas_histo)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return FormatoServillaResult(
+        orden=orden,
+        f_recepcio=fecha,
+        filas=resultado.filas,
+        excluidos=resultado.excluidos,
+        nombre=resultado.nombre,
+        excel_base64=base64.b64encode(resultado.contenido).decode(),
+        sin_causal=[SerialSinCausal(**s) for s in resultado.sin_causal],
+    )
+
+
 @router.post("", response_model=GenerarDatResult)
 async def generar(
     orden: str = Form(...),
@@ -53,9 +99,7 @@ async def generar(
     files: list[UploadFile] = File(...),
     _=_auth,
 ):
-    orden = orden.strip()
-    if not re.fullmatch(r"\d{1,10}", orden):
-        raise HTTPException(status_code=400, detail="Número de orden inválido")
+    orden = _validar_orden(orden)
     fecha = _normalizar_fecha(fecha_ini)
     tipo = tipo.strip().lower()
     if tipo not in TIPOS_INFORME:
@@ -79,11 +123,7 @@ async def generar(
             )
         archivos.append((nombre, contenido))
 
-    try:
-        filas_histo = await fetch_histo_orden(orden)
-    except Exception as exc:
-        logger.error("Error consultando la orden %s en bases_web.histo: %s", orden, exc)
-        raise HTTPException(status_code=502, detail="No se pudo consultar bases_web")
+    filas_histo = await _consultar_orden(orden)
 
     try:
         resultado = generar_dat(orden, fecha, archivos, filas_histo, tipo)

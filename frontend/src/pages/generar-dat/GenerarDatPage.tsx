@@ -2,23 +2,14 @@ import { useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { AlertCircle, AlertTriangle, Download, FileCog, FileSpreadsheet, FileText, Upload, X } from "lucide-react";
 import { generarDatApi, type GenerarDatResult, type TipoInforme } from "@/api/generarDat";
+import { descargarBase64, XLSX_MIME } from "./descargas";
+import { FormatoServillaCard } from "./FormatoServillaCard";
 
 const MAX_ARCHIVOS = 5;
 const TIPOS: { value: TipoInforme; label: string; descripcion: string }[] = [
   { value: "centralizado", label: "Centralizado", descripcion: "Registro completo (375 caracteres)" },
   { value: "terceros", label: "Terceros", descripcion: "Solo de fecha inicial a F_GESTION" },
 ];
-const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-
-function descargarBase64(base64: string, nombre: string, mime: string) {
-  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = nombre;
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
 function Resumen({ data }: { data: GenerarDatResult }) {
   return (
@@ -178,7 +169,10 @@ export function GenerarDatPage() {
         </div>
       </div>
 
+      <FormatoServillaCard />
+
       <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
+        <h2 className="text-sm font-semibold text-gray-900 mb-3">Generar .dat</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           <label className="block">
             <span className="text-xs font-medium text-gray-700">Número de orden</span>
