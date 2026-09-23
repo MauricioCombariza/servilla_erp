@@ -103,3 +103,23 @@ def test_terceros_solo_bloque_de_gestion():
 def test_tipo_invalido():
     with pytest.raises(ValueError, match="Tipo de informe"):
         generar_dat("123791", "20260731", [("a.xlsx", EXCEL_1)], HISTO, tipo="otro")
+
+
+def test_formato_excel_es_aceptado_por_el_lector():
+    from openpyxl import load_workbook
+
+    from app.services.generar_dat_service import COLUMNAS_EXCEL, construir_formato_excel
+
+    contenido = construir_formato_excel()
+    ws = load_workbook(io.BytesIO(contenido)).active
+    assert [c.value for c in ws[1]] == COLUMNAS_EXCEL
+    assert ws["C2"].number_format == "@"
+
+    # Diligenciado con texto, el lector conserva los ceros a la izquierda
+    ws["A2"], ws["B2"], ws["C2"], ws["D2"], ws["E2"], ws["F2"] = (
+        "1672696003", "ENT", "00", "20260803", "150018205327", "20260806"
+    )
+    buffer = io.BytesIO()
+    ws.parent.save(buffer)
+    r = generar_dat("123791", "20260731", [("formato.xlsx", buffer.getvalue())], HISTO, "terceros")
+    assert r.contenido_dat.decode("latin-1").split("\n")[1] == "20260731ENT002026080300015001820532720260806"

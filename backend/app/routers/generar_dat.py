@@ -3,12 +3,18 @@ import logging
 import re
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 
 from app.auth.dependencies import require_page
 from app.schemas.generar_dat import GenerarDatResult, SerialError
 from app.services.bases_web import fetch_histo_orden
-from app.services.generar_dat_service import TIPOS_INFORME, construir_excel_errores, generar_dat
+from app.services.excel_utils import XLSX_MEDIA_TYPE
+from app.services.generar_dat_service import (
+    TIPOS_INFORME,
+    construir_excel_errores,
+    construir_formato_excel,
+    generar_dat,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +34,15 @@ def _normalizar_fecha(fecha: str) -> str:
         except ValueError:
             continue
     raise HTTPException(status_code=400, detail="Fecha inicial inválida (use AAAA-MM-DD)")
+
+
+@router.get("/formato")
+async def descargar_formato(_=_auth):
+    return Response(
+        content=construir_formato_excel(),
+        media_type=XLSX_MEDIA_TYPE,
+        headers={"Content-Disposition": 'attachment; filename="formato_generar_dat.xlsx"'},
+    )
 
 
 @router.post("", response_model=GenerarDatResult)

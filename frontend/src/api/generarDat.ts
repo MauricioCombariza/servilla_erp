@@ -24,6 +24,8 @@ export interface GenerarDatResult {
 }
 
 export const generarDatApi = {
+  descargarFormato: () => api.get("/generar-dat/formato", { responseType: "blob" }),
+
   generar: (orden: string, fechaIni: string, tipo: TipoInforme, files: File[]) => {
     const form = new FormData();
     form.append("orden", orden);

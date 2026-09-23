@@ -12,6 +12,9 @@ import io
 from dataclasses import dataclass, field
 
 import pandas as pd
+from openpyxl import Workbook
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
 
 from app.services.excel_utils import construir_excel
 
@@ -172,3 +175,24 @@ def construir_excel_errores(orden: str, errores: list[dict]) -> bytes:
         errores,
         [20, 30],
     )
+
+
+def construir_formato_excel() -> bytes:
+    """Excel vacío con los encabezados que espera leer_excels, en la fila 1.
+    Columnas en formato texto para que Excel no quite ceros a la izquierda
+    (Causal_Dev '00', guías) ni pase los seriales a notación científica."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Gestion"
+    for col, nombre in enumerate(COLUMNAS_EXCEL, start=1):
+        c = ws.cell(row=1, column=col, value=nombre)
+        c.font = Font(bold=True)
+        letra = get_column_letter(col)
+        ws.column_dimensions[letra].width = 18
+        for fila in range(2, 5001):
+            ws.cell(row=fila, column=col).number_format = "@"
+    ws.freeze_panes = "A2"
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()

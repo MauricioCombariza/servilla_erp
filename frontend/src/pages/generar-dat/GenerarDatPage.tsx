@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { AlertCircle, AlertTriangle, Download, FileCog, FileText, Upload, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, Download, FileCog, FileSpreadsheet, FileText, Upload, X } from "lucide-react";
 import { generarDatApi, type GenerarDatResult, type TipoInforme } from "@/api/generarDat";
 
 const MAX_ARCHIVOS = 5;
@@ -129,6 +129,18 @@ export function GenerarDatPage() {
     mutationFn: () => generarDatApi.generar(orden.trim(), fechaIni, tipo, files).then((r) => r.data),
   });
 
+  const formatoMutation = useMutation({
+    mutationFn: async () => {
+      const r = await generarDatApi.descargarFormato();
+      const url = URL.createObjectURL(r.data as Blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "formato_generar_dat.xlsx";
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+  });
+
   function agregarArchivos(nuevos: FileList | null) {
     if (!nuevos) return;
     const xlsx = Array.from(nuevos).filter((f) => f.name.toLowerCase().endsWith(".xlsx"));
@@ -214,10 +226,24 @@ export function GenerarDatPage() {
           </div>
         </div>
 
-        <p className="text-xs text-gray-500 mb-2">
-          Excel de gestión (.xlsx, hasta {MAX_ARCHIVOS}) con las columnas{" "}
-          <code className="bg-gray-100 px-1 rounded">serial, Estado, Causal_Dev, F_recepcio, guias, F_GESTION</code>
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <p className="text-xs text-gray-500">
+            Excel de gestión (.xlsx, hasta {MAX_ARCHIVOS}) con las columnas{" "}
+            <code className="bg-gray-100 px-1 rounded">serial, Estado, Causal_Dev, F_recepcio, guias, F_GESTION</code>
+          </p>
+          <button
+            type="button"
+            onClick={() => formatoMutation.mutate()}
+            disabled={formatoMutation.isPending}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-primary border border-primary rounded-lg px-3 py-1.5 hover:bg-blue-50 transition-colors disabled:opacity-60"
+          >
+            <FileSpreadsheet size={14} />
+            {formatoMutation.isPending ? "Descargando..." : "Descargar formato Excel"}
+          </button>
+        </div>
+        {formatoMutation.isError && (
+          <p className="text-xs text-red-600 mb-2">No se pudo descargar el formato</p>
+        )}
         <div
           onClick={() => inputRef.current?.click()}
           onDragOver={(e) => e.preventDefault()}
