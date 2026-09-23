@@ -194,6 +194,34 @@ async def buscar_histo_serial_exacto(serial: str) -> dict | None:
     return await asyncio.to_thread(_buscar_histo_serial_exacto_sync, serial)
 
 
+def _fetch_histo_orden_sync(orden: str) -> list[dict]:
+    """Filas de una orden para el .dat de BCS. A diferencia de las búsquedas,
+    propaga los errores de conexión: una orden vacía por fallo de red generaría
+    un .dat incompleto sin avisar."""
+    dsn = _parse_dsn()
+    if not dsn:
+        raise RuntimeError("bases_web_url no configurado")
+    conn = pymysql.connect(
+        **dsn,
+        cursorclass=pymysql.cursors.DictCursor,
+        connect_timeout=5,
+        read_timeout=60,
+    )
+    with conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT identdes, oficina, nombred, dir_pred, barrd1, ciudad1, dpto1, "
+                "serial, courrier, orden "
+                "FROM histo WHERE orden = %s",
+                (orden,),
+            )
+            return cur.fetchall()
+
+
+async def fetch_histo_orden(orden: str) -> list[dict]:
+    return await asyncio.to_thread(_fetch_histo_orden_sync, orden)
+
+
 async def buscar_histo(termino: str, modo: str) -> list[dict]:
     if modo == "serial":
         return await asyncio.to_thread(_buscar_histo_serial_sync, termino)

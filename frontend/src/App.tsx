@@ -34,6 +34,7 @@ import { EscaneoCarrytPage } from "@/pages/carryt/EscaneoCarrytPage";
 import { EscaneoOffloadPage } from "@/pages/imile/EscaneoOffloadPage";
 import { UsuariosRolesPage } from "@/pages/admin/UsuariosRolesPage";
 import { GeocercasPage } from "@/pages/geocercas/GeocercasPage";
+import { GenerarDatPage } from "@/pages/generar-dat/GenerarDatPage";
 import { Placeholder } from "@/pages/Placeholder";
 
 const qc = new QueryClient({
@@ -129,6 +130,7 @@ export default function App() {
             <Route path="/pendientes-entrega" element={<PageGuard pageKey="pendientes_entrega"><PendientesEntregaPage /></PageGuard>} />
             <Route path="/devoluciones" element={<PageGuard pageKey="devoluciones"><DevolucionesPage /></PageGuard>} />
             <Route path="/geocercas" element={<PageGuard pageKey="geocercas"><GeocercasPage /></PageGuard>} />
+            <Route path="/generar-dat" element={<PageGuard pageKey="generar_dat"><GenerarDatPage /></PageGuard>} />
             <Route path="/admin/usuarios-roles" element={<AdminOnlyRoute><UsuariosRolesPage /></AdminOnlyRoute>} />
           </Route>
         </Routes>
