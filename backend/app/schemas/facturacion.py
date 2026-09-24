@@ -73,12 +73,16 @@ class FacturaEmitidaCreate(BaseModel):
 
 
 class FacturaEmitidaUpdate(BaseModel):
+    # saldo_pendiente y estado no se editan: se recalculan a partir de total y pagos
+    numero_factura: str | None = Field(default=None, min_length=1)
+    fecha_emision: date | None = None
     fecha_vencimiento: date | None = None
-    subtotal: float | None = None
-    descuento: float | None = None
-    total: float | None = None
-    saldo_pendiente: float | None = None
-    estado: str | None = None
+    periodo_mes: int | None = Field(default=None, ge=1, le=12)
+    periodo_anio: int | None = Field(default=None, ge=2020, le=2030)
+    cantidad_items: int | None = Field(default=None, ge=0)
+    subtotal: float | None = Field(default=None, ge=0)
+    descuento: float | None = Field(default=None, ge=0)
+    total: float | None = Field(default=None, ge=0)
     observaciones: str | None = None
 
 

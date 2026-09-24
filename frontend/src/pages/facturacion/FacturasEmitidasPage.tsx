@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Plus, Pencil, Ban, DollarSign, Eye } from "lucide-react";
+import { Plus, Pencil, Ban, DollarSign } from "lucide-react";
 import { facturacionApi, type FacturaEmitida } from "@/api/facturacion";
 import { clientesApi } from "@/api/clientes";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
@@ -18,6 +18,7 @@ const ESTADO_STYLE: Record<string, string> = {
 export function FacturasEmitidasPage() {
   const qc = useQueryClient();
   const [showForm, setShowForm] = useState(false);
+  const [editando, setEditando] = useState<FacturaEmitida | null>(null);
   const [showPago, setShowPago] = useState<FacturaEmitida | null>(null);
   const [clienteFiltro, setClienteFiltro] = useState("");
   const [estadoFiltro, setEstadoFiltro] = useState("");
@@ -133,6 +134,14 @@ export function FacturasEmitidasPage() {
                       )}
                       {f.estado !== "anulada" && (
                         <button
+                          onClick={() => setEditando(f)}
+                          className="text-gray-400 hover:text-blue-600 transition-colors" title="Editar"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                      )}
+                      {f.estado !== "anulada" && (
+                        <button
                           onClick={() => { if (confirm(`¿Anular factura ${f.numero_factura}?`)) anular.mutate(f.id); }}
                           className="text-gray-400 hover:text-red-500 transition-colors" title="Anular"
                         >
@@ -159,6 +168,19 @@ export function FacturasEmitidasPage() {
             qc.invalidateQueries({ queryKey: ["facturas-emitidas"] });
             qc.invalidateQueries({ queryKey: ["facturacion-resumen"] });
             setShowForm(false);
+          }}
+        />
+      )}
+
+      {editando && (
+        <FacturaEmitidaForm
+          clientes={clientes}
+          factura={editando}
+          onClose={() => setEditando(null)}
+          onSaved={() => {
+            qc.invalidateQueries({ queryKey: ["facturas-emitidas"] });
+            qc.invalidateQueries({ queryKey: ["facturacion-resumen"] });
+            setEditando(null);
           }}
         />
       )}

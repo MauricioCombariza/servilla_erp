@@ -199,6 +199,82 @@ async def test_anular_factura(client, headers, setup):
     r = await client.get(f"/api/facturacion/emitidas/{fid}", headers=headers)
     assert r.json()["estado"] == "anulada"
 
+    r = await client.put(f"/api/facturacion/emitidas/{fid}", json={"observaciones": "x"}, headers=headers)
+    assert r.status_code == 409
+
+
+async def _crear_emitida(client, headers, cid, numero, total):
+    r = await client.post("/api/facturacion/emitidas", json={
+        "numero_factura": numero,
+        "cliente_id": cid,
+        "fecha_emision": "2026-06-01",
+        "fecha_vencimiento": "2026-07-01",
+        "periodo_mes": 6, "periodo_anio": 2026,
+        "cantidad_items": 10,
+        "subtotal": total, "total": total,
+    }, headers=headers)
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+@pytest.mark.asyncio
+async def test_editar_factura_campos_basicos(client, headers, setup):
+    cid, _ = setup
+    fid = await _crear_emitida(client, headers, cid, "FAC-TEST-EDIT", 100000)
+
+    r = await client.put(f"/api/facturacion/emitidas/{fid}", json={
+        "fecha_vencimiento": "2026-08-15",
+        "periodo_mes": 7,
+        "observaciones": "corregida",
+    }, headers=headers)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["fecha_vencimiento"] == "2026-08-15"
+    assert data["periodo_mes"] == 7
+    assert data["observaciones"] == "corregida"
+    assert data["estado"] == "pendiente"
+    assert float(data["saldo_pendiente"]) == 100000.0
+
+
+@pytest.mark.asyncio
+async def test_editar_total_recalcula_saldo(client, headers, setup):
+    cid, _ = setup
+    fid = await _crear_emitida(client, headers, cid, "FAC-TEST-EDIT-SALDO", 500000)
+    r = await client.post(f"/api/facturacion/emitidas/{fid}/pagos", json={
+        "fecha_pago": "2026-06-15", "monto": 200000, "metodo_pago": "efectivo",
+    }, headers=headers)
+    assert r.status_code == 201
+
+    r = await client.put(f"/api/facturacion/emitidas/{fid}", json={
+        "subtotal": 300000, "total": 300000,
+    }, headers=headers)
+    assert r.status_code == 200, r.text
+    assert float(r.json()["saldo_pendiente"]) == 100000.0
+    assert r.json()["estado"] == "parcial"
+
+    r = await client.put(f"/api/facturacion/emitidas/{fid}", json={
+        "subtotal": 200000, "total": 200000,
+    }, headers=headers)
+    assert float(r.json()["saldo_pendiente"]) == 0.0
+    assert r.json()["estado"] == "pagada"
+
+
+@pytest.mark.asyncio
+async def test_editar_numero_duplicado_rechazado(client, headers, setup):
+    cid, _ = setup
+    await _crear_emitida(client, headers, cid, "FAC-TEST-DUP-A", 1000)
+    fid_b = await _crear_emitida(client, headers, cid, "FAC-TEST-DUP-B", 1000)
+
+    r = await client.put(f"/api/facturacion/emitidas/{fid_b}", json={
+        "numero_factura": "FAC-TEST-DUP-A",
+    }, headers=headers)
+    assert r.status_code == 409
+
+    r = await client.put(f"/api/facturacion/emitidas/{fid_b}", json={
+        "descuento": 5000,
+    }, headers=headers)
+    assert r.status_code == 409
+
 
 # ── Facturas recibidas ─────────────────────────────────────────────────────────
 

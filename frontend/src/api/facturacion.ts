@@ -41,6 +41,10 @@ export interface FacturaEmitida {
   pagos: Pago[];
 }
 
+export type FacturaEmitidaUpdate = Partial<Pick<FacturaEmitida,
+  "numero_factura" | "fecha_emision" | "fecha_vencimiento" | "periodo_mes" | "periodo_anio" |
+  "cantidad_items" | "subtotal" | "descuento" | "total" | "observaciones">>;
+
 export interface FacturaRecibida {
   id: number;
   numero_factura: string;
@@ -98,7 +102,7 @@ export const facturacionApi = {
   getEmitida: (id: number) => api.get<FacturaEmitida>(`/facturacion/emitidas/${id}`),
   createEmitida: (data: Partial<FacturaEmitida> & { ordenes_ids?: number[] }) =>
     api.post<FacturaEmitida>("/facturacion/emitidas", data),
-  updateEmitida: (id: number, data: Partial<FacturaEmitida>) =>
+  updateEmitida: (id: number, data: FacturaEmitidaUpdate) =>
     api.put<FacturaEmitida>(`/facturacion/emitidas/${id}`, data),
   anularEmitida: (id: number) => api.delete(`/facturacion/emitidas/${id}`),
   registrarPagoEmitida: (id: number, pago: Omit<Pago, "id" | "factura_id" | "fecha_creacion">) =>

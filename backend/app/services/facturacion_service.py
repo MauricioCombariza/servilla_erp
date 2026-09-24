@@ -24,6 +24,7 @@ from app.models.facturacion import (
 )
 from app.schemas.facturacion import (
     FacturaEmitidaCreate,
+    FacturaEmitidaUpdate,
     FacturaRecibidaCreate,
     PagoCreate,
     ResumenFinanciero,
@@ -136,6 +137,52 @@ async def registrar_pago_recibido(
     await db.refresh(factura)
     await db.refresh(pago)
     return pago, factura
+
+
+async def actualizar_factura_emitida(
+    factura: FacturaEmitida, body: FacturaEmitidaUpdate, db: AsyncSession
+) -> FacturaEmitida:
+    """Edita la factura y recalcula saldo_pendiente + estado contra los pagos ya registrados."""
+    cambios = body.model_dump(exclude_unset=True)
+    # Campos no-nulos en BD: un null explícito se ignora
+    cambios = {k: v for k, v in cambios.items() if v is not None or k == "observaciones"}
+
+    nuevo_numero = cambios.get("numero_factura")
+    if nuevo_numero and nuevo_numero != factura.numero_factura:
+        existe = (
+            await db.execute(
+                select(FacturaEmitida.id).where(
+                    FacturaEmitida.numero_factura == nuevo_numero,
+                    FacturaEmitida.id != factura.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if existe:
+            raise ValueError(f"Ya existe una factura con número {nuevo_numero}")
+
+    subtotal = float(cambios.get("subtotal", factura.subtotal))
+    descuento = float(cambios.get("descuento", factura.descuento or 0))
+    if descuento > subtotal:
+        raise ValueError("El descuento no puede ser mayor que el subtotal")
+
+    for field, val in cambios.items():
+        setattr(factura, field, val)
+
+    pagado = sum(float(p.monto) for p in factura.pagos)
+    saldo = max(float(factura.total) - pagado, 0)
+    factura.saldo_pendiente = saldo
+    if saldo <= 0:
+        factura.estado = "pagada"
+    elif pagado > 0:
+        factura.estado = "parcial"
+    elif factura.estado == "vencida" and factura.fecha_vencimiento < date.today():
+        factura.estado = "vencida"
+    else:
+        factura.estado = "pendiente"
+
+    await db.commit()
+    await db.refresh(factura)
+    return factura
 
 
 async def anular_factura_emitida(factura: FacturaEmitida, db: AsyncSession) -> None:

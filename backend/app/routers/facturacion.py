@@ -19,6 +19,7 @@ from app.schemas.facturacion import (
     ResumenFinanciero,
 )
 from app.services.facturacion_service import (
+    actualizar_factura_emitida,
     anular_factura_emitida,
     crear_factura_emitida,
     crear_factura_recibida,
@@ -139,11 +140,10 @@ async def update_emitida(
         raise HTTPException(404, "Factura no encontrada")
     if f.estado == "anulada":
         raise HTTPException(409, "No se puede editar una factura anulada")
-    for field, val in body.model_dump(exclude_none=True).items():
-        setattr(f, field, val)
-    await db.commit()
-    await db.refresh(f)
-    return f
+    try:
+        return await actualizar_factura_emitida(f, body, db)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 @router.delete("/emitidas/{factura_id}", status_code=204)
