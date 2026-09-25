@@ -15,7 +15,7 @@ function Resumen({ data }: { data: GenerarDatResult }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
       <h2 className="text-sm font-semibold text-gray-900 mb-4">
-        Orden {data.orden} — fecha inicial {data.fecha_ini} — {data.tipo === "terceros" ? "Terceros" : "Centralizado"}
+        Orden {data.orden} — informe {data.informe} — fecha inicial {data.fecha_ini} — {data.tipo === "terceros" ? "Terceros" : "Centralizado"}
       </h2>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-5">
         <Stat label="Registros en el .dat" value={data.registros} />
@@ -112,12 +112,13 @@ export function GenerarDatPage() {
   const [orden, setOrden] = useState("");
   const [fechaIni, setFechaIni] = useState("");
   const [tipo, setTipo] = useState<TipoInforme>("centralizado");
+  const [informe, setInforme] = useState("CON");
   const [files, setFiles] = useState<File[]>([]);
   const [errorLocal, setErrorLocal] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const mutation = useMutation({
-    mutationFn: () => generarDatApi.generar(orden.trim(), fechaIni, tipo, files).then((r) => r.data),
+    mutationFn: () => generarDatApi.generar(orden.trim(), fechaIni, tipo, informe, files).then((r) => r.data),
   });
 
   const formatoMutation = useMutation({
@@ -148,6 +149,7 @@ export function GenerarDatPage() {
     setErrorLocal("");
     if (!/^\d+$/.test(orden.trim())) return setErrorLocal("Ingresa un número de orden válido");
     if (!fechaIni) return setErrorLocal("Selecciona la fecha inicial");
+    if (!/^[A-Z]{3}$/.test(informe)) return setErrorLocal("El nombre del informe debe tener 3 letras");
     if (files.length === 0) return setErrorLocal("Sube al menos un archivo Excel");
     mutation.mutate();
   }
@@ -173,7 +175,7 @@ export function GenerarDatPage() {
 
       <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
         <h2 className="text-sm font-semibold text-gray-900 mb-3">Generar .dat</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
           <label className="block">
             <span className="text-xs font-medium text-gray-700">Número de orden</span>
             <input
@@ -192,6 +194,19 @@ export function GenerarDatPage() {
               onChange={(e) => setFechaIni(e.target.value)}
               className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
             />
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium text-gray-700">Nombre del informe</span>
+            <input
+              value={informe}
+              onChange={(e) => setInforme(e.target.value.toUpperCase().replace(/[^A-Z]/g, ""))}
+              maxLength={3}
+              placeholder="Ej: CON, CLP"
+              className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
+            />
+            <span className="mt-1 block text-xs text-gray-500">
+              Archivo: BCS_{informe || "___"}_EXT_02_AAAAMMDD.dat
+            </span>
           </label>
         </div>
 

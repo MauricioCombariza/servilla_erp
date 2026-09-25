@@ -62,6 +62,20 @@ def test_genera_registros_de_ancho_fijo():
     assert registros[0][294:330] == "DEV0520260806000150018205324" + " " * 8
 
 
+
+def test_nombre_de_informe_en_encabezado_y_archivo():
+    r = generar_dat("123791", "20260731", [("a.xlsx", EXCEL_1)], HISTO, informe="CLP")
+    lineas = r.contenido_dat.decode("latin-1").split("\n")
+
+    assert r.nombre_dat == "BCS_CLP_EXT_02_20260731.dat"
+    assert lineas[0] == "*BCSEXTCLP0220260731".ljust(312)
+
+
+@pytest.mark.parametrize("informe", ["CL", "C1P", "clp", "CLPX"])
+def test_nombre_de_informe_invalido(informe):
+    with pytest.raises(ValueError, match="Nombre de informe"):
+        generar_dat("123791", "20260731", [("a.xlsx", EXCEL_1)], HISTO, informe=informe)
+
 def test_reporta_errores_y_no_encontrados():
     r = generar_dat("123791", "20260731", [("a.xlsx", EXCEL_1), ("b.xlsx", EXCEL_2)], HISTO)
     assert r.errores == [{"serial": "1672693026", "courrier": "LECTA"}]

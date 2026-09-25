@@ -16,6 +16,7 @@ from app.services.bases_web import fetch_histo_orden
 from app.services.excel_utils import XLSX_MEDIA_TYPE
 from app.services.formato_servilla_service import generar_formato_servilla
 from app.services.generar_dat_service import (
+    INFORME_DEFAULT,
     TIPOS_INFORME,
     construir_excel_errores,
     construir_formato_excel,
@@ -93,6 +94,7 @@ async def generar(
     orden: str = Form(...),
     fecha_ini: str = Form(...),
     tipo: str = Form("centralizado"),
+    informe: str = Form(INFORME_DEFAULT),
     files: list[UploadFile] = File(...),
     _=_auth,
 ):
@@ -101,6 +103,9 @@ async def generar(
     tipo = tipo.strip().lower()
     if tipo not in TIPOS_INFORME:
         raise HTTPException(status_code=400, detail="Tipo de informe inválido (centralizado o terceros)")
+    informe = informe.strip().upper()
+    if not re.fullmatch(r"[A-Z]{3}", informe):
+        raise HTTPException(status_code=400, detail="El nombre del informe debe tener 3 letras (p. ej. CON, CLP)")
 
     if not files:
         raise HTTPException(status_code=400, detail="Sube al menos un archivo Excel")
@@ -123,7 +128,7 @@ async def generar(
     filas_histo = await _consultar_orden(orden)
 
     try:
-        resultado = generar_dat(orden, fecha, archivos, filas_histo, tipo)
+        resultado = generar_dat(orden, fecha, archivos, filas_histo, tipo, informe)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -137,6 +142,7 @@ async def generar(
         orden=orden,
         fecha_ini=fecha,
         tipo=tipo,
+        informe=informe,
         registros=resultado.registros,
         seriales_excel=resultado.seriales_excel,
         seriales_orden=resultado.seriales_orden,

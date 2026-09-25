@@ -2,13 +2,14 @@
 Genera el informe .dat de BCS (ancho fijo, latin-1) cruzando los Excel de gestión
 con los registros de la orden en bases_web.histo.
 
-Formato tomado del archivo BCS_CON_EXT_02_<fecha>.dat existente: encabezado de 312
+Formato tomado del archivo BCS_<INFORME>_EXT_02_<fecha>.dat existente (p. ej. CON, CLP): encabezado de 312
 caracteres, registros de 375 (centralizado) o de 44 (terceros: solo el bloque
 de gestión) y pie con el conteo + 'NOC'.
 """
 from __future__ import annotations
 
 import io
+import re
 from dataclasses import dataclass, field
 
 import pandas as pd
@@ -19,6 +20,7 @@ from openpyxl.utils import get_column_letter
 from app.services.excel_utils import construir_excel
 
 TIPO_DOC = "NI"
+INFORME_DEFAULT = "CON"
 MARCA_NOC = "NOC1"
 ANCHO_REGISTRO = 375
 ANCHO_TERCEROS = 44
@@ -130,10 +132,13 @@ def generar_dat(
     archivos: list[tuple[str, bytes]],
     filas_histo: list[dict],
     tipo: str = TIPO_CENTRALIZADO,
+    informe: str = INFORME_DEFAULT,
 ) -> ResultadoDat:
     """Cruza los Excel con histo y arma el contenido del .dat. fecha_ini en AAAAMMDD."""
     if tipo not in TIPOS_INFORME:
         raise ValueError(f"Tipo de informe inválido: {tipo}")
+    if not re.fullmatch(r"[A-Z]{3}", informe):
+        raise ValueError(f"Nombre de informe inválido: {informe} (deben ser 3 letras, p. ej. CON)")
     if not filas_histo:
         raise ValueError(f"La orden {orden} no tiene registros en histo")
 
@@ -144,7 +149,7 @@ def generar_dat(
 
     df = df_excel.merge(df_histo, on="serial", how="inner").sort_values("oficina")
 
-    lineas = [campo(f"*BCSEXTCON02{fecha_ini}", ANCHO_ENCABEZADO)]
+    lineas = [campo(f"*BCSEXT{informe}02{fecha_ini}", ANCHO_ENCABEZADO)]
     lineas += [construir_linea(reg, fecha_ini, tipo) for reg in df.to_dict("records")]
     lineas.append(campo(f"*{str(len(df)).zfill(8)}", ANCHO_ENCABEZADO) + "NOC")
     contenido = ("\n".join(lineas) + "\n").encode("latin-1", errors="replace")
@@ -157,7 +162,7 @@ def generar_dat(
     ]
 
     return ResultadoDat(
-        nombre_dat=f"BCS_CON_EXT_02_{fecha_ini}.dat",
+        nombre_dat=f"BCS_{informe}_EXT_02_{fecha_ini}.dat",
         contenido_dat=contenido,
         registros=len(df),
         seriales_excel=len(df_excel),
