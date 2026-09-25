@@ -4,6 +4,7 @@ import { AlertCircle, AlertTriangle, Download, FileCog, FileSpreadsheet, FileTex
 import { generarDatApi, type GenerarDatResult, type TipoInforme } from "@/api/generarDat";
 import { descargarBase64, XLSX_MIME } from "./descargas";
 import { FormatoServillaCard } from "./FormatoServillaCard";
+import { InformeGlobalTab } from "./InformeGlobalTab";
 
 const MAX_ARCHIVOS = 5;
 const TIPOS: { value: TipoInforme; label: string; descripcion: string }[] = [
@@ -108,7 +109,10 @@ function Aviso({ titulo, seriales }: { titulo: string; seriales: string[] }) {
   );
 }
 
+type Tab = "dat" | "global";
+
 export function GenerarDatPage() {
+  const [tab, setTab] = useState<Tab>("dat");
   const [orden, setOrden] = useState("");
   const [fechaIni, setFechaIni] = useState("");
   const [tipo, setTipo] = useState<TipoInforme>("centralizado");
@@ -171,164 +175,187 @@ export function GenerarDatPage() {
         </div>
       </div>
 
-      <FormatoServillaCard />
-
-      <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
-        <h2 className="text-sm font-semibold text-gray-900 mb-3">Generar .dat</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-          <label className="block">
-            <span className="text-xs font-medium text-gray-700">Número de orden</span>
-            <input
-              value={orden}
-              onChange={(e) => setOrden(e.target.value)}
-              inputMode="numeric"
-              placeholder="Ej: 123791"
-              className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
-            />
-          </label>
-          <label className="block">
-            <span className="text-xs font-medium text-gray-700">Fecha inicial</span>
-            <input
-              type="date"
-              value={fechaIni}
-              onChange={(e) => setFechaIni(e.target.value)}
-              className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
-            />
-          </label>
-          <label className="block">
-            <span className="text-xs font-medium text-gray-700">Nombre del informe</span>
-            <input
-              value={informe}
-              onChange={(e) => setInforme(e.target.value.toUpperCase().replace(/[^A-Z]/g, ""))}
-              maxLength={3}
-              placeholder="Ej: CON, CLP"
-              className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
-            />
-            <span className="mt-1 block text-xs text-gray-500">
-              Archivo: BCS_{informe || "___"}_EXT_02_AAAAMMDD.dat
-            </span>
-          </label>
-        </div>
-
-        <div className="mb-4">
-          <span className="text-xs font-medium text-gray-700">Tipo de informe</span>
-          <div className="mt-1 grid grid-cols-2 gap-2">
-            {TIPOS.map((t) => (
-              <button
-                key={t.value}
-                type="button"
-                onClick={() => {
-                  setTipo(t.value);
-                  mutation.reset();
-                }}
-                aria-pressed={tipo === t.value}
-                className={`text-left border rounded-lg px-3 py-2 transition-colors ${
-                  tipo === t.value
-                    ? "border-primary bg-blue-50 ring-2 ring-primary"
-                    : "border-gray-300 hover:border-primary"
-                }`}
-              >
-                <p className="text-sm font-medium text-gray-900">{t.label}</p>
-                <p className="text-xs text-gray-500">{t.descripcion}</p>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-          <p className="text-xs text-gray-500">
-            Excel de gestión (.xlsx, hasta {MAX_ARCHIVOS}) con las columnas{" "}
-            <code className="bg-gray-100 px-1 rounded">serial, Estado, Causal_Dev, F_recepcio, guias, F_GESTION</code>
-          </p>
+      <div className="flex border-b border-gray-200 mb-4">
+        {([
+          ["dat", "Generar .dat"],
+          ["global", "Informe global"],
+        ] as const).map(([valor, etiqueta]) => (
           <button
-            type="button"
-            onClick={() => formatoMutation.mutate()}
-            disabled={formatoMutation.isPending}
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-primary border border-primary rounded-lg px-3 py-1.5 hover:bg-blue-50 transition-colors disabled:opacity-60"
+            key={valor}
+            onClick={() => setTab(valor)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              tab === valor ? "border-primary text-primary" : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}
           >
-            <FileSpreadsheet size={14} />
-            {formatoMutation.isPending ? "Descargando..." : "Descargar formato Excel"}
+            {etiqueta}
           </button>
-        </div>
-        {formatoMutation.isError && (
-          <p className="text-xs text-red-600 mb-2">No se pudo descargar el formato</p>
-        )}
-        <div
-          onClick={() => inputRef.current?.click()}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            agregarArchivos(e.dataTransfer.files);
-          }}
-          className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center cursor-pointer hover:border-primary hover:bg-blue-50 transition-colors"
-        >
-          <input
-            ref={inputRef}
-            type="file"
-            accept=".xlsx"
-            multiple
-            className="hidden"
-            onChange={(e) => agregarArchivos(e.target.files)}
-          />
-          <div className="flex flex-col items-center gap-1.5">
-            <Upload size={24} className="text-gray-400" />
-            <p className="text-sm text-gray-700">Arrastra los archivos aquí o haz clic para seleccionar</p>
-            <p className="text-xs text-gray-400">Puedes subir 2 o 3 archivos a la vez</p>
-          </div>
-        </div>
-
-        {files.length > 0 && (
-          <ul className="mt-3 space-y-1.5">
-            {files.map((f) => (
-              <li key={f.name} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
-                <span className="flex items-center gap-2 text-sm text-gray-800">
-                  <FileText size={16} className="text-primary" />
-                  {f.name}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFiles((prev) => prev.filter((x) => x.name !== f.name));
-                    mutation.reset();
-                  }}
-                  className="text-gray-400 hover:text-red-500"
-                  aria-label={`Quitar ${f.name}`}
-                >
-                  <X size={16} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <button
-          type="button"
-          onClick={handleGenerar}
-          disabled={mutation.isPending}
-          className="mt-4 w-full bg-primary hover:bg-primary-hover text-white font-medium py-2.5 rounded-xl text-sm transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
-        >
-          {mutation.isPending ? (
-            <>
-              <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-              Generando...
-            </>
-          ) : (
-            <>
-              <FileCog size={16} />
-              Generar .dat
-            </>
-          )}
-        </button>
-
-        {(errorLocal || errorApi) && (
-          <div className="mt-3 bg-red-50 border border-red-200 rounded-xl p-3 flex items-start gap-2">
-            <AlertCircle size={16} className="text-red-500 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-red-700">{errorLocal || errorApi}</p>
-          </div>
-        )}
+        ))}
       </div>
 
-      {mutation.data && <Resumen data={mutation.data} />}
+      {tab === "global" && <InformeGlobalTab />}
+
+      {tab === "dat" && (
+        <>
+          <FormatoServillaCard />
+
+          <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
+            <h2 className="text-sm font-semibold text-gray-900 mb-3">Generar .dat</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+              <label className="block">
+                <span className="text-xs font-medium text-gray-700">Número de orden</span>
+                <input
+                  value={orden}
+                  onChange={(e) => setOrden(e.target.value)}
+                  inputMode="numeric"
+                  placeholder="Ej: 123791"
+                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-gray-700">Fecha inicial</span>
+                <input
+                  type="date"
+                  value={fechaIni}
+                  onChange={(e) => setFechaIni(e.target.value)}
+                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-gray-700">Nombre del informe</span>
+                <input
+                  value={informe}
+                  onChange={(e) => setInforme(e.target.value.toUpperCase().replace(/[^A-Z]/g, ""))}
+                  maxLength={3}
+                  placeholder="Ej: CON, CLP"
+                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
+                />
+                <span className="mt-1 block text-xs text-gray-500">
+                  Archivo: BCS_{informe || "___"}_EXT_02_AAAAMMDD.dat
+                </span>
+              </label>
+            </div>
+
+            <div className="mb-4">
+              <span className="text-xs font-medium text-gray-700">Tipo de informe</span>
+              <div className="mt-1 grid grid-cols-2 gap-2">
+                {TIPOS.map((t) => (
+                  <button
+                    key={t.value}
+                    type="button"
+                    onClick={() => {
+                      setTipo(t.value);
+                      mutation.reset();
+                    }}
+                    aria-pressed={tipo === t.value}
+                    className={`text-left border rounded-lg px-3 py-2 transition-colors ${
+                      tipo === t.value
+                        ? "border-primary bg-blue-50 ring-2 ring-primary"
+                        : "border-gray-300 hover:border-primary"
+                    }`}
+                  >
+                    <p className="text-sm font-medium text-gray-900">{t.label}</p>
+                    <p className="text-xs text-gray-500">{t.descripcion}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <p className="text-xs text-gray-500">
+                Excel de gestión (.xlsx, hasta {MAX_ARCHIVOS}) con las columnas{" "}
+                <code className="bg-gray-100 px-1 rounded">serial, Estado, Causal_Dev, F_recepcio, guias, F_GESTION</code>
+              </p>
+              <button
+                type="button"
+                onClick={() => formatoMutation.mutate()}
+                disabled={formatoMutation.isPending}
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-primary border border-primary rounded-lg px-3 py-1.5 hover:bg-blue-50 transition-colors disabled:opacity-60"
+              >
+                <FileSpreadsheet size={14} />
+                {formatoMutation.isPending ? "Descargando..." : "Descargar formato Excel"}
+              </button>
+            </div>
+            {formatoMutation.isError && (
+              <p className="text-xs text-red-600 mb-2">No se pudo descargar el formato</p>
+            )}
+            <div
+              onClick={() => inputRef.current?.click()}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                agregarArchivos(e.dataTransfer.files);
+              }}
+              className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center cursor-pointer hover:border-primary hover:bg-blue-50 transition-colors"
+            >
+              <input
+                ref={inputRef}
+                type="file"
+                accept=".xlsx"
+                multiple
+                className="hidden"
+                onChange={(e) => agregarArchivos(e.target.files)}
+              />
+              <div className="flex flex-col items-center gap-1.5">
+                <Upload size={24} className="text-gray-400" />
+                <p className="text-sm text-gray-700">Arrastra los archivos aquí o haz clic para seleccionar</p>
+                <p className="text-xs text-gray-400">Puedes subir 2 o 3 archivos a la vez</p>
+              </div>
+            </div>
+
+            {files.length > 0 && (
+              <ul className="mt-3 space-y-1.5">
+                {files.map((f) => (
+                  <li key={f.name} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+                    <span className="flex items-center gap-2 text-sm text-gray-800">
+                      <FileText size={16} className="text-primary" />
+                      {f.name}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFiles((prev) => prev.filter((x) => x.name !== f.name));
+                        mutation.reset();
+                      }}
+                      className="text-gray-400 hover:text-red-500"
+                      aria-label={`Quitar ${f.name}`}
+                    >
+                      <X size={16} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <button
+              type="button"
+              onClick={handleGenerar}
+              disabled={mutation.isPending}
+              className="mt-4 w-full bg-primary hover:bg-primary-hover text-white font-medium py-2.5 rounded-xl text-sm transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+            >
+              {mutation.isPending ? (
+                <>
+                  <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                  Generando...
+                </>
+              ) : (
+                <>
+                  <FileCog size={16} />
+                  Generar .dat
+                </>
+              )}
+            </button>
+
+            {(errorLocal || errorApi) && (
+              <div className="mt-3 bg-red-50 border border-red-200 rounded-xl p-3 flex items-start gap-2">
+                <AlertCircle size={16} className="text-red-500 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-red-700">{errorLocal || errorApi}</p>
+              </div>
+            )}
+          </div>
+
+          {mutation.data && <Resumen data={mutation.data} />}
+        </>
+      )}
     </div>
   );
 }

@@ -65,3 +65,52 @@ export const formatoServillaApi = {
     });
   },
 };
+
+export type TipoInformeGlobal = "centralizado" | "entregas";
+
+export interface ItemInformeGlobalInput {
+  orden: string;
+  nombre: string;
+  tipo: TipoInformeGlobal;
+  file: File;
+}
+
+export interface OperadorInforme {
+  operador: string;
+  enviada: number;
+  entrega: number;
+  devoluciones: number;
+  dev_iniciales: number;
+  nrd: number;
+}
+
+export interface ItemInformeGlobal {
+  nombre_archivo: string;
+  orden: string;
+  nombre: string;
+  tipo: TipoInformeGlobal;
+  registros: number;
+  corte: string;
+  fecha_minima: string;
+  operadores: OperadorInforme[];
+  causales: Record<string, number>;
+  nombre_excel: string;
+  advertencias: string[];
+}
+
+export interface InformeGlobalResult {
+  items: ItemInformeGlobal[];
+  nombre_zip: string;
+  zip_base64: string;
+}
+
+export const informeGlobalApi = {
+  generar: (items: ItemInformeGlobalInput[]) => {
+    const form = new FormData();
+    form.append("items", JSON.stringify(items.map(({ orden, nombre, tipo }) => ({ orden, nombre, tipo }))));
+    items.forEach((it) => form.append("files", it.file));
+    return api.post<InformeGlobalResult>("/generar-dat/informe-global", form, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+  },
+};

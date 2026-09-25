@@ -1,4 +1,5 @@
 import base64
+import json
 import logging
 import re
 from datetime import datetime
@@ -9,6 +10,8 @@ from app.auth.dependencies import require_page
 from app.schemas.generar_dat import (
     FormatoServillaResult,
     GenerarDatResult,
+    InformeGlobalResult,
+    ItemInformeGlobal,
     SerialError,
     SerialPorRevisar,
 )
@@ -22,6 +25,8 @@ from app.services.generar_dat_service import (
     construir_formato_excel,
     generar_dat,
 )
+from app.services.informe_global_service import TIPOS as TIPOS_INFORME_GLOBAL
+from app.services.informe_global_service import ItemInforme, generar_informe_global
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +35,7 @@ _auth = Depends(require_page("generar_dat"))
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_ARCHIVOS = 5
+MAX_DAT = 10
 
 
 def _validar_orden(orden: str) -> str:
@@ -153,4 +159,65 @@ async def generar(
         errores_base64=errores_b64,
         no_encontrados_en_orden=resultado.no_encontrados_en_orden,
         duplicados_en_excel=resultado.duplicados_en_excel,
+    )
+
+
+@router.post("/informe-global", response_model=InformeGlobalResult)
+async def informe_global(
+    items: str = Form(..., description='JSON: [{"orden", "nombre", "tipo"}], en el orden de files'),
+    files: list[UploadFile] = File(...),
+    _=_auth,
+):
+    try:
+        meta = json.loads(items)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="items no es un JSON válido")
+    if not isinstance(meta, list) or not meta:
+        raise HTTPException(status_code=400, detail="Agrega al menos un archivo .dat")
+    if len(meta) != len(files):
+        raise HTTPException(status_code=400, detail="Cada archivo .dat debe tener su orden, nombre y tipo")
+    if len(files) > MAX_DAT:
+        raise HTTPException(status_code=400, detail=f"Máximo {MAX_DAT} archivos .dat")
+
+    lista: list[ItemInforme] = []
+    for m, f in zip(meta, files):
+        nombre_archivo = f.filename or "archivo.dat"
+        if not isinstance(m, dict):
+            raise HTTPException(status_code=400, detail=f"{nombre_archivo}: datos inválidos")
+        if not nombre_archivo.lower().endswith(".dat"):
+            raise HTTPException(status_code=400, detail=f"{nombre_archivo}: solo se aceptan archivos .dat")
+        orden = _validar_orden(str(m.get("orden", "")))
+        nombre = str(m.get("nombre", "")).strip()
+        if not nombre or len(nombre) > 40:
+            raise HTTPException(status_code=400, detail=f"{nombre_archivo}: ingresa el nombre del informe (máx. 40 caracteres)")
+        tipo = str(m.get("tipo", "")).strip().lower()
+        if tipo not in TIPOS_INFORME_GLOBAL:
+            raise HTTPException(status_code=400, detail=f"{nombre_archivo}: tipo inválido (centralizado o entregas)")
+        contenido = await f.read()
+        if len(contenido) > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"{nombre_archivo}: demasiado grande (máximo {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)",
+            )
+        lista.append(ItemInforme(nombre_archivo, contenido, orden, nombre, tipo))
+
+    histo_por_orden = {o: await _consultar_orden(o) for o in dict.fromkeys(it.orden for it in lista)}
+
+    try:
+        resultado = generar_informe_global(lista, histo_por_orden)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return InformeGlobalResult(
+        items=[
+            ItemInformeGlobal(
+                nombre_archivo=r.nombre_archivo, orden=r.orden, nombre=r.nombre, tipo=r.tipo,
+                registros=r.registros, corte=r.corte, fecha_minima=r.fecha_minima,
+                operadores=r.operadores, causales=r.causales, nombre_excel=r.nombre_excel,
+                advertencias=r.advertencias,
+            )
+            for r in resultado.items
+        ],
+        nombre_zip=resultado.nombre_zip,
+        zip_base64=base64.b64encode(resultado.contenido_zip).decode(),
     )
