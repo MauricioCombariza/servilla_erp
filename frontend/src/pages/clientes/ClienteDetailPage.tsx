@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useNavigate } from "react-router-dom";
 import { useState } from "react";
-import { ArrowLeft, Plus, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Trash2, Mail, Phone, User } from "lucide-react";
 import { clientesApi } from "@/api/clientes";
 import { Badge } from "@/components/ui/Badge";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
@@ -44,6 +44,11 @@ export function ClienteDetailPage() {
   if (isLoading) return <div className="text-center py-16 text-gray-500">Cargando...</div>;
   if (!cliente) return <div className="text-center py-16 text-gray-400">Cliente no encontrado</div>;
 
+  const emails = (cliente.contacto_email ?? "")
+    .split(/[,;]/)
+    .map((e) => e.trim())
+    .filter(Boolean);
+
   return (
     <div>
       <button
@@ -68,6 +73,34 @@ export function ClienteDetailPage() {
           <Plus size={16} />
           Nuevo precio
         </button>
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
+        <h2 className="text-xs font-medium text-gray-600 uppercase tracking-wide mb-3">Contacto</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+          <div className="flex items-center gap-2 text-gray-700">
+            <User size={15} className="text-gray-400 shrink-0" />
+            {cliente.contacto_nombre ?? <span className="text-gray-400">—</span>}
+          </div>
+          <div className="flex items-center gap-2 text-gray-700">
+            <Phone size={15} className="text-gray-400 shrink-0" />
+            {cliente.contacto_telefono ?? <span className="text-gray-400">—</span>}
+          </div>
+          <div className="flex items-start gap-2">
+            <Mail size={15} className="text-gray-400 shrink-0 mt-0.5" />
+            {emails.length === 0 ? (
+              <span className="text-gray-400">—</span>
+            ) : (
+              <div className="flex flex-col gap-0.5 min-w-0">
+                {emails.map((e) => (
+                  <a key={e} href={`mailto:${e}`} className="text-primary hover:underline break-all">
+                    {e}
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {cliente.precios.length === 0 ? (

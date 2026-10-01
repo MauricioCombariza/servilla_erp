@@ -102,7 +102,7 @@ export function ClientesPage() {
                       <button
                         onClick={() => navigate(`/clientes/${c.id}`)}
                         className="text-gray-400 hover:text-primary transition-colors"
-                        title="Ver precios"
+                        title="Ver detalle (contacto y precios)"
                       >
                         <Eye size={15} />
                       </button>
