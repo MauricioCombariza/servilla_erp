@@ -17,7 +17,7 @@ _MESES_ES = [
 ]
 
 COLUMNAS_EXCEL = [
-    "serial", "orden", "cod_men", "planilla", "f_emi", "no_entidad", "nombred",
+    "serial", "orden", "cod_men", "planilla", "f_emi", "f_lleva", "no_entidad", "nombred",
     "dirdes1", "cod_sec", "ciudad1", "dpto1", "retorno", "ret_esc", "motivo",
 ]
 
@@ -243,11 +243,11 @@ def nombre_archivo_excel(persona: Personal) -> str:
 
 def construir_excel_courier(nombre: str, filas: list[dict]) -> bytes:
     titulo = "Pendientes de entrega" + (f" - {nombre}" if nombre else "")
-    widths = [16, 10, 10, 12, 12, 26, 26, 30, 10, 16, 12, 10, 10, 20]
+    widths = [16, 10, 10, 12, 12, 12, 26, 26, 30, 10, 16, 12, 10, 10, 20]
     return construir_excel(titulo, COLUMNAS_EXCEL, filas, widths)
 
 
 def construir_excel_mensual(mes_label: str, filas: list[dict]) -> bytes:
     titulo = f"Pendientes de entrega - {mes_label}"
-    widths = [16, 26, 16, 10, 10, 12, 12, 26, 26, 30, 10, 16, 12, 10, 10, 20]
+    widths = [16, 26, 16, 10, 10, 12, 12, 12, 26, 26, 30, 10, 16, 12, 10, 10, 20]
     return construir_excel(titulo, COLUMNAS_EXCEL_MENSUAL, filas, widths)

@@ -260,7 +260,7 @@ def _fetch_pendientes_courier_sync(codigos: list[int], corte: str) -> list[dict]
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
-                    SELECT serial, orden, cod_men, f_emi, no_entidad, nombred,
+                    SELECT serial, orden, cod_men, f_emi, f_lleva, no_entidad, nombred,
                            dirdes1, cod_sec, ciudad1, dpto1, retorno, ret_esc, motivo,
                            NULLIF(TRIM(planilla), '') AS planilla
                     FROM histo
