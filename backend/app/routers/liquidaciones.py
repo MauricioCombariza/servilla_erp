@@ -26,18 +26,21 @@ _auth_admin = Depends(require_role("administrador", "contabilidad"))
 # Condición sobre `sg` (seriales_gestion) que decide si un serial puede entrar en
 # la liquidación de mes completo — ver _predicado_planillas para el porqué.
 # /pendientes la usa también, para que el total mostrado sea lo que /generar suma.
+# Los paquetes (iMile, Carryt y cualquier cliente de paquetes) siempre son
+# liquidables: su planilla se fija al cargar (IM<fecha>) o no existe (Carryt).
 _COND_PLANILLA_LIQUIDABLE = (
-    "(sg.planilla NOT IN ('', 'nan')"
-    " AND ("
-    "   sg.planilla LIKE '7%'"
-    "   OR ("
-    "     sg.planilla LIKE '4%'"
-    "     AND NOT EXISTS ("
-    "       SELECT 1 FROM seriales_gestion sg2"
-    "       WHERE sg2.planilla = sg.planilla AND sg2.editado_manualmente = FALSE"
-    "     )"
-    "   )"
-    " ))"
+    "(sg.tipo_envio = 'paquete'"
+    " OR (sg.planilla NOT IN ('', 'nan')"
+    "  AND ("
+    "    sg.planilla LIKE '7%'"
+    "    OR ("
+    "      sg.planilla LIKE '4%'"
+    "      AND NOT EXISTS ("
+    "        SELECT 1 FROM seriales_gestion sg2"
+    "        WHERE sg2.planilla = sg.planilla AND sg2.editado_manualmente = FALSE"
+    "      )"
+    "    )"
+    "  )))"
 )
 
 
@@ -197,6 +200,10 @@ def _predicado_planillas(planillas: list[str] | None, mes: int, anio: int) -> tu
        planillas_service.resumen_planillas). Una planilla 4xxx recién llegada del
        CSV puede seguir recibiendo/corrigiendo seriales; liquidarla antes de
        bloquearla arriesga dejar el mismo tipo de dato huérfano que el punto 1.
+
+    Ambas restricciones aplican solo a sobres: los paquetes (tipo_envio='paquete')
+    pasan siempre, porque su planilla no la completa el dashboard.csv — iMile la
+    fija al cargar (IM<fecha escaneo>) y Carryt no la trae nunca.
 
     El camino explícito por planilla (`planillas` dado) no aplica ninguna de las
     dos restricciones: el usuario ya eligió planillas conocidas a propósito.

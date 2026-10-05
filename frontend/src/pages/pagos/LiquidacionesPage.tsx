@@ -832,7 +832,7 @@ function PendienteRow({ p, mes, anio, soloSeriales, onGenerar }: {
         <td className="px-4 py-3 font-semibold text-gray-900">
           <CurrencyCell value={p.total_pendiente} />
           {p.monto_no_liquidable > 0 && (
-            <p className="text-xs font-normal text-amber-600 mt-0.5" title="Seriales de planillas sin asignar o 4xxx sin bloquear: no entran al generar la liquidación del mes">
+            <p className="text-xs font-normal text-amber-600 mt-0.5" title="Sobres de planillas sin asignar o 4xxx sin bloquear: no entran al generar la liquidación del mes">
               ⚠ ${fmt.format(p.monto_no_liquidable)} no liquidable
             </p>
           )}

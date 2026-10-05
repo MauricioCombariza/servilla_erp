@@ -403,7 +403,8 @@ async def test_pendientes_reporta_monto_sin_aprobar_y_lo_excluye_del_subtotal(cl
 async def test_pendientes_excluye_seriales_no_liquidables_igual_que_generar(client, auth_headers):
     """/pendientes debe sumar en total_pendiente solo los seriales que /generar (mes
     completo) va a liquidar, y reportar aparte los de planillas sin asignar o 4xxx
-    sin bloquear — caso LIQ-202609-0011, donde el subtotal del modal no coincidía."""
+    sin bloquear — caso LIQ-202609-0011, donde el subtotal del modal no coincidía.
+    Los paquetes (iMile IM<fecha>, Carryt sin planilla) siempre son liquidables."""
     from app.database import AsyncSessionLocal
     from sqlalchemy import text
 
@@ -424,7 +425,9 @@ async def test_pendientes_excluye_seriales_no_liquidables_igual_que_generar(clie
             RETURNING id
         """))
         pid = r.scalar_one()
-        for i, (planilla, precio) in enumerate(zip(planillas, (500, 300, 200))):
+        seriales = [(pl, precio, "sobre") for pl, precio in zip(planillas, (500, 300, 200))]
+        seriales += [("IM20260408", 1600, "paquete"), ("", 1000, "paquete")]
+        for i, (planilla, precio, tipo_envio) in enumerate(seriales):
             await db.execute(text("""
                 INSERT INTO seriales_gestion
                     (serial, planilla, f_esc, cod_men, mensajero_id,
@@ -432,8 +435,9 @@ async def test_pendientes_excluye_seriales_no_liquidables_igual_que_generar(clie
                      precio_mensajero, precio_cliente, origen, editado_manualmente)
                 VALUES
                     (:serial, :planilla, '2026-04-08', 'LQ05', :pid,
-                     'Entrega', 'sobre', 'bogota', 'pendiente', :precio, 0, 'manual', FALSE)
-            """), {"serial": f"LQ05-{i}", "planilla": planilla, "pid": pid, "precio": precio})
+                     'Entrega', :tipo_envio, 'bogota', 'pendiente', :precio, 0, 'manual', FALSE)
+            """), {"serial": f"LQ05-{i}", "planilla": planilla, "pid": pid, "precio": precio,
+                  "tipo_envio": tipo_envio})
         await db.commit()
 
     try:
@@ -444,9 +448,9 @@ async def test_pendientes_excluye_seriales_no_liquidables_igual_que_generar(clie
         )
         assert r.status_code == 200, r.text
         row = next(row for row in r.json() if row["personal_id"] == pid)
-        assert row["total_seriales"] == 1
-        assert row["total_mensajero"] == 500.0
-        assert row["total_pendiente"] == 500.0
+        assert row["total_seriales"] == 3
+        assert row["total_mensajero"] == 3100.0  # 500 (7xxx) + 1600 (IM) + 1000 (Carryt '')
+        assert row["total_pendiente"] == 3100.0
         assert row["total_seriales_no_liquidables"] == 2
         assert row["monto_no_liquidable"] == 500.0  # 300 (4xxx sin bloquear) + 200 ('nan')
 
