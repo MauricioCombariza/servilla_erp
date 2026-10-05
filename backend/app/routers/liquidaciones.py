@@ -236,10 +236,19 @@ def _predicado_planillas(planillas: list[str] | None, mes: int, anio: int) -> tu
     fija al cargar (IM<fecha escaneo>) y Carryt no la trae nunca.
 
     El camino explícito por planilla (`planillas` dado) no aplica ninguna de las
-    dos restricciones: el usuario ya eligió planillas conocidas a propósito.
+    dos restricciones: el usuario ya eligió planillas conocidas a propósito. Una
+    planilla real se toma completa aunque tenga seriales de otro mes, pero "sin
+    planilla" ('' / 'nan') no es un lote: agrupa seriales sin escanear de
+    cualquier fecha, así que se acota al mes — igual que lo que lista
+    /planillas-pendientes, que es de donde el usuario la selecciona.
     """
     if planillas is not None:
-        return "AND sg.planilla = ANY(:planillas)", {"planillas": planillas}
+        return (
+            "AND sg.planilla = ANY(:planillas)"
+            " AND (sg.planilla NOT IN ('', 'nan')"
+            "  OR (EXTRACT(MONTH FROM sg.f_esc) = :mes AND EXTRACT(YEAR FROM sg.f_esc) = :anio))",
+            {"planillas": planillas, "mes": mes, "anio": anio},
+        )
     return (
         "AND EXTRACT(MONTH FROM sg.f_esc) = :mes AND EXTRACT(YEAR FROM sg.f_esc) = :anio"
         f" AND {_COND_PLANILLA_LIQUIDABLE}",

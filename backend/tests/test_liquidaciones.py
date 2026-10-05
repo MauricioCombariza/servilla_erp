@@ -544,3 +544,49 @@ async def test_generar_aplica_ajustes_pendientes_una_sola_vez(client, auth_heade
     finally:
         async with AsyncSessionLocal() as db:
             await _cleanup(db)
+
+
+@pytest.mark.asyncio
+async def test_generar_sin_planilla_explicita_solo_toma_el_mes(client, auth_headers):
+    """'Sin planilla' agrupa seriales sin escanear de cualquier fecha: al
+    seleccionarla solo entra la del mes, igual que lo que lista /planillas-pendientes."""
+    from app.database import AsyncSessionLocal
+    from sqlalchemy import text
+
+    async def _cleanup(db):
+        await db.execute(text("DELETE FROM liquidaciones WHERE personal_id IN (SELECT id FROM personal WHERE codigo='LQ05')"))
+        await db.execute(text("DELETE FROM seriales_gestion WHERE serial LIKE 'LQ-SP-%'"))
+        await db.execute(text("DELETE FROM personal WHERE codigo='LQ05'"))
+        await db.commit()
+
+    async with AsyncSessionLocal() as db:
+        await _cleanup(db)
+        pid = (await db.execute(text("""
+            INSERT INTO personal (codigo, nombre_completo, identificacion, tipo_personal, activo)
+            VALUES ('LQ05', 'Mensajero Sin Planilla Test', '777705TEST', 'mensajero', TRUE) RETURNING id
+        """))).scalar_one()
+        for serial, mes in (("LQ-SP-1", 9), ("LQ-SP-2", 9), ("LQ-SP-3", 1)):
+            await db.execute(text("""
+                INSERT INTO seriales_gestion (serial, planilla, f_esc, cod_men, mensajero_id, tipo_gestion,
+                    precio_mensajero, precio_cliente, estado, editado_manualmente, origen)
+                VALUES (:s, '', make_date(2026, :m, 5), 'LQ05', :pid, 'Entrega', 400, 900, 'pendiente', FALSE, 'manual')
+            """), {"s": serial, "m": mes, "pid": pid})
+        await db.commit()
+
+    try:
+        r = await client.post("/api/liquidaciones/generar", json={
+            "personal_id": pid, "periodo_mes": 9, "periodo_anio": 2026,
+            "fecha_pago_programada": "2026-10-08", "planillas": [""], "fechas_alistamiento": [],
+        }, headers=auth_headers)
+        assert r.status_code == 201, r.text
+        assert r.json()["cantidad_entregas"] == 2
+        assert r.json()["total_entregas"] == 800.0
+
+        async with AsyncSessionLocal() as db:
+            estado_enero = (await db.execute(
+                text("SELECT estado FROM seriales_gestion WHERE serial='LQ-SP-3'")
+            )).scalar_one()
+        assert estado_enero == "pendiente"
+    finally:
+        async with AsyncSessionLocal() as db:
+            await _cleanup(db)

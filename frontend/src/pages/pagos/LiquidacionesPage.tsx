@@ -471,7 +471,9 @@ function SeleccionarTab({ mes, anio, soloSeriales, onGenerado }: {
                       <td className="px-4 py-2">
                         <input type="checkbox" checked={planillasSel.has(p.planilla)} onChange={() => togglePlanilla(p.planilla)} />
                       </td>
-                      <td className="px-4 py-2 font-mono text-xs text-gray-700">{p.planilla}</td>
+                      <td className="px-4 py-2 font-mono text-xs text-gray-700">
+                        {p.planilla || <span className="font-sans italic text-amber-600" title="Seriales del mes aún sin escanear en una planilla">sin planilla</span>}
+                      </td>
                       <td className="px-4 py-2 text-gray-600 text-xs">{p.fecha_escaner ?? "—"}</td>
                       <td className="px-4 py-2 text-gray-600">{p.total_seriales}</td>
                       <td className="px-4 py-2">
@@ -502,7 +504,8 @@ function SeleccionarTab({ mes, anio, soloSeriales, onGenerado }: {
                         ) : (
                           <div className="flex items-center gap-2">
                             <CurrencyCell value={p.valor_por_envio} />
-                            <button
+                            {/* "Sin planilla" no es un lote: cambiar su precio tocaría todos los seriales sin planilla */}
+                            {p.planilla && <button
                               onClick={() => {
                                 setEditingPlanilla(p.planilla);
                                 setEditVal(String(p.valor_por_envio));
@@ -510,7 +513,7 @@ function SeleccionarTab({ mes, anio, soloSeriales, onGenerado }: {
                               className="text-gray-400 hover:text-primary transition-colors"
                             >
                               <Pencil size={13} />
-                            </button>
+                            </button>}
                           </div>
                         )}
                       </td>
