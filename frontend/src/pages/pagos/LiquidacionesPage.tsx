@@ -4,7 +4,7 @@ import { CheckCircle, DollarSign, Trash2, Plus, Rows3, SlidersHorizontal, X, Pen
 import { gestionesApi } from "@/api/gestiones";
 import { laboresApi } from "@/api/labores";
 import { personalApi } from "@/api/personal";
-import { liqApi, type Pendiente, type Liquidacion, type SerialesPorPrecio } from "@/api/liquidaciones";
+import { liqApi, type Pendiente, type Liquidacion, type SerialesPorPrecio, type AjustePendiente } from "@/api/liquidaciones";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
 import type { PlanillaResumen, ResumenLabores, Personal } from "@/types/domain";
 
@@ -613,14 +613,17 @@ function ConfirmarLiquidacionModal({ personalId, mes, anio, planillas, fechasAli
   const hoy = new Date();
   const diasPago = new Date(hoy.getFullYear(), hoy.getMonth(), 8).toISOString().slice(0, 10);
   const [fechaPago, setFechaPago] = useState(diasPago);
-  const [montoPagar, setMontoPagar] = useState(String(totalCalculado));
+  const ajustes = useAjustesPendientes(personalId);
+  // El backend aplica los ajustes pendientes al generar; el monto sugerido ya los incluye.
+  const totalConAjustes = totalCalculado + netoAjustes(ajustes);
+  const [montoPagar, setMontoPagar] = useState("");
   const [notasAjuste, setNotasAjuste] = useState("");
   const [observaciones, setObservaciones] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const montoNum = montoPagar === "" ? totalCalculado : +montoPagar;
-  const ajustado = montoNum !== totalCalculado;
+  const montoNum = montoPagar === "" ? totalConAjustes : +montoPagar;
+  const ajustado = montoNum !== totalConAjustes;
 
   async function handleConfirm() {
     setSaving(true);
@@ -658,13 +661,14 @@ function ConfirmarLiquidacionModal({ personalId, mes, anio, planillas, fechasAli
         </div>
         <div className="px-6 py-4 space-y-4">
           {error && <p className="text-sm text-red-600">{error}</p>}
+          <AjustesPendientesAviso ajustes={ajustes} />
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">Monto a pagar</label>
-            <input type="number" min={0} value={montoPagar}
+            <input type="number" min={0} value={montoPagar === "" ? String(totalConAjustes) : montoPagar}
               onChange={(e) => setMontoPagar(e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
             {ajustado && (
-              <p className="text-xs text-amber-600 mt-1">Ajustado respecto al calculado (${fmt.format(totalCalculado)})</p>
+              <p className="text-xs text-amber-600 mt-1">Ajustado respecto al calculado (${fmt.format(totalConAjustes)})</p>
             )}
           </div>
           {ajustado && (
@@ -1013,6 +1017,37 @@ function DiarioDetalle({ diario }: { diario: (ResumenLabores & { fecha: string }
   );
 }
 
+// ── Ajustes pendientes (se aplican solos al generar) ──────────────────────────
+
+function useAjustesPendientes(personalId: number): AjustePendiente[] {
+  const { data = [] } = useQuery({
+    queryKey: ["liq-ajustes-pendientes", personalId],
+    queryFn: () => liqApi.ajustesPendientes(personalId).then((r) => r.data),
+  });
+  return data;
+}
+
+function netoAjustes(ajustes: AjustePendiente[]): number {
+  return ajustes.reduce((s, a) => s + (a.tipo === "bonificacion" ? a.monto : -a.monto), 0);
+}
+
+function AjustesPendientesAviso({ ajustes }: { ajustes: AjustePendiente[] }) {
+  if (ajustes.length === 0) return null;
+  return (
+    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900 space-y-1">
+      <p className="font-medium">Se aplicarán automáticamente estos ajustes:</p>
+      {ajustes.map((a) => (
+        <p key={a.id}>
+          <span className={a.tipo === "descuento" ? "text-red-600" : "text-green-700"}>
+            {a.tipo === "descuento" ? "−" : "+"}${fmt.format(a.monto)}
+          </span>{" "}
+          {a.motivo}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 // ── Modal generar liquidación ──────────────────────────────────────────────────
 
 export function GenerarLiquidacionModal({ pendiente, mes, anio, onClose, onSaved }: {
@@ -1022,7 +1057,8 @@ export function GenerarLiquidacionModal({ pendiente, mes, anio, onClose, onSaved
   const diasPago = new Date(hoy.getFullYear(), hoy.getMonth(), 8).toISOString().slice(0, 10);
   const [form, setForm] = useState({ fecha_pago_programada: diasPago, bonificaciones: 0, descuentos: 0, observaciones: "" });
   const [saving, setSaving] = useState(false);
-  const total = pendiente.total_pendiente + form.bonificaciones - form.descuentos;
+  const ajustes = useAjustesPendientes(pendiente.personal_id);
+  const total = pendiente.total_pendiente + form.bonificaciones - form.descuentos + netoAjustes(ajustes);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -1062,6 +1098,7 @@ export function GenerarLiquidacionModal({ pendiente, mes, anio, onClose, onSaved
               ⚠ ${fmt.format(pendiente.monto_no_liquidable)} en {pendiente.total_seriales_no_liquidables} seriales de planillas sin asignar o 4xxx sin bloquear no se incluirán en este pago. Bloquea la planilla y liquídala por selección de planillas.
             </div>
           )}
+          <AjustesPendientesAviso ajustes={ajustes} />
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Bonificación</label>

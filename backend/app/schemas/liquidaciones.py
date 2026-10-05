@@ -100,3 +100,15 @@ class ResumenPendientePago(BaseModel):
     total_seriales_no_liquidables: int = 0
     monto_no_liquidable: float = 0
     ya_liquidado: bool
+
+
+class AjusteLiquidacionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    personal_id: int
+    tipo: str
+    monto: float
+    motivo: str
+    liquidacion_origen_id: int | None
+    fecha_creacion: datetime | None

@@ -36,6 +36,16 @@ export interface SerialesPorPrecio {
   monto_no_liquidable: number;
 }
 
+export interface AjustePendiente {
+  id: number;
+  personal_id: number;
+  tipo: "descuento" | "bonificacion";
+  monto: number;
+  motivo: string;
+  liquidacion_origen_id: number | null;
+  fecha_creacion: string | null;
+}
+
 export const liqApi = {
   pendientes: (mes: number, anio: number) =>
     api.get<Pendiente[]>("/liquidaciones/pendientes", { params: { mes, anio } }),
@@ -43,6 +53,8 @@ export const liqApi = {
     api.get<PlanillaPendienteMensajero[]>(`/liquidaciones/planillas/${personalId}`, { params: { mes, anio } }),
   preciosPendientes: (personalId: number, mes: number, anio: number) =>
     api.get<SerialesPorPrecio[]>(`/liquidaciones/precios/${personalId}`, { params: { mes, anio } }),
+  ajustesPendientes: (personalId: number) =>
+    api.get<AjustePendiente[]>(`/liquidaciones/ajustes-pendientes/${personalId}`),
   list: (params: object) => api.get<Liquidacion[]>("/liquidaciones/", { params }),
   generar: (data: object) => api.post<Liquidacion>("/liquidaciones/generar", data),
   aprobar: (id: number) => api.post<Liquidacion>(`/liquidaciones/${id}/aprobar`),

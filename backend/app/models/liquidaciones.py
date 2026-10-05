@@ -49,3 +49,24 @@ class Liquidacion(Base):
     @property
     def valor_a_pagar(self) -> float:
         return float(self.valor_ajustado) if self.valor_ajustado is not None else float(self.total_a_pagar)
+
+
+class AjusteLiquidacion(Base):
+    """Descuento o bonificación que se aplica en la próxima liquidación generada
+    del mensajero (ver migración 030)."""
+    __tablename__ = "ajustes_liquidacion"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    personal_id: Mapped[int] = mapped_column(
+        ForeignKey("personal.id", ondelete="CASCADE"), nullable=False
+    )
+    tipo: Mapped[str] = mapped_column(String(12), nullable=False)
+    monto: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    motivo: Mapped[str] = mapped_column(Text, nullable=False)
+    liquidacion_origen_id: Mapped[int | None] = mapped_column(
+        ForeignKey("liquidaciones.id", ondelete="SET NULL")
+    )
+    liquidacion_aplicada_id: Mapped[int | None] = mapped_column(
+        ForeignKey("liquidaciones.id", ondelete="SET NULL")
+    )
+    fecha_creacion: Mapped[datetime | None] = mapped_column(_ts)

@@ -480,3 +480,67 @@ async def test_pendientes_excluye_seriales_no_liquidables_igual_que_generar(clie
     finally:
         async with AsyncSessionLocal() as db:
             await _cleanup(db)
+
+
+@pytest.mark.asyncio
+async def test_generar_aplica_ajustes_pendientes_una_sola_vez(client, auth_headers):
+    """Seriales cobrados antes de escanearse y reabiertos para su mes real: lo ya
+    cobrado queda como descuento pendiente y /generar lo aplica automáticamente."""
+    from app.database import AsyncSessionLocal
+    from sqlalchemy import text
+
+    async def _cleanup(db):
+        await db.execute(text("DELETE FROM ajustes_liquidacion WHERE personal_id IN (SELECT id FROM personal WHERE codigo='LQ04')"))
+        await db.execute(text("DELETE FROM liquidaciones WHERE personal_id IN (SELECT id FROM personal WHERE codigo='LQ04')"))
+        await db.execute(text("DELETE FROM seriales_gestion WHERE planilla IN ('7TEST-AJ1', '7TEST-AJ2')"))
+        await db.execute(text("DELETE FROM personal WHERE codigo='LQ04'"))
+        await db.commit()
+
+    async with AsyncSessionLocal() as db:
+        await _cleanup(db)
+        pid = (await db.execute(text("""
+            INSERT INTO personal (codigo, nombre_completo, identificacion, tipo_personal, activo)
+            VALUES ('LQ04', 'Mensajero Ajustes Test', '777704TEST', 'mensajero', TRUE) RETURNING id
+        """))).scalar_one()
+        for serial, planilla, mes in (("LQ-AJ-1", "7TEST-AJ1", 7), ("LQ-AJ-2", "7TEST-AJ2", 8)):
+            await db.execute(text("""
+                INSERT INTO seriales_gestion (serial, planilla, f_esc, cod_men, mensajero_id, tipo_gestion,
+                    precio_mensajero, precio_cliente, estado, editado_manualmente, origen)
+                VALUES (:s, :p, make_date(2026, :m, 10), 'LQ04', :pid, 'Entrega', 1000, 2000, 'pendiente', TRUE, 'manual')
+            """), {"s": serial, "p": planilla, "m": mes, "pid": pid})
+        await db.execute(text("""
+            INSERT INTO ajustes_liquidacion (personal_id, tipo, monto, motivo) VALUES
+                (:pid, 'descuento', 300, 'cobrado en LIQ-X antes de escanearse'),
+                (:pid, 'bonificacion', 100, 'cobrado por otro mensajero')
+        """), {"pid": pid})
+        await db.commit()
+
+    try:
+        r = await client.get(f"/api/liquidaciones/ajustes-pendientes/{pid}", headers=auth_headers)
+        assert r.status_code == 200
+        assert len(r.json()) == 2
+
+        r = await client.post("/api/liquidaciones/generar", json={
+            "personal_id": pid, "periodo_mes": 7, "periodo_anio": 2026,
+            "fecha_pago_programada": "2026-08-08", "descuentos": 50,
+        }, headers=auth_headers)
+        assert r.status_code == 201, r.text
+        liq = r.json()
+        assert liq["descuentos"] == 350.0
+        assert liq["bonificaciones"] == 100.0
+        assert liq["total_a_pagar"] == 1000.0 - 350.0 + 100.0
+        assert "LIQ-X" in liq["observaciones"]
+
+        # Ya aplicados: la siguiente liquidación no los vuelve a descontar.
+        r = await client.get(f"/api/liquidaciones/ajustes-pendientes/{pid}", headers=auth_headers)
+        assert r.json() == []
+        r = await client.post("/api/liquidaciones/generar", json={
+            "personal_id": pid, "periodo_mes": 8, "periodo_anio": 2026,
+            "fecha_pago_programada": "2026-09-08",
+        }, headers=auth_headers)
+        assert r.status_code == 201, r.text
+        assert r.json()["descuentos"] == 0.0
+        assert r.json()["total_a_pagar"] == 1000.0
+    finally:
+        async with AsyncSessionLocal() as db:
+            await _cleanup(db)

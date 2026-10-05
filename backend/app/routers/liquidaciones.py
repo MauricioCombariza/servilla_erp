@@ -6,10 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_page, require_role
 from app.database import get_db
-from app.models.liquidaciones import Liquidacion
+from app.models.liquidaciones import AjusteLiquidacion, Liquidacion
 from app.models.personal import Personal
 from app.schemas.liquidaciones import (
     AjustarMontoLiquidacionRequest,
+    AjusteLiquidacionRead,
     GenerarLiquidacionRequest,
     LiquidacionRead,
     LiquidacionUpdate,
@@ -284,6 +285,21 @@ async def list_liquidaciones(
     return (await db.execute(q)).scalars().all()
 
 
+@router.get("/ajustes-pendientes/{personal_id}", response_model=list[AjusteLiquidacionRead])
+async def ajustes_pendientes(
+    personal_id: int,
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    """Descuentos/bonificaciones que /generar aplicará en la próxima liquidación."""
+    q = (
+        select(AjusteLiquidacion)
+        .where(AjusteLiquidacion.personal_id == personal_id, AjusteLiquidacion.liquidacion_aplicada_id.is_(None))
+        .order_by(AjusteLiquidacion.id)
+    )
+    return (await db.execute(q)).scalars().all()
+
+
 @router.post("/generar", response_model=LiquidacionRead, status_code=status.HTTP_201_CREATED)
 async def generar_liquidacion(
     body: GenerarLiquidacionRequest,
@@ -359,9 +375,26 @@ async def generar_liquidacion(
     """)
     r_sub = (await db.execute(sql_sub, {"pid": body.personal_id, **params_fecha})).mappings().one()
 
+    # Ajustes pendientes (p. ej. seriales cobrados en un mes anterior antes de
+    # escanearse y reabiertos para el mes real): se suman a lo que se haya
+    # digitado en el formulario y quedan marcados como aplicados en esta liquidación.
+    ajustes = (await db.execute(
+        select(AjusteLiquidacion).where(
+            AjusteLiquidacion.personal_id == body.personal_id,
+            AjusteLiquidacion.liquidacion_aplicada_id.is_(None),
+        ).order_by(AjusteLiquidacion.id)
+    )).scalars().all()
+    bonificaciones = body.bonificaciones + sum(float(a.monto) for a in ajustes if a.tipo == "bonificacion")
+    descuentos = body.descuentos + sum(float(a.monto) for a in ajustes if a.tipo == "descuento")
+    lineas_ajuste = [
+        f"{'Descuento' if a.tipo == 'descuento' else 'Bonificación'} ${float(a.monto):,.0f}: {a.motivo}"
+        for a in ajustes
+    ]
+    observaciones = "\n".join(([body.observaciones] if body.observaciones else []) + lineas_ajuste) or None
+
     total = (
         float(r_ser["total"]) + float(r_h["monto"]) + float(r_l["monto"]) + float(r_sub["monto"])
-        + body.bonificaciones - body.descuentos
+        + bonificaciones - descuentos
     )
 
     num = f"LIQ-{body.periodo_anio}{body.periodo_mes:02d}-{personal.codigo}-{datetime.now(timezone.utc).strftime('%H%M%S%f')}" \
@@ -380,17 +413,20 @@ async def generar_liquidacion(
         total_labores=float(r_l["monto"]),
         cantidad_labores=int(r_l["cant"]),
         total_subsidio=float(r_sub["monto"]),
-        bonificaciones=body.bonificaciones,
-        descuentos=body.descuentos,
+        bonificaciones=bonificaciones,
+        descuentos=descuentos,
         total_a_pagar=round(total, 2),
         valor_ajustado=body.valor_ajustado,
         notas_ajuste=body.notas_ajuste,
         estado="generada",
-        observaciones=body.observaciones,
+        observaciones=observaciones,
     )
     db.add(liq)
 
     await db.flush()
+
+    for a in ajustes:
+        a.liquidacion_aplicada_id = liq.id
 
     # Actualizar liquidacion_id en seriales y estado en horas/labores — mismo
     # predicado que el SELECT correspondiente, para no dejar ítems sumados en
