@@ -89,4 +89,6 @@ class ResumenPendientePago(BaseModel):
     total_subsidio: float
     total_pendiente: float
     total_sin_aprobar: float
+    total_seriales_no_liquidables: int = 0
+    monto_no_liquidable: float = 0
     ya_liquidado: bool

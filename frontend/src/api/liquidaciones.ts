@@ -4,7 +4,8 @@ export interface Pendiente {
   personal_id: number; codigo: string; nombre_completo: string; tipo_personal: string;
   total_seriales: number; total_mensajero: number; total_horas: number; total_horas_monto: number;
   total_labores: number; total_labores_monto: number; total_subsidio: number;
-  total_pendiente: number; total_sin_aprobar: number; ya_liquidado: boolean;
+  total_pendiente: number; total_sin_aprobar: number;
+  total_seriales_no_liquidables: number; monto_no_liquidable: number; ya_liquidado: boolean;
 }
 
 export interface Liquidacion {

@@ -23,6 +23,24 @@ _auth = Depends(require_page("pagos_mensajeros"))
 _auth_admin = Depends(require_role("administrador", "contabilidad"))
 
 
+# Condición sobre `sg` (seriales_gestion) que decide si un serial puede entrar en
+# la liquidación de mes completo — ver _predicado_planillas para el porqué.
+# /pendientes la usa también, para que el total mostrado sea lo que /generar suma.
+_COND_PLANILLA_LIQUIDABLE = (
+    "(sg.planilla NOT IN ('', 'nan')"
+    " AND ("
+    "   sg.planilla LIKE '7%'"
+    "   OR ("
+    "     sg.planilla LIKE '4%'"
+    "     AND NOT EXISTS ("
+    "       SELECT 1 FROM seriales_gestion sg2"
+    "       WHERE sg2.planilla = sg.planilla AND sg2.editado_manualmente = FALSE"
+    "     )"
+    "   )"
+    " ))"
+)
+
+
 # ── Resumen pendientes de pago ────────────────────────────────────────────────
 
 @router.get("/pendientes", response_model=list[ResumenPendientePago])
@@ -32,15 +50,20 @@ async def pendientes_pago(
     db: AsyncSession = Depends(get_db),
     _=_auth,
 ):
-    sql = text("""
+    # Los seriales se separan en liquidables (mismo criterio que /generar por
+    # mes completo) y no liquidables (planilla sin asignar o 4xxx sin bloquear):
+    # antes se sumaban todos y el total mostrado no coincidía con la liquidación.
+    sql = text(f"""
         WITH ya_liq AS (
             SELECT personal_id FROM liquidaciones
             WHERE periodo_mes = :mes AND periodo_anio = :anio
         ),
         seriales AS (
             SELECT p.id AS personal_id, p.codigo, p.nombre_completo, p.tipo_personal,
-                   COUNT(sg.id)              AS total_seriales,
-                   SUM(sg.precio_mensajero)  AS total_mensajero
+                   COUNT(sg.id) FILTER (WHERE {_COND_PLANILLA_LIQUIDABLE})                 AS total_seriales,
+                   COALESCE(SUM(sg.precio_mensajero) FILTER (WHERE {_COND_PLANILLA_LIQUIDABLE}), 0) AS total_mensajero,
+                   COUNT(sg.id) FILTER (WHERE NOT COALESCE({_COND_PLANILLA_LIQUIDABLE}, FALSE))             AS total_seriales_no_liquidables,
+                   COALESCE(SUM(sg.precio_mensajero) FILTER (WHERE NOT COALESCE({_COND_PLANILLA_LIQUIDABLE}, FALSE)), 0) AS monto_no_liquidable
             FROM personal p
             JOIN seriales_gestion sg ON sg.mensajero_id = p.id
             WHERE sg.estado = 'pendiente'
@@ -112,6 +135,8 @@ async def pendientes_pago(
               + COALESCE(l.total_labores_monto, 0)
               + COALESCE(sub.total_subsidio, 0) AS total_pendiente,
             COALESCE(sa.total_sin_aprobar, 0) AS total_sin_aprobar,
+            COALESCE(s.total_seriales_no_liquidables, 0) AS total_seriales_no_liquidables,
+            COALESCE(s.monto_no_liquidable, 0)           AS monto_no_liquidable,
             (COALESCE(s.personal_id, h.personal_id, l.personal_id, sub.personal_id, sa.personal_id) IN (SELECT personal_id FROM ya_liq)) AS ya_liquidado
         FROM seriales s
         FULL OUTER JOIN horas    h   ON s.personal_id = h.personal_id
@@ -180,17 +205,7 @@ def _predicado_planillas(planillas: list[str] | None, mes: int, anio: int) -> tu
         return "AND sg.planilla = ANY(:planillas)", {"planillas": planillas}
     return (
         "AND EXTRACT(MONTH FROM sg.f_esc) = :mes AND EXTRACT(YEAR FROM sg.f_esc) = :anio"
-        " AND sg.planilla NOT IN ('', 'nan')"
-        " AND ("
-        "   sg.planilla LIKE '7%'"
-        "   OR ("
-        "     sg.planilla LIKE '4%'"
-        "     AND NOT EXISTS ("
-        "       SELECT 1 FROM seriales_gestion sg2"
-        "       WHERE sg2.planilla = sg.planilla AND sg2.editado_manualmente = FALSE"
-        "     )"
-        "   )"
-        " )",
+        f" AND {_COND_PLANILLA_LIQUIDABLE}",
         {"mes": mes, "anio": anio},
     )
 

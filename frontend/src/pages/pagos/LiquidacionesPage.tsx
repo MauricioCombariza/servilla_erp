@@ -188,7 +188,7 @@ export function LiquidacionesPanel({ mes, anio, soloSeriales = false }: { mes: n
                   <tr>
                     {(soloSeriales
                       ? ["N° Liquidación","Período","Entregas","Bonif./Desc.","Total","Estado","Pago prog.",""]
-                      : ["N° Liquidación","Período","Entregas","Horas","Bonif./Desc.","Total","Estado","Pago prog.",""]
+                      : ["N° Liquidación","Período","Entregas","Horas","Labores/Subsidio","Bonif./Desc.","Total","Estado","Pago prog.",""]
                     ).map((h) => (
                       <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">{h}</th>
                     ))}
@@ -201,7 +201,10 @@ export function LiquidacionesPanel({ mes, anio, soloSeriales = false }: { mes: n
                       <td className="px-4 py-3 text-gray-600">{MESES[l.periodo_mes - 1]} {l.periodo_anio}</td>
                       <td className="px-4 py-3 text-gray-600">{l.cantidad_entregas} · <CurrencyCell value={l.total_entregas} /></td>
                       {!soloSeriales && (
-                        <td className="px-4 py-3 text-gray-600"><CurrencyCell value={l.total_horas} /></td>
+                        <>
+                          <td className="px-4 py-3 text-gray-600"><CurrencyCell value={l.total_horas} /></td>
+                          <td className="px-4 py-3 text-gray-600"><CurrencyCell value={l.total_labores} /> · <CurrencyCell value={l.total_subsidio} /></td>
+                        </>
                       )}
                       <td className="px-4 py-3 text-gray-600">+<CurrencyCell value={l.bonificaciones} /> -<CurrencyCell value={l.descuentos} /></td>
                       <td className="px-4 py-3 font-semibold text-gray-900">
@@ -826,7 +829,14 @@ function PendienteRow({ p, mes, anio, soloSeriales, onGenerar }: {
             <td className="px-4 py-3 text-gray-600"><CurrencyCell value={p.total_subsidio} /></td>
           </>
         )}
-        <td className="px-4 py-3 font-semibold text-gray-900"><CurrencyCell value={p.total_pendiente} /></td>
+        <td className="px-4 py-3 font-semibold text-gray-900">
+          <CurrencyCell value={p.total_pendiente} />
+          {p.monto_no_liquidable > 0 && (
+            <p className="text-xs font-normal text-amber-600 mt-0.5" title="Seriales de planillas sin asignar o 4xxx sin bloquear: no entran al generar la liquidación del mes">
+              ⚠ ${fmt.format(p.monto_no_liquidable)} no liquidable
+            </p>
+          )}
+        </td>
         <td className="px-4 py-3">
           <span className={`px-2 py-0.5 rounded text-xs font-medium ${p.ya_liquidado ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
             {p.ya_liquidado ? "Liquidado" : "Pendiente"}
@@ -981,6 +991,11 @@ export function GenerarLiquidacionModal({ pendiente, mes, anio, onClose, onSaved
           {pendiente.total_sin_aprobar > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
               ⚠ ${fmt.format(pendiente.total_sin_aprobar)} en horas/labores sin aprobar no se incluirán en este pago. Apruébalas en Registro Horas/Labores antes de liquidar.
+            </div>
+          )}
+          {pendiente.monto_no_liquidable > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+              ⚠ ${fmt.format(pendiente.monto_no_liquidable)} en {pendiente.total_seriales_no_liquidables} seriales de planillas sin asignar o 4xxx sin bloquear no se incluirán en este pago. Bloquea la planilla y liquídala por selección de planillas.
             </div>
           )}
           <div className="grid grid-cols-2 gap-4">

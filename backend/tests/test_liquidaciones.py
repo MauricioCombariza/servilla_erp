@@ -397,3 +397,67 @@ async def test_pendientes_reporta_monto_sin_aprobar_y_lo_excluye_del_subtotal(cl
             await db.execute(text("DELETE FROM registro_labores WHERE personal_id = :pid"), {"pid": pid})
             await db.execute(text("DELETE FROM personal WHERE id = :pid"), {"pid": pid})
             await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_pendientes_excluye_seriales_no_liquidables_igual_que_generar(client, auth_headers):
+    """/pendientes debe sumar en total_pendiente solo los seriales que /generar (mes
+    completo) va a liquidar, y reportar aparte los de planillas sin asignar o 4xxx
+    sin bloquear — caso LIQ-202609-0011, donde el subtotal del modal no coincidía."""
+    from app.database import AsyncSessionLocal
+    from sqlalchemy import text
+
+    planillas = ["7TESTLQ05", "4TESTLQ05", "nan"]
+
+    async def _cleanup(db):
+        await db.execute(text("DELETE FROM seriales_gestion WHERE serial LIKE 'LQ05-%'"))
+        await db.execute(text("DELETE FROM liquidaciones WHERE personal_id IN "
+                               "(SELECT id FROM personal WHERE codigo = 'LQ05')"))
+        await db.execute(text("DELETE FROM personal WHERE codigo = 'LQ05'"))
+        await db.commit()
+
+    async with AsyncSessionLocal() as db:
+        await _cleanup(db)
+        r = await db.execute(text("""
+            INSERT INTO personal (codigo, nombre_completo, identificacion, tipo_personal, activo)
+            VALUES ('LQ05', 'Mensajero No Liquidable Test', '777705TEST', 'mensajero', TRUE)
+            RETURNING id
+        """))
+        pid = r.scalar_one()
+        for i, (planilla, precio) in enumerate(zip(planillas, (500, 300, 200))):
+            await db.execute(text("""
+                INSERT INTO seriales_gestion
+                    (serial, planilla, f_esc, cod_men, mensajero_id,
+                     tipo_gestion, tipo_envio, ambito, estado,
+                     precio_mensajero, precio_cliente, origen, editado_manualmente)
+                VALUES
+                    (:serial, :planilla, '2026-04-08', 'LQ05', :pid,
+                     'Entrega', 'sobre', 'bogota', 'pendiente', :precio, 0, 'manual', FALSE)
+            """), {"serial": f"LQ05-{i}", "planilla": planilla, "pid": pid, "precio": precio})
+        await db.commit()
+
+    try:
+        r = await client.get(
+            "/api/liquidaciones/pendientes",
+            params={"mes": 4, "anio": 2026},
+            headers=auth_headers,
+        )
+        assert r.status_code == 200, r.text
+        row = next(row for row in r.json() if row["personal_id"] == pid)
+        assert row["total_seriales"] == 1
+        assert row["total_mensajero"] == 500.0
+        assert row["total_pendiente"] == 500.0
+        assert row["total_seriales_no_liquidables"] == 2
+        assert row["monto_no_liquidable"] == 500.0  # 300 (4xxx sin bloquear) + 200 ('nan')
+
+        r = await client.post(
+            "/api/liquidaciones/generar",
+            json={"personal_id": pid, "periodo_mes": 4, "periodo_anio": 2026,
+                  "fecha_pago_programada": "2026-05-08"},
+            headers=auth_headers,
+        )
+        assert r.status_code == 201, r.text
+        assert r.json()["total_a_pagar"] == row["total_pendiente"]
+    finally:
+        async with AsyncSessionLocal() as db:
+            await _cleanup(db)
