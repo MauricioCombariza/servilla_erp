@@ -28,11 +28,21 @@ export interface PlanillaPendienteMensajero {
   valor_por_envio: number;
 }
 
+export interface SerialesPorPrecio {
+  precio_mensajero: number;
+  seriales_liquidables: number;
+  monto_liquidable: number;
+  seriales_no_liquidables: number;
+  monto_no_liquidable: number;
+}
+
 export const liqApi = {
   pendientes: (mes: number, anio: number) =>
     api.get<Pendiente[]>("/liquidaciones/pendientes", { params: { mes, anio } }),
   planillasPendientes: (personalId: number, mes: number, anio: number) =>
     api.get<PlanillaPendienteMensajero[]>(`/liquidaciones/planillas/${personalId}`, { params: { mes, anio } }),
+  preciosPendientes: (personalId: number, mes: number, anio: number) =>
+    api.get<SerialesPorPrecio[]>(`/liquidaciones/precios/${personalId}`, { params: { mes, anio } }),
   list: (params: object) => api.get<Liquidacion[]>("/liquidaciones/", { params }),
   generar: (data: object) => api.post<Liquidacion>("/liquidaciones/generar", data),
   aprobar: (id: number) => api.post<Liquidacion>(`/liquidaciones/${id}/aprobar`),

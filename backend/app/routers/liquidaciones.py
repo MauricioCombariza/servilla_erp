@@ -16,6 +16,7 @@ from app.schemas.liquidaciones import (
     PagarLiquidacionRequest,
     PlanillaPendienteMensajero,
     ResumenPendientePago,
+    SerialesPorPrecio,
 )
 
 router = APIRouter(prefix="/api/liquidaciones", tags=["liquidaciones"])
@@ -177,6 +178,34 @@ async def planillas_pendientes_mensajero(
     """)
     rows = (await db.execute(sql, {"pid": personal_id, "mes": mes, "anio": anio})).mappings().all()
     return [PlanillaPendienteMensajero(**dict(r)) for r in rows]
+
+
+@router.get("/precios/{personal_id}", response_model=list[SerialesPorPrecio])
+async def seriales_por_precio(
+    personal_id: int,
+    mes: int,
+    anio: int,
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    """Seriales pendientes del mes agrupados por precio_mensajero, separando
+    liquidables y no liquidables con el mismo criterio que /pendientes y /generar."""
+    sql = text(f"""
+        SELECT
+            sg.precio_mensajero,
+            COUNT(*) FILTER (WHERE {_COND_PLANILLA_LIQUIDABLE}) AS seriales_liquidables,
+            COALESCE(SUM(sg.precio_mensajero) FILTER (WHERE {_COND_PLANILLA_LIQUIDABLE}), 0) AS monto_liquidable,
+            COUNT(*) FILTER (WHERE NOT COALESCE({_COND_PLANILLA_LIQUIDABLE}, FALSE)) AS seriales_no_liquidables,
+            COALESCE(SUM(sg.precio_mensajero) FILTER (WHERE NOT COALESCE({_COND_PLANILLA_LIQUIDABLE}, FALSE)), 0) AS monto_no_liquidable
+        FROM seriales_gestion sg
+        WHERE sg.mensajero_id = :pid AND sg.estado = 'pendiente'
+          AND EXTRACT(MONTH FROM sg.f_esc) = :mes
+          AND EXTRACT(YEAR  FROM sg.f_esc) = :anio
+        GROUP BY sg.precio_mensajero
+        ORDER BY sg.precio_mensajero ASC
+    """)
+    rows = (await db.execute(sql, {"pid": personal_id, "mes": mes, "anio": anio})).mappings().all()
+    return [SerialesPorPrecio(**dict(r)) for r in rows]
 
 
 # ── Helpers de selección explícita (planillas / fechas) ────────────────────────

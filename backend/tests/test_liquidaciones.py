@@ -454,6 +454,21 @@ async def test_pendientes_excluye_seriales_no_liquidables_igual_que_generar(clie
         assert row["total_seriales_no_liquidables"] == 2
         assert row["monto_no_liquidable"] == 500.0  # 300 (4xxx sin bloquear) + 200 ('nan')
 
+        r = await client.get(
+            f"/api/liquidaciones/precios/{pid}",
+            params={"mes": 4, "anio": 2026},
+            headers=auth_headers,
+        )
+        assert r.status_code == 200, r.text
+        precios = {x["precio_mensajero"]: x for x in r.json()}
+        assert set(precios) == {200.0, 300.0, 500.0, 1000.0, 1600.0}
+        assert precios[500.0]["seriales_liquidables"] == 1
+        assert precios[300.0]["seriales_no_liquidables"] == 1
+        assert precios[300.0]["monto_no_liquidable"] == 300.0
+        assert precios[1600.0]["monto_liquidable"] == 1600.0
+        assert sum(x["monto_liquidable"] for x in precios.values()) == row["total_mensajero"]
+        assert sum(x["monto_no_liquidable"] for x in precios.values()) == row["monto_no_liquidable"]
+
         r = await client.post(
             "/api/liquidaciones/generar",
             json={"personal_id": pid, "periodo_mes": 4, "periodo_anio": 2026,

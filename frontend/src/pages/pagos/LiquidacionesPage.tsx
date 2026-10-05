@@ -4,7 +4,7 @@ import { CheckCircle, DollarSign, Trash2, Plus, Rows3, SlidersHorizontal, X, Pen
 import { gestionesApi } from "@/api/gestiones";
 import { laboresApi } from "@/api/labores";
 import { personalApi } from "@/api/personal";
-import { liqApi, type Pendiente, type Liquidacion } from "@/api/liquidaciones";
+import { liqApi, type Pendiente, type Liquidacion, type SerialesPorPrecio } from "@/api/liquidaciones";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
 import type { PlanillaResumen, ResumenLabores, Personal } from "@/types/domain";
 
@@ -800,6 +800,12 @@ function PendienteRow({ p, mes, anio, soloSeriales, onGenerar }: {
     enabled: expandido && esMensajero,
   });
 
+  const { data: precios = [], isLoading: cargandoPrecios } = useQuery({
+    queryKey: ["pago-precios", p.personal_id, mes, anio],
+    queryFn: () => liqApi.preciosPendientes(p.personal_id, mes, anio).then((r) => r.data),
+    enabled: expandido && esMensajero,
+  });
+
   const { data: diario = [], isLoading: cargandoDiario } = useQuery({
     queryKey: ["pago-diario", p.personal_id, mes, anio],
     queryFn: () => laboresApi.resumenDiario({ personal_id: p.personal_id, mes, anio, aprobado: true, liquidado: false }).then((r) => r.data),
@@ -865,6 +871,13 @@ function PendienteRow({ p, mes, anio, soloSeriales, onGenerar }: {
       {expandido && (
         <tr>
           <td colSpan={soloSeriales ? 7 : 10} className="bg-gray-50/60 border-t border-gray-100 px-4 py-3">
+            {esMensajero && (
+              cargandoPrecios ? (
+                <p className="text-xs text-gray-400 mb-3">Cargando seriales por precio…</p>
+              ) : precios.length > 0 && (
+                <PreciosDetalle precios={precios} />
+              )
+            )}
             {esMensajero ? (
               cargandoPlanillas ? (
                 <p className="text-xs text-gray-400">Cargando planillas…</p>
@@ -886,6 +899,57 @@ function PendienteRow({ p, mes, anio, soloSeriales, onGenerar }: {
         </tr>
       )}
     </>
+  );
+}
+
+function PreciosDetalle({ precios }: { precios: SerialesPorPrecio[] }) {
+  const tot = precios.reduce(
+    (a, x) => ({
+      sl: a.sl + x.seriales_liquidables, ml: a.ml + x.monto_liquidable,
+      sn: a.sn + x.seriales_no_liquidables, mn: a.mn + x.monto_no_liquidable,
+    }),
+    { sl: 0, ml: 0, sn: 0, mn: 0 },
+  );
+  const th = "px-3 py-1.5 text-right text-gray-500 font-medium";
+  const td = "px-3 py-1.5 text-right text-gray-700";
+  return (
+    <table className="w-full text-xs bg-white border border-gray-200 rounded-lg overflow-hidden mb-3">
+      <thead className="bg-gray-50 border-b border-gray-100">
+        <tr>
+          <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Precio</th>
+          <th className={th}>Seriales liquidables</th>
+          <th className={th}>Monto liquidable</th>
+          <th className={th}>Seriales no liquidables</th>
+          <th className={th}>Monto no liquidable</th>
+          <th className={th}>Total seriales</th>
+          <th className={th}>Total</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-gray-50">
+        {precios.map((x) => (
+          <tr key={x.precio_mensajero}>
+            <td className="px-3 py-1.5 text-gray-700">${fmt.format(x.precio_mensajero)}</td>
+            <td className={td}>{x.seriales_liquidables}</td>
+            <td className={td}>${fmt.format(x.monto_liquidable)}</td>
+            <td className={`${td} ${x.seriales_no_liquidables > 0 ? "text-amber-600" : ""}`}>{x.seriales_no_liquidables}</td>
+            <td className={`${td} ${x.monto_no_liquidable > 0 ? "text-amber-600" : ""}`}>${fmt.format(x.monto_no_liquidable)}</td>
+            <td className={td}>{x.seriales_liquidables + x.seriales_no_liquidables}</td>
+            <td className={`${td} font-semibold`}>${fmt.format(x.monto_liquidable + x.monto_no_liquidable)}</td>
+          </tr>
+        ))}
+      </tbody>
+      <tfoot className="bg-gray-50 border-t border-gray-200 font-semibold">
+        <tr>
+          <td className="px-3 py-1.5 text-gray-700">Total</td>
+          <td className={td}>{tot.sl}</td>
+          <td className={td}>${fmt.format(tot.ml)}</td>
+          <td className={`${td} text-amber-600`}>{tot.sn}</td>
+          <td className={`${td} text-amber-600`}>${fmt.format(tot.mn)}</td>
+          <td className={td}>{tot.sl + tot.sn}</td>
+          <td className={td}>${fmt.format(tot.ml + tot.mn)}</td>
+        </tr>
+      </tfoot>
+    </table>
   );
 }
 

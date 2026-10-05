@@ -75,6 +75,14 @@ class PlanillaPendienteMensajero(BaseModel):
     valor_por_envio: float
 
 
+class SerialesPorPrecio(BaseModel):
+    precio_mensajero: float
+    seriales_liquidables: int
+    monto_liquidable: float
+    seriales_no_liquidables: int
+    monto_no_liquidable: float
+
+
 class ResumenPendientePago(BaseModel):
     personal_id: int
     codigo: str
