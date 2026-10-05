@@ -155,11 +155,18 @@ async def cambiar_mensajero_planilla(
     req: CambiarMensajeroRequest,
     db: AsyncSession,
 ) -> PlanillaActionResult:
+    # Solo se reasignan los pendientes. Una planilla puede contener seriales ya
+    # liquidados a otro mensajero: el dashboard.csv les pone la planilla de su
+    # último despacho (_PLANILLA_FIX_UPDATE), pero su gestión anterior ya se pagó
+    # a quien la hizo. Cambiarles el mensajero los dejaba apuntando a alguien
+    # distinto del dueño de su liquidación (caso planilla 401350). El bloqueo sí
+    # se aplica a toda la planilla: _COND_PLANILLA_LIQUIDABLE exige que ningún
+    # serial de la planilla quede sin bloquear.
     result = await db.execute(
         text("""
             UPDATE seriales_gestion
-            SET cod_men = :cod_men,
-                mensajero_id = :men_id,
+            SET cod_men      = CASE WHEN estado = 'pendiente' THEN :cod_men ELSE cod_men END,
+                mensajero_id = CASE WHEN estado = 'pendiente' THEN :men_id  ELSE mensajero_id END,
                 editado_manualmente = TRUE
             WHERE planilla = :planilla
         """),

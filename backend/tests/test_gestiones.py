@@ -251,3 +251,46 @@ async def test_cambiar_precio_no_toca_bloqueados(client, headers, seriales_test)
     r2 = await client.get(f"/api/gestiones/?planilla={planilla}", headers=headers)
     bloqueado = next(s for s in r2.json() if s["editado_manualmente"])
     assert bloqueado["precio_mensajero"] == 1500.0
+
+
+@pytest.mark.asyncio
+async def test_cambiar_mensajero_no_toca_liquidados(client, headers):
+    """Una planilla puede traer seriales ya liquidados a otro mensajero (el CSV
+    les pone la planilla de su último despacho). Reasignarla solo mueve los
+    pendientes; los liquidados conservan a quien se les pagó, pero se bloquean."""
+    from app.database import AsyncSessionLocal
+    from sqlalchemy import text
+
+    planilla = "TEST-PLA-MEN"
+    async with AsyncSessionLocal() as db:
+        await db.execute(text("DELETE FROM seriales_gestion WHERE serial LIKE 'TSTM-%'"))
+        for serial, estado in (("TSTM-1", "pendiente"), ("TSTM-2", "liquidado")):
+            await db.execute(
+                text("""
+                    INSERT INTO seriales_gestion
+                        (serial, planilla, f_esc, cod_men, tipo_gestion,
+                         precio_mensajero, precio_cliente, estado, editado_manualmente, origen)
+                    VALUES (:serial, :planilla, '2026-06-03', 'MN01', 'Entrega',
+                            288, 700, :estado, FALSE, 'manual')
+                """),
+                {"serial": serial, "planilla": planilla, "estado": estado},
+            )
+        await db.commit()
+
+    try:
+        r = await client.patch(
+            f"/api/gestiones/planillas/{planilla}/mensajero",
+            json={"cod_men": "MN99"},
+            headers=headers,
+        )
+        assert r.status_code == 200
+
+        r2 = await client.get(f"/api/gestiones/?planilla={planilla}", headers=headers)
+        por_serial = {s["serial"]: s for s in r2.json()}
+        assert por_serial["TSTM-1"]["cod_men"] == "MN99"
+        assert por_serial["TSTM-2"]["cod_men"] == "MN01"
+        assert all(s["editado_manualmente"] for s in por_serial.values())
+    finally:
+        async with AsyncSessionLocal() as db:
+            await db.execute(text("DELETE FROM seriales_gestion WHERE serial LIKE 'TSTM-%'"))
+            await db.commit()
