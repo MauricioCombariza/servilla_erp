@@ -23,6 +23,13 @@ import { CurrencyCell } from "@/components/ui/CurrencyCell";
 import type { PlanillaResumen } from "@/types/domain";
 import { X } from "lucide-react";
 
+// Una planilla puede tener seriales ya liquidados (incluso a otro mensajero, si
+// se reasignó después) junto a pendientes: el total los mezcla, este desglose no.
+function desgloseEstados(p: PlanillaResumen) {
+  const liq = p.estados?.liquidado ?? 0;
+  return { liq, pend: p.total_seriales - liq };
+}
+
 // ── Modal de edición de planilla ──────────────────────────────────────────────
 interface EditModalProps {
   planilla: PlanillaResumen;
@@ -749,6 +756,7 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
 
   const preciosUnicos = [...new Set(seriales.map((s) => s.precio_mensajero))];
   const preciosMixtos = preciosUnicos.length > 1;
+  const estadosDesglose = desgloseEstados(p);
 
   const selIds = [...seleccion];
   const selSeriales = seriales.filter((s) => seleccion.has(s.id));
@@ -864,16 +872,23 @@ function PlanillaCard({ p, busqueda }: PlanillaCardProps) {
             {[
               { label: "Entregas", val: p.entregas },
               { label: "Devoluciones", val: p.devoluciones },
-              { label: "Total seriales", val: p.total_seriales, warn: p.con_precio_cero > 0, warnTxt: `${p.con_precio_cero} sin precio` },
+              { label: "Total seriales", val: p.total_seriales, warn: p.con_precio_cero > 0, warnTxt: `${p.con_precio_cero} sin precio`, desglose: true },
               { label: "Val. mensajero", val: `$${p.total_mensajero.toLocaleString("es-CO")}` },
               { label: "Val. cliente", val: `$${p.total_cliente.toLocaleString("es-CO")}` },
-            ].map(({ label, val, warn, warnTxt }) => (
+            ].map(({ label, val, warn, warnTxt, desglose }) => (
               <div key={label}>
                 <p className="text-gray-400 uppercase tracking-wide">{label}</p>
                 <p className="font-semibold text-gray-800 flex items-center gap-1">
                   {val}
                   {warn && <span title={warnTxt} className="text-amber-500"><AlertTriangle size={11} /></span>}
                 </p>
+                {desglose && estadosDesglose.liq > 0 && (
+                  <p className="text-[11px]" title="Seriales ya liquidados / pendientes de liquidar">
+                    <span className="text-green-600">{estadosDesglose.liq} liq.</span>
+                    <span className="text-gray-400"> · </span>
+                    <span className="text-amber-600">{estadosDesglose.pend} pend.</span>
+                  </p>
+                )}
               </div>
             ))}
           </div>
@@ -1603,6 +1618,11 @@ export function PlanillasPage() {
                   <td className="px-4 py-3 text-gray-700">{p.devoluciones}</td>
                   <td className="px-4 py-3">
                     <span className="font-medium text-gray-900">{p.total_seriales}</span>
+                    {desgloseEstados(p).liq > 0 && (
+                      <span className="ml-1 text-xs text-gray-400" title="Seriales ya liquidados / pendientes de liquidar">
+                        ({desgloseEstados(p).liq} liq · {desgloseEstados(p).pend} pend)
+                      </span>
+                    )}
                     {p.con_precio_cero > 0 && (
                       <>
                         <span
