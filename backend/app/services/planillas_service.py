@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gestiones import SerialGestion
 from app.models.planillas_revisadas import PlanillaRevisada
+from app.services.excel_utils import construir_excel_multi
 from app.schemas.gestiones import (
     BloquearRangoRequest,
     BloquearRangoResult,
@@ -29,14 +30,14 @@ from app.schemas.gestiones import (
 logger = logging.getLogger(__name__)
 
 
-async def resumen_planillas(
+async def _seriales_filtrados(
     db: AsyncSession,
     fecha_desde: date | None = None,
     fecha_hasta: date | None = None,
     cod_men: str | None = None,
     planilla: str | None = None,
     mensajero_id: int | None = None,
-) -> list[PlanillaResumen]:
+) -> list[SerialGestion]:
     """Trae los seriales a resumir por planilla.
 
     Una planilla puede tener seriales con f_esc fuera del rango usado para
@@ -80,6 +81,24 @@ async def resumen_planillas(
         if mensajero_id is not None:
             q = q.where(SerialGestion.mensajero_id == mensajero_id)
         seriales = list((await db.execute(q)).scalars().all())
+    return seriales
+
+
+async def resumen_planillas(
+    db: AsyncSession,
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
+    cod_men: str | None = None,
+    planilla: str | None = None,
+    mensajero_id: int | None = None,
+) -> list[PlanillaResumen]:
+    seriales = await _seriales_filtrados(db, fecha_desde, fecha_hasta, cod_men, planilla, mensajero_id)
+    return await _agrupar_resumen(db, seriales)
+
+
+async def _agrupar_resumen(db: AsyncSession, seriales: list[SerialGestion]) -> list[PlanillaResumen]:
+    if not seriales:
+        return []
 
     # Cargar planillas revisadas para lookup O(1)
     revisadas_rows = (await db.execute(select(PlanillaRevisada.lot_esc))).scalars().all()
@@ -148,6 +167,108 @@ async def resumen_planillas(
 
     result.sort(key=lambda r: r.fecha_escaner or date.min, reverse=True)
     return result
+
+
+COLUMNAS_EXCEL_PLANILLAS = [
+    "Planilla", "Mensajero", "Nombre", "Tipo", "Fecha", "Entregas", "Devoluciones",
+    "Total seriales", "Valor mensajero", "Valor cliente", "$/Envío", "Sin precio",
+    "Bloqueada", "Revisada",
+]
+COLUMNAS_EXCEL_SERIALES = [
+    "Serial", "Planilla", "Mensajero", "Nombre mensajero", "Cliente", "Orden",
+    "F. emisión", "F. escaneo", "Tipo gestión", "Tipo envío", "Ámbito", "Ciudad",
+    "Estado", "Precio mensajero", "Precio cliente", "Bloqueado", "Observaciones",
+]
+_FORMATOS_EXCEL = {
+    c: "#,##0" for c in ("Valor mensajero", "Valor cliente", "$/Envío", "Precio mensajero", "Precio cliente")
+}
+
+
+async def excel_planillas(
+    db: AsyncSession,
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
+    cod_men: str | None = None,
+    planilla: str | None = None,
+    mensajero_id: int | None = None,
+) -> bytes | None:
+    """Excel con el mismo resultado que /planillas/resumen: hoja de planillas + hoja de seriales.
+
+    None si el filtro no trae seriales.
+    """
+    seriales = await _seriales_filtrados(db, fecha_desde, fecha_hasta, cod_men, planilla, mensajero_id)
+    if not seriales:
+        return None
+    resumen = await _agrupar_resumen(db, seriales)
+
+    filas_planillas = [
+        {
+            "Planilla": p.planilla,
+            "Mensajero": p.cod_men,
+            "Nombre": p.mensajero_nombre or "",
+            "Tipo": p.tipo_personal or "",
+            "Fecha": p.fecha_escaner,
+            "Entregas": p.entregas,
+            "Devoluciones": p.devoluciones,
+            "Total seriales": p.total_seriales,
+            "Valor mensajero": p.total_mensajero,
+            "Valor cliente": p.total_cliente,
+            "$/Envío": p.precio_promedio_mensajero,
+            "Sin precio": p.con_precio_cero,
+            "Bloqueada": "Sí" if p.bloqueada else "No",
+            "Revisada": "Sí" if p.revisada else "No",
+        }
+        for p in resumen
+    ]
+    filas_planillas.append({
+        "Planilla": "TOTAL",
+        "Entregas": sum(p.entregas for p in resumen),
+        "Devoluciones": sum(p.devoluciones for p in resumen),
+        "Total seriales": sum(p.total_seriales for p in resumen),
+        "Valor mensajero": round(sum(p.total_mensajero for p in resumen), 2),
+        "Valor cliente": round(sum(p.total_cliente for p in resumen), 2),
+        "Sin precio": sum(p.con_precio_cero for p in resumen),
+    })
+
+    filas_seriales = [
+        {
+            "Serial": s.serial,
+            "Planilla": s.planilla,
+            "Mensajero": s.mensajero.codigo if s.mensajero else s.cod_men,
+            "Nombre mensajero": s.mensajero.nombre_completo if s.mensajero else "",
+            "Cliente": s.cliente.nombre_empresa if s.cliente else "",
+            "Orden": s.orden,
+            "F. emisión": s.f_emi,
+            "F. escaneo": s.f_esc,
+            "Tipo gestión": s.tipo_gestion,
+            "Tipo envío": s.tipo_envio,
+            "Ámbito": s.ambito,
+            "Ciudad": s.ciudad,
+            "Estado": s.estado,
+            "Precio mensajero": float(s.precio_mensajero),
+            "Precio cliente": float(s.precio_cliente),
+            "Bloqueado": "Sí" if s.editado_manualmente else "No",
+            "Observaciones": s.observaciones,
+        }
+        for s in sorted(seriales, key=lambda s: (s.planilla, s.f_esc, s.serial))
+    ]
+
+    if planilla:
+        filtro = f"planilla {planilla}"
+    else:
+        filtro = f"{fecha_desde or '…'} a {fecha_hasta or '…'}"
+    if cod_men:
+        filtro += f" · mensajero {cod_men}"
+
+    return construir_excel_multi(
+        [
+            ("Planillas", f"Planillas {filtro}", COLUMNAS_EXCEL_PLANILLAS, filas_planillas,
+             [12, 10, 30, 16, 12, 10, 12, 13, 15, 15, 10, 10, 10, 10]),
+            ("Seriales", f"Seriales {filtro}", COLUMNAS_EXCEL_SERIALES, filas_seriales,
+             [16, 12, 10, 30, 28, 12, 12, 12, 12, 10, 10, 20, 12, 15, 15, 10, 30]),
+        ],
+        formatos=_FORMATOS_EXCEL,
+    )
 
 
 async def cambiar_mensajero_planilla(

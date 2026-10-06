@@ -151,6 +151,41 @@ async def test_planillas_resumen(client, headers, seriales_test):
 
 
 @pytest.mark.asyncio
+async def test_planillas_excel(client, headers, seriales_test):
+    import io
+    from openpyxl import load_workbook
+
+    params = {"fecha_desde": "2026-06-01", "fecha_hasta": "2026-06-01", "cod_men": "MN01"}
+    r = await client.get("/api/gestiones/planillas/excel", params=params, headers=headers)
+    assert r.status_code == 200
+    assert "planillas_2026-06-01_a_2026-06-01_MN01.xlsx" in r.headers["content-disposition"]
+
+    wb = load_workbook(io.BytesIO(r.content))
+    assert wb.sheetnames == ["Planillas", "Seriales"]
+
+    resumen = (await client.get("/api/gestiones/planillas/resumen", params=params, headers=headers)).json()
+    filas_planillas = list(wb["Planillas"].iter_rows(min_row=4, values_only=True))
+    assert len(filas_planillas) == len(resumen) + 1  # + fila TOTAL
+    assert filas_planillas[-1][0] == "TOTAL"
+    total_seriales = sum(p["total_seriales"] for p in resumen)
+    assert filas_planillas[-1][7] == total_seriales
+
+    filas_seriales = list(wb["Seriales"].iter_rows(min_row=4, values_only=True))
+    assert len(filas_seriales) == total_seriales
+    assert {f[0] for f in filas_seriales} >= {"TST-001", "TST-002", "TST-003"}
+
+
+@pytest.mark.asyncio
+async def test_planillas_excel_sin_datos(client, headers):
+    r = await client.get(
+        "/api/gestiones/planillas/excel",
+        params={"fecha_desde": "1990-01-01", "fecha_hasta": "1990-01-02"},
+        headers=headers,
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_resumen_con_precio_cero(client, headers, seriales_test):
     planilla = seriales_test["planilla_a"]
     r = await client.get(

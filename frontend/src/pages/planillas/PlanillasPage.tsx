@@ -1360,39 +1360,6 @@ function BuscarPlanillaSection() {
   );
 }
 
-// ── Utilidad CSV ──────────────────────────────────────────────────────────────
-function exportarCSV(planillas: PlanillaResumen[]) {
-  const cols = [
-    "Planilla", "Mensajero", "Nombre", "Fecha", "Entregas", "Devoluciones",
-    "Total Seriales", "Valor Mensajero", "Valor Cliente", "Bloqueada", "Revisada",
-  ];
-  const rows = planillas.map((p) => [
-    p.planilla,
-    p.cod_men,
-    p.mensajero_nombre ?? "",
-    p.fecha_escaner ?? "",
-    p.entregas,
-    p.devoluciones,
-    p.total_seriales,
-    p.total_mensajero,
-    p.total_cliente,
-    p.bloqueada ? "Sí" : "No",
-    p.revisada ? "Sí" : "No",
-  ]);
-
-  const csv = [cols, ...rows]
-    .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))
-    .join("\n");
-
-  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `planillas_${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
 // ── Página principal ──────────────────────────────────────────────────────────
 export function PlanillasPage() {
   const qc = useQueryClient();
@@ -1415,6 +1382,38 @@ export function PlanillasPage() {
     queryKey: ["planillas", filtros],
     queryFn: () => gestionesApi.planillasResumen(params).then((r) => r.data),
   });
+
+  const [descargandoExcel, setDescargandoExcel] = useState(false);
+
+  async function descargarExcel() {
+    setDescargandoExcel(true);
+    try {
+      const r = await gestionesApi.descargarExcelPlanillas(params);
+      const nombre =
+        /filename="([^"]+)"/.exec(r.headers["content-disposition"] ?? "")?.[1] ??
+        `planillas_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const url = URL.createObjectURL(r.data as Blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = nombre;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: unknown) {
+      // responseType blob: el detail del error llega como Blob, hay que leerlo
+      const data = (e as { response?: { data?: unknown } })?.response?.data;
+      let msg = "Error al generar el Excel";
+      if (data instanceof Blob) {
+        try {
+          msg = JSON.parse(await data.text()).detail ?? msg;
+        } catch {
+          /* respuesta no JSON */
+        }
+      }
+      alert(msg);
+    } finally {
+      setDescargandoExcel(false);
+    }
+  }
 
   const bloquear = useMutation({
     mutationFn: (planilla: string) => gestionesApi.bloquear(planilla),
@@ -1457,13 +1456,13 @@ export function PlanillasPage() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => exportarCSV(planillas)}
-            disabled={planillas.length === 0}
+            onClick={descargarExcel}
+            disabled={planillas.length === 0 || descargandoExcel}
             className="flex items-center gap-1.5 px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-600 disabled:opacity-40"
-            title="Exportar CSV"
+            title="Descargar en Excel las planillas filtradas (resumen + seriales)"
           >
             <Download size={14} />
-            CSV
+            {descargandoExcel ? "Generando…" : "Excel"}
           </button>
           <button
             onClick={() => setShowRecalcular(true)}

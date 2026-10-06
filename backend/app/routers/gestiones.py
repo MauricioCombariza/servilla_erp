@@ -1,6 +1,6 @@
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,7 @@ from app.schemas.gestiones import (
     SerialGestionRead,
     SerialGestionUpdate,
 )
+from app.services.excel_utils import XLSX_MEDIA_TYPE
 from app.services.planillas_service import (
     bloquear_planilla,
     bloquear_por_rango,
@@ -37,6 +38,7 @@ from app.services.planillas_service import (
     ciudades_planilla,
     desbloquear_planilla,
     desmarcar_revisada,
+    excel_planillas,
     marcar_revisada,
     precio_por_ciudades,
     recalcular_bloqueados_sin_precio,
@@ -61,6 +63,32 @@ async def get_planillas_resumen(
     _=_auth,
 ):
     return await resumen_planillas(db, fecha_desde, fecha_hasta, cod_men, planilla, mensajero_id)
+
+
+@router.get("/planillas/excel")
+async def descargar_planillas_excel(
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
+    cod_men: str | None = None,
+    planilla: str | None = None,
+    mensajero_id: int | None = None,
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    contenido = await excel_planillas(db, fecha_desde, fecha_hasta, cod_men, planilla, mensajero_id)
+    if contenido is None:
+        raise HTTPException(status_code=404, detail="No hay planillas para esos filtros.")
+    if planilla:
+        filename = f"planilla_{planilla}"
+    else:
+        filename = f"planillas_{fecha_desde or 'inicio'}_a_{fecha_hasta or 'hoy'}"
+    if cod_men:
+        filename += f"_{cod_men}"
+    return Response(
+        content=contenido,
+        media_type=XLSX_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{filename}.xlsx"'},
+    )
 
 
 @router.patch("/planillas/{planilla}/mensajero", response_model=PlanillaActionResult)

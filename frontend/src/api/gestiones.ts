@@ -106,6 +106,14 @@ export const gestionesApi = {
     mensajero_id?: number;
   }) => api.get<PlanillaResumen[]>("/gestiones/planillas/resumen", { params }),
 
+  descargarExcelPlanillas: (params?: {
+    fecha_desde?: string;
+    fecha_hasta?: string;
+    cod_men?: string;
+    planilla?: string;
+    mensajero_id?: number;
+  }) => api.get("/gestiones/planillas/excel", { params, responseType: "blob" }),
+
   cambiarMensajero: (planilla: string, cod_men: string, mensajero_id?: number) =>
     api.patch<PlanillaActionResult>(
       `/gestiones/planillas/${encodeURIComponent(planilla)}/mensajero`,
