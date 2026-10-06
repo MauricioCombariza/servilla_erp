@@ -12,7 +12,8 @@ const HOY = new Date();
 const CATEGORIAS = [
   "mantenimiento","polizas","servicios_publicos","caja_menor","papeleria",
   "aseo","internet","software","alquiler_equipos","arriendo","honorarios",
-  "impuestos","alimentos","gasolina","otros",
+  "impuestos","alimentos","gasolina","comisiones_bancarias","dotacion",
+  "mantenimiento_vehiculos","seguros","siniestros","depreciacion","otros",
 ];
 
 type Tab = "gastos" | "fijos";

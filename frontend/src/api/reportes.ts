@@ -52,11 +52,30 @@ export interface TendenciaMesRow {
   costo_mensajero: number;
 }
 
-export interface PLMensualRow {
-  mes: number;
-  margen_clientes: number;
-  gasto_nomina: number;
+export interface PLCompletoRow {
+  mes: number; // 0 = total del año
+  ingresos: number;
+  costo_mensajeros: number;
+  alistamiento: number;
+  subsidio: number;
+  ajustes_liquidacion: number;
+  fletes: number;
+  margen_operacional: number;
+  nomina: number;
+  gastos_admin: number;
+  gastos_fijos: number;
+  facturas_proveedores: number;
+  total_gastos: number;
   utilidad_neta: number;
+  margen_pct: number | null;
+  advertencias: string[];
+}
+
+export interface PLCompletoResponse {
+  anio: number;
+  meses: PLCompletoRow[];
+  total: PLCompletoRow;
+  gastos_admin_por_categoria: { categoria: string; mes: number; monto: number }[];
 }
 
 export const reportesApi = {
@@ -83,6 +102,9 @@ export const reportesApi = {
   tendencias: (meses: number) =>
     api.get<TendenciaMesRow[]>("/reportes/tendencias", { params: { meses } }),
 
-  plMensual: (anio: number) =>
-    api.get<PLMensualRow[]>("/reportes/pl-mensual", { params: { anio } }),
+  plCompleto: (anio: number) =>
+    api.get<PLCompletoResponse>("/reportes/pl-completo", { params: { anio } }),
+
+  plCompletoExcel: (anio: number) =>
+    api.get("/reportes/pl-completo/excel", { params: { anio }, responseType: "blob" }),
 };

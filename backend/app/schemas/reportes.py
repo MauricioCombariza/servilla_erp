@@ -60,3 +60,35 @@ class PLMensualRow(BaseModel):
     margen_clientes: float
     gasto_nomina: float
     utilidad_neta: float
+
+
+class PLCompletoRow(BaseModel):
+    mes: int                       # 0 = total del año
+    ingresos: float
+    costo_mensajeros: float
+    alistamiento: float
+    subsidio: float
+    ajustes_liquidacion: float
+    fletes: float
+    margen_operacional: float
+    nomina: float
+    gastos_admin: float
+    gastos_fijos: float
+    facturas_proveedores: float
+    total_gastos: float
+    utilidad_neta: float
+    margen_pct: float | None       # None cuando ingresos = 0
+    advertencias: list[str] = []
+
+
+class GastoCategoriaMes(BaseModel):
+    categoria: str
+    mes: int
+    monto: float
+
+
+class PLCompletoResponse(BaseModel):
+    anio: int
+    meses: list[PLCompletoRow]
+    total: PLCompletoRow
+    gastos_admin_por_categoria: list[GastoCategoriaMes]

@@ -4,9 +4,9 @@ import {
   BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
-import { Download } from "lucide-react";
+import { AlertTriangle, Download } from "lucide-react";
 import { reportesApi } from "@/api/reportes";
-import type { PLMensualRow } from "@/api/reportes";
+import type { PLCompletoRow } from "@/api/reportes";
 import { clientesApi } from "@/api/clientes";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
 
@@ -65,104 +65,168 @@ function MetricCards({ items }: { items: { label: string; value: string; sub?: s
   );
 }
 
-// ── P&L Mensual ───────────────────────────────────────────────────────────────
-function PLMensualTable({ data, anio, mesFiltro }: {
-  data: PLMensualRow[];
-  anio: number;
-  mesFiltro: number | undefined;
-}) {
-  const tot = data.reduce(
-    (acc, r) => ({
-      margen: acc.margen + r.margen_clientes,
-      nomina: acc.nomina + r.gasto_nomina,
-      util: acc.util + r.utilidad_neta,
-    }),
-    { margen: 0, nomina: 0, util: 0 },
-  );
-  const totPct = tot.margen ? (tot.util / tot.margen) * 100 : null;
+// ── Estado de resultados (P&L completo) ──────────────────────────────────────
+type CampoPL = keyof Omit<PLCompletoRow, "mes" | "margen_pct" | "advertencias">;
 
-  const chartData = data.map((r) => ({
+const LINEAS_PL: { label: string; campo: CampoPL; tipo: "ingreso" | "gasto" | "subtotal" | "total" }[] = [
+  { label: "Ingresos clientes", campo: "ingresos", tipo: "ingreso" },
+  { label: "(−) Pago mensajeros", campo: "costo_mensajeros", tipo: "gasto" },
+  { label: "(−) Alistamiento (horas + labores)", campo: "alistamiento", tipo: "gasto" },
+  { label: "(−) Subsidio transporte", campo: "subsidio", tipo: "gasto" },
+  { label: "(−) Ajustes liquidaciones", campo: "ajustes_liquidacion", tipo: "gasto" },
+  { label: "(−) Fletes / transporte", campo: "fletes", tipo: "gasto" },
+  { label: "= Margen operacional", campo: "margen_operacional", tipo: "subtotal" },
+  { label: "(−) Nómina", campo: "nomina", tipo: "gasto" },
+  { label: "(−) Gastos administrativos", campo: "gastos_admin", tipo: "gasto" },
+  { label: "(−) Gastos fijos", campo: "gastos_fijos", tipo: "gasto" },
+  { label: "(−) Facturas proveedores", campo: "facturas_proveedores", tipo: "gasto" },
+  { label: "Total gastos", campo: "total_gastos", tipo: "subtotal" },
+  { label: "= Utilidad neta", campo: "utilidad_neta", tipo: "total" },
+];
+
+function EstadoResultados({ anio, mesFiltro }: { anio: number; mesFiltro: number | undefined }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["reporte-pl-completo", anio],
+    queryFn: () => reportesApi.plCompleto(anio).then((r) => r.data),
+  });
+  const [descargando, setDescargando] = useState(false);
+
+  async function descargarExcel() {
+    setDescargando(true);
+    try {
+      const r = await reportesApi.plCompletoExcel(anio);
+      const url = URL.createObjectURL(r.data as Blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `estado_resultados_${anio}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDescargando(false);
+    }
+  }
+
+  if (isLoading || !data) {
+    return <div className="mt-5 text-center py-10 text-gray-400">Cargando estado de resultados...</div>;
+  }
+
+  const foco = mesFiltro ? data.meses[mesFiltro - 1] : data.total;
+  const focoLabel = mesFiltro ? `${MESES[mesFiltro]} ${anio}` : `Año ${anio}`;
+  const advertencias = data.meses.flatMap((m) => m.advertencias.map((a) => ({ mes: m.mes, a })));
+
+  const chartData = data.meses.map((r) => ({
     name: MESES[r.mes].substring(0, 3),
-    margen: r.margen_clientes,
-    nomina: r.gasto_nomina,
+    ingresos: r.ingresos,
+    gastos: r.total_gastos,
     utilidad: r.utilidad_neta,
   }));
 
   return (
     <div className="mt-5 bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
-          P&L mensual — {anio}
-        </h3>
-        <span className="text-xs text-gray-400">Margen clientes − Gasto nómina</span>
+      <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
+            Estado de resultados — {anio}
+          </h3>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Ingresos − costos operativos − nómina − gastos administrativos y fijos − proveedores
+          </p>
+        </div>
+        <button onClick={descargarExcel} disabled={descargando}
+          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 border border-gray-300 rounded-lg px-3 py-2 disabled:opacity-50">
+          <Download size={14} /> {descargando ? "Generando..." : "Excel"}
+        </button>
       </div>
 
-      <div className="px-4 pt-4">
+      <div className="px-5 pt-4">
+        <p className="text-xs text-gray-500 mb-2">{focoLabel}</p>
+        <MetricCards items={[
+          { label: "Ingresos", value: fmt(foco.ingresos) },
+          { label: "Margen operacional", value: fmt(foco.margen_operacional) },
+          { label: "Total gastos", value: fmt(foco.total_gastos) },
+          { label: "Utilidad neta", value: fmt(foco.utilidad_neta), sub: pct(foco.margen_pct) },
+        ]} />
+      </div>
+
+      {advertencias.length > 0 && (
+        <div className="mx-5 mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+          <p className="flex items-center gap-1.5 font-semibold mb-1">
+            <AlertTriangle size={14} /> Datos incompletos: la utilidad de estos meses puede estar sobrestimada
+          </p>
+          <ul className="list-disc pl-5 space-y-0.5">
+            {advertencias.map(({ mes, a }) => (
+              <li key={`${mes}-${a}`}><span className="font-medium">{MESES[mes]}:</span> {a}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="px-4">
         <ResponsiveContainer width="100%" height={200}>
           <BarChart data={chartData} margin={{ top: 0, right: 8, left: 8, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
             <XAxis dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
             <YAxis
-              tickFormatter={(v: number) => v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `$${(v / 1e3).toFixed(0)}k` : `$${v}`}
+              tickFormatter={(v: number) => Math.abs(v) >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : Math.abs(v) >= 1e3 ? `$${(v / 1e3).toFixed(0)}k` : `$${v}`}
               tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={60}
             />
             <Tooltip formatter={(v: number) => [fmt(v), ""]} labelStyle={{ fontWeight: 600 }} />
             <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
-            <Bar dataKey="margen" name="Margen clientes" fill="#93c5fd" radius={[3, 3, 0, 0]} maxBarSize={24} />
-            <Bar dataKey="nomina" name="Gasto nómina" fill="#fb923c" radius={[3, 3, 0, 0]} maxBarSize={24} />
+            <Bar dataKey="ingresos" name="Ingresos" fill="#93c5fd" radius={[3, 3, 0, 0]} maxBarSize={24} />
+            <Bar dataKey="gastos" name="Total gastos" fill="#fb923c" radius={[3, 3, 0, 0]} maxBarSize={24} />
             <Bar dataKey="utilidad" name="Utilidad neta" fill="#4ade80" radius={[3, 3, 0, 0]} maxBarSize={24} />
           </BarChart>
         </ResponsiveContainer>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[560px]">
+      <div className="overflow-x-auto mt-2">
+        <table className="w-full text-xs min-w-[1200px]">
           <thead className="bg-gray-50 border-y border-gray-200">
             <tr>
-              {["Mes", "Margen clientes", "Gasto nómina", "Utilidad neta", "%"].map((h, i) => (
-                <th key={h} className={`px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide ${i === 0 ? "text-left" : "text-right"}`}>{h}</th>
+              <th className="sticky left-0 bg-gray-50 px-4 py-3 text-left font-medium text-gray-600 uppercase tracking-wide">Concepto</th>
+              {data.meses.map((m) => (
+                <th key={m.mes} className={`px-3 py-3 text-right font-medium uppercase tracking-wide ${mesFiltro === m.mes ? "text-blue-700 bg-blue-50" : "text-gray-600"}`}>
+                  {MESES[m.mes].substring(0, 3)}
+                </th>
               ))}
+              <th className="px-4 py-3 text-right font-bold text-gray-700 uppercase tracking-wide">Total</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
-            {data.map((r) => {
-              const hasDatos = r.margen_clientes > 0 || r.gasto_nomina > 0;
-              const rowPct = r.margen_clientes ? (r.utilidad_neta / r.margen_clientes) * 100 : null;
-              const highlight = mesFiltro === r.mes;
+            {LINEAS_PL.map(({ label, campo, tipo }) => {
+              const destacado = tipo === "subtotal" || tipo === "total";
+              const color = (v: number) =>
+                tipo === "gasto" ? "text-gray-600"
+                : v < 0 ? "text-red-600"
+                : tipo === "total" ? "text-green-700" : "text-gray-900";
               return (
-                <tr key={r.mes} className={highlight ? "bg-blue-50" : "hover:bg-gray-50"}>
-                  <td className={`px-4 py-2.5 font-medium ${highlight ? "text-blue-700" : "text-gray-700"}`}>
-                    {MESES[r.mes]}
+                <tr key={campo} className={tipo === "total" ? "bg-gray-50 border-t-2 border-gray-300" : destacado ? "bg-gray-50/60" : "hover:bg-gray-50"}>
+                  <td className={`sticky left-0 bg-inherit px-4 py-2 whitespace-nowrap ${destacado ? "font-bold text-gray-800" : "text-gray-700"}`}>
+                    {label}
                   </td>
-                  <td className="px-4 py-2.5 text-right text-gray-700">
-                    {hasDatos ? fmt(r.margen_clientes) : <span className="text-gray-300">—</span>}
-                  </td>
-                  <td className="px-4 py-2.5 text-right text-orange-600">
-                    {r.gasto_nomina > 0 ? fmt(r.gasto_nomina) : <span className="text-gray-300">—</span>}
-                  </td>
-                  <td className={`px-4 py-2.5 text-right font-semibold ${hasDatos ? (r.utilidad_neta >= 0 ? "text-green-700" : "text-red-600") : "text-gray-300"}`}>
-                    {hasDatos ? fmt(r.utilidad_neta) : "—"}
-                  </td>
-                  <td className={`px-4 py-2.5 text-right text-xs ${hasDatos ? (r.utilidad_neta >= 0 ? "text-green-600" : "text-red-500") : "text-gray-300"}`}>
-                    {hasDatos && rowPct !== null ? `${rowPct.toFixed(1)}%` : ""}
+                  {data.meses.map((m) => (
+                    <td key={m.mes} className={`px-3 py-2 text-right whitespace-nowrap ${destacado ? "font-semibold" : ""} ${color(m[campo])} ${mesFiltro === m.mes ? "bg-blue-50" : ""}`}>
+                      {m[campo] ? fmt(m[campo]) : <span className="text-gray-300">—</span>}
+                    </td>
+                  ))}
+                  <td className={`px-4 py-2 text-right whitespace-nowrap font-bold ${color(data.total[campo])}`}>
+                    {fmt(data.total[campo])}
                   </td>
                 </tr>
               );
             })}
-          </tbody>
-          <tfoot className="bg-gray-50 border-t-2 border-gray-300">
             <tr>
-              <td className="px-4 py-3 text-xs font-bold text-gray-700 uppercase">Total {anio}</td>
-              <td className="px-4 py-3 text-right text-sm font-bold text-gray-900">{fmt(tot.margen)}</td>
-              <td className="px-4 py-3 text-right text-sm font-bold text-orange-600">{fmt(tot.nomina)}</td>
-              <td className={`px-4 py-3 text-right text-sm font-bold ${tot.util >= 0 ? "text-green-700" : "text-red-600"}`}>
-                {fmt(tot.util)}
-              </td>
-              <td className={`px-4 py-3 text-right text-xs font-bold ${tot.util >= 0 ? "text-green-600" : "text-red-500"}`}>
-                {totPct !== null ? `${totPct.toFixed(1)}%` : ""}
+              <td className="sticky left-0 bg-white px-4 py-2 text-gray-500">Margen neto %</td>
+              {data.meses.map((m) => (
+                <td key={m.mes} className={`px-3 py-2 text-right ${(m.margen_pct ?? 0) < 0 ? "text-red-500" : "text-green-600"} ${mesFiltro === m.mes ? "bg-blue-50" : ""}`}>
+                  {m.margen_pct != null ? pct(m.margen_pct) : ""}
+                </td>
+              ))}
+              <td className={`px-4 py-2 text-right font-bold ${(data.total.margen_pct ?? 0) < 0 ? "text-red-500" : "text-green-600"}`}>
+                {pct(data.total.margen_pct)}
               </td>
             </tr>
-          </tfoot>
+          </tbody>
         </table>
       </div>
     </div>
@@ -178,11 +242,6 @@ function TabOperacional() {
   const { data = [], isLoading } = useQuery({
     queryKey: ["reporte-operacional", anio, mes],
     queryFn: () => reportesApi.operacional(anio, mes).then((r) => r.data),
-  });
-
-  const { data: plMensual = [] } = useQuery({
-    queryKey: ["reporte-pl-mensual", anio],
-    queryFn: () => reportesApi.plMensual(anio).then((r) => r.data),
   });
 
   const totalSer = data.reduce((s, r) => s + r.total_seriales, 0);
@@ -247,7 +306,7 @@ function TabOperacional() {
           {!data.length && <div className="text-center py-12 text-gray-400">Sin datos para este período</div>}
         </div>
       )}
-      <PLMensualTable data={plMensual} anio={anio} mesFiltro={mes} />
+      <EstadoResultados anio={anio} mesFiltro={mes} />
     </div>
   );
 }

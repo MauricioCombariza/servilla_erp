@@ -138,6 +138,36 @@ async def test_tendencias_limite_max(client, headers):
     assert r.status_code == 422
 
 
+# ── P&L completo ──────────────────────────────────────────────────────────────
+
+_GASTOS_PL = ("costo_mensajeros", "alistamiento", "subsidio", "ajustes_liquidacion", "fletes",
+              "nomina", "gastos_admin", "gastos_fijos", "facturas_proveedores")
+
+
+@pytest.mark.asyncio
+async def test_pl_completo_cuadra(client, headers):
+    r = await client.get("/api/reportes/pl-completo?anio=2026", headers=headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["anio"] == 2026
+    assert [m["mes"] for m in data["meses"]] == list(range(1, 13))
+    for row in [*data["meses"], data["total"]]:
+        total_gastos = sum(row[c] for c in _GASTOS_PL)
+        assert row["total_gastos"] == pytest.approx(total_gastos, abs=0.05)
+        assert row["utilidad_neta"] == pytest.approx(row["ingresos"] - total_gastos, abs=0.05)
+    for campo in ("ingresos", "total_gastos", "utilidad_neta"):
+        assert data["total"][campo] == pytest.approx(sum(m[campo] for m in data["meses"]), abs=0.5)
+
+
+@pytest.mark.asyncio
+async def test_pl_completo_excel(client, headers):
+    r = await client.get("/api/reportes/pl-completo/excel?anio=2026", headers=headers)
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    assert r.content[:2] == b"PK"
+
+
 # ── Acceso sin auth ───────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -148,6 +178,7 @@ async def test_sin_autenticacion(client):
         "/api/reportes/ordenes",
         "/api/reportes/facturacion",
         "/api/reportes/tendencias",
+        "/api/reportes/pl-completo",
     ]:
         r = await client.get(url)
         assert r.status_code == 401, f"Esperaba 401 en {url}"

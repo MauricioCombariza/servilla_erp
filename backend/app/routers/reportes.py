@@ -1,7 +1,7 @@
 from calendar import monthrange
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy import BigInteger, bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,15 +9,21 @@ from app.auth.dependencies import require_page
 from app.database import get_db
 from app.schemas.reportes import (
     FacturacionClienteRow,
+    GastoCategoriaMes,
     OrdenReporteRow,
+    PLCompletoResponse,
+    PLCompletoRow,
     PLMensualRow,
     ResumenClienteRow,
     ResumenMensajeroRow,
     TendenciaMesRow,
 )
+from app.services.excel_utils import XLSX_MEDIA_TYPE, construir_excel_multi
 
 router = APIRouter(prefix="/api/reportes", tags=["reportes"])
 _auth = Depends(require_page("reportes"))
+
+_MESES_CORTOS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 
 
 def _rango_anio_mes(anio: int, mes: int | None) -> tuple[date, date]:
@@ -134,6 +140,269 @@ async def get_pl_mensual(
         )
         for m in range(1, 13)
     ]
+
+
+# ── 2b. P&L completo (estado de resultados con todos los gastos) ─────────────
+#
+# Fuentes y criterio de mes (causado, no caja):
+#   ingresos            seriales_gestion.precio_cliente        por f_emi
+#   costo_mensajeros    seriales_gestion.precio_mensajero      por f_esc (como liquidaciones)
+#   alistamiento        registro_horas.total + registro_labores.total   por fecha
+#   subsidio            subsidio_transporte.total              por fecha
+#   ajustes_liquidacion liquidaciones: bonificaciones − descuentos + (valor_ajustado − total_a_pagar)
+#                       por periodo
+#   fletes              facturas_transporte.monto_total        por fecha_factura
+#   nomina              nomina_provisiones (11 componentes)    por periodo
+#   gastos_admin        gastos_administrativos.monto           por fecha
+#   gastos_fijos        pago registrado del mes; si no hay, monto del fijo activo
+#                       (desde el mes en que se creó y hasta el mes actual)
+#   facturas_proveedores facturas_recibidas tipo materiales/otros, no anuladas, por fecha_recepcion
+#
+# Para no contar dos veces:
+#   - ajustes_liquidacion (tabla) ya entra en liquidaciones.bonificaciones/descuentos.
+#   - prefacturas/facturas_courier_cxp y facturas_recibidas tipo courier/transportadora
+#     ya están en precio_mensajero / fletes.
+#   - horas/labores/subsidio se toman de sus registros, no de liquidaciones.total_*.
+
+_SQL_POR_MES = {
+    "ingresos": """
+        SELECT EXTRACT(MONTH FROM f_emi)::int AS mes, SUM(precio_cliente) AS v
+        FROM seriales_gestion
+        WHERE f_emi BETWEEN :desde AND :hasta AND estado != 'anulado'
+        GROUP BY 1
+    """,
+    "costo_mensajeros": """
+        SELECT EXTRACT(MONTH FROM f_esc)::int AS mes, SUM(precio_mensajero) AS v
+        FROM seriales_gestion
+        WHERE f_esc BETWEEN :desde AND :hasta AND estado != 'anulado'
+        GROUP BY 1
+    """,
+    "alistamiento": """
+        SELECT EXTRACT(MONTH FROM fecha)::int AS mes, SUM(total) AS v
+        FROM (
+            SELECT fecha, total FROM registro_horas   WHERE fecha BETWEEN :desde AND :hasta
+            UNION ALL
+            SELECT fecha, total FROM registro_labores WHERE fecha BETWEEN :desde AND :hasta
+        ) sub
+        GROUP BY 1
+    """,
+    "subsidio": """
+        SELECT EXTRACT(MONTH FROM fecha)::int AS mes, SUM(total) AS v
+        FROM subsidio_transporte
+        WHERE fecha BETWEEN :desde AND :hasta
+        GROUP BY 1
+    """,
+    "ajustes_liquidacion": """
+        SELECT periodo_mes AS mes,
+               SUM(COALESCE(bonificaciones, 0) - COALESCE(descuentos, 0)
+                   + COALESCE(valor_ajustado - total_a_pagar, 0)) AS v
+        FROM liquidaciones
+        WHERE periodo_anio = :anio
+        GROUP BY 1
+    """,
+    "fletes": """
+        SELECT EXTRACT(MONTH FROM fecha_factura)::int AS mes, SUM(monto_total) AS v
+        FROM facturas_transporte
+        WHERE fecha_factura BETWEEN :desde AND :hasta AND estado != 'anulada'
+        GROUP BY 1
+    """,
+    "nomina": """
+        SELECT periodo_mes AS mes,
+               SUM(
+                   COALESCE(salario_base, 0) + COALESCE(auxilio_transporte, 0) +
+                   COALESCE(auxilio_no_salarial, 0) + COALESCE(arl, 0) +
+                   COALESCE(eps, 0) + COALESCE(afp, 0) +
+                   COALESCE(caja_compensacion, 0) + COALESCE(prima, 0) +
+                   COALESCE(cesantias, 0) + COALESCE(int_cesantias, 0) +
+                   COALESCE(vacaciones, 0)
+               ) AS v
+        FROM nomina_provisiones
+        WHERE periodo_anio = :anio
+        GROUP BY 1
+    """,
+    "gastos_admin": """
+        SELECT EXTRACT(MONTH FROM fecha)::int AS mes, SUM(monto) AS v
+        FROM gastos_administrativos
+        WHERE fecha BETWEEN :desde AND :hasta
+        GROUP BY 1
+    """,
+    "facturas_proveedores": """
+        SELECT EXTRACT(MONTH FROM fecha_recepcion)::int AS mes, SUM(total) AS v
+        FROM facturas_recibidas
+        WHERE fecha_recepcion BETWEEN :desde AND :hasta
+          AND tipo IN ('materiales', 'otros') AND estado != 'anulada'
+        GROUP BY 1
+    """,
+}
+
+# Una fila por (gasto fijo, mes): pago registrado si existe; si no, el monto del
+# fijo activo para los meses entre su creación y el mes actual (causado).
+_SQL_GASTOS_FIJOS = """
+    WITH meses AS (SELECT generate_series(1, 12) AS mes),
+    causado AS (
+        SELECT gf.id, m.mes, gf.monto
+        FROM gastos_fijos_mensuales gf
+        CROSS JOIN meses m
+        WHERE gf.activo
+          AND make_date(:anio, m.mes, 1) >= date_trunc('month', COALESCE(gf.created_at, make_date(:anio, 1, 1)))::date
+          AND make_date(:anio, m.mes, 1) <= date_trunc('month', CURRENT_DATE)::date
+    ),
+    pagos AS (
+        SELECT gasto_fijo_id AS id, mes, SUM(monto_pagado) AS monto
+        FROM pagos_gastos_fijos
+        WHERE anio = :anio
+        GROUP BY 1, 2
+    )
+    SELECT COALESCE(p.mes, c.mes) AS mes,
+           SUM(COALESCE(p.monto, c.monto)) AS v,
+           COUNT(*) FILTER (WHERE p.id IS NULL)::int AS sin_pago
+    FROM causado c
+    FULL OUTER JOIN pagos p ON p.id = c.id AND p.mes = c.mes
+    GROUP BY 1
+"""
+
+_CAMPOS_COSTO_OPERATIVO = ("costo_mensajeros", "alistamiento", "subsidio", "ajustes_liquidacion", "fletes")
+_CAMPOS_GASTO_FIJO = ("nomina", "gastos_admin", "gastos_fijos", "facturas_proveedores")
+
+
+def _fila_pl(mes: int, v: dict[str, float], advertencias: list[str]) -> PLCompletoRow:
+    costos_op = sum(v[c] for c in _CAMPOS_COSTO_OPERATIVO)
+    margen_op = v["ingresos"] - costos_op
+    total_gastos = costos_op + sum(v[c] for c in _CAMPOS_GASTO_FIJO)
+    utilidad = v["ingresos"] - total_gastos
+    return PLCompletoRow(
+        mes=mes,
+        **{k: round(x, 2) for k, x in v.items()},
+        margen_operacional=round(margen_op, 2),
+        total_gastos=round(total_gastos, 2),
+        utilidad_neta=round(utilidad, 2),
+        margen_pct=round(utilidad / v["ingresos"] * 100, 2) if v["ingresos"] else None,
+        advertencias=advertencias,
+    )
+
+
+async def calcular_pl_completo(db: AsyncSession, anio: int) -> PLCompletoResponse:
+    params = {"anio": anio, "desde": date(anio, 1, 1), "hasta": date(anio, 12, 31)}
+
+    por_campo: dict[str, dict[int, float]] = {}
+    for campo, sql in _SQL_POR_MES.items():
+        rows = (await db.execute(text(sql), params)).mappings().all()
+        por_campo[campo] = {int(r["mes"]): float(r["v"] or 0) for r in rows}
+
+    fijos_rows = (await db.execute(text(_SQL_GASTOS_FIJOS), params)).mappings().all()
+    por_campo["gastos_fijos"] = {int(r["mes"]): float(r["v"] or 0) for r in fijos_rows}
+    fijos_sin_pago = {int(r["mes"]): r["sin_pago"] for r in fijos_rows}
+
+    categorias = (await db.execute(
+        text("""
+            SELECT categoria, EXTRACT(MONTH FROM fecha)::int AS mes, SUM(monto) AS monto
+            FROM gastos_administrativos
+            WHERE fecha BETWEEN :desde AND :hasta
+            GROUP BY 1, 2
+            ORDER BY 1, 2
+        """),
+        params,
+    )).mappings().all()
+
+    campos = ["ingresos", *_CAMPOS_COSTO_OPERATIVO, *_CAMPOS_GASTO_FIJO]
+    meses: list[PLCompletoRow] = []
+    for m in range(1, 13):
+        v = {c: por_campo[c].get(m, 0.0) for c in campos}
+        advertencias = []
+        hay_actividad = v["ingresos"] or v["costo_mensajeros"]
+        if hay_actividad and not v["nomina"]:
+            advertencias.append("Sin provisiones de nómina")
+        if fijos_sin_pago.get(m):
+            advertencias.append(f"{fijos_sin_pago[m]} gasto(s) fijo(s) sin pago registrado (se usa el monto)")
+        if hay_actividad and not v["gastos_admin"]:
+            advertencias.append("Sin gastos administrativos registrados")
+        meses.append(_fila_pl(m, v, advertencias))
+
+    total = _fila_pl(0, {c: sum(getattr(f, c) for f in meses) for c in campos}, [])
+
+    return PLCompletoResponse(
+        anio=anio,
+        meses=meses,
+        total=total,
+        gastos_admin_por_categoria=[
+            GastoCategoriaMes(categoria=r["categoria"], mes=int(r["mes"]), monto=round(float(r["monto"]), 2))
+            for r in categorias
+        ],
+    )
+
+
+@router.get("/pl-completo", response_model=PLCompletoResponse)
+async def get_pl_completo(
+    anio: int = Query(default_factory=lambda: date.today().year),
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    return await calcular_pl_completo(db, anio)
+
+
+_LINEAS_PL = [
+    ("Ingresos clientes", "ingresos"),
+    ("(−) Pago mensajeros", "costo_mensajeros"),
+    ("(−) Alistamiento (horas + labores)", "alistamiento"),
+    ("(−) Subsidio transporte", "subsidio"),
+    ("(−) Ajustes liquidaciones", "ajustes_liquidacion"),
+    ("(−) Fletes / transporte", "fletes"),
+    ("= Margen operacional", "margen_operacional"),
+    ("(−) Nómina", "nomina"),
+    ("(−) Gastos administrativos", "gastos_admin"),
+    ("(−) Gastos fijos", "gastos_fijos"),
+    ("(−) Facturas proveedores", "facturas_proveedores"),
+    ("Total gastos", "total_gastos"),
+    ("= Utilidad neta", "utilidad_neta"),
+    ("Margen %", "margen_pct"),
+]
+
+
+@router.get("/pl-completo/excel")
+async def get_pl_completo_excel(
+    anio: int = Query(default_factory=lambda: date.today().year),
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    pl = await calcular_pl_completo(db, anio)
+
+    col_meses = [_MESES_CORTOS[m - 1] for m in range(1, 13)]
+    columnas = ["Concepto", *col_meses, "Total"]
+    filas = []
+    for etiqueta, campo in _LINEAS_PL:
+        fila = {"Concepto": etiqueta, "Total": getattr(pl.total, campo)}
+        for nombre_mes, row in zip(col_meses, pl.meses):
+            fila[nombre_mes] = getattr(row, campo)
+        filas.append(fila)
+
+    cat_cols = ["Categoría", *col_meses, "Total"]
+    cat_filas: dict[str, dict] = {}
+    for g in pl.gastos_admin_por_categoria:
+        fila = cat_filas.setdefault(g.categoria, {"Categoría": g.categoria, "Total": 0.0})
+        fila[col_meses[g.mes - 1]] = g.monto
+        fila["Total"] += g.monto
+
+    adv_filas = [
+        {"Mes": col_meses[r.mes - 1], "Advertencia": a}
+        for r in pl.meses for a in r.advertencias
+    ]
+
+    contenido = construir_excel_multi(
+        [
+            ("Estado de resultados", f"Estado de resultados {anio}", columnas, filas,
+             [36, *[13] * 12, 15]),
+            ("Gastos admin", f"Gastos administrativos por categoría {anio}", cat_cols,
+             list(cat_filas.values()), [24, *[13] * 12, 15]),
+            ("Advertencias", f"Datos incompletos {anio}", ["Mes", "Advertencia"], adv_filas,
+             [10, 70]),
+        ],
+        formatos={c: "#,##0" for c in [*col_meses, "Total"]},
+    )
+    return Response(
+        content=contenido,
+        media_type=XLSX_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="estado_resultados_{anio}.xlsx"'},
+    )
 
 
 # ── 3. Gestiones por mensajero ────────────────────────────────────────────────

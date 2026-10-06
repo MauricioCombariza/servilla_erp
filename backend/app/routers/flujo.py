@@ -26,10 +26,10 @@ async def resumen_mensual(
     params: dict = {}
     anio_filter = ""
     if anio is not None:
-        anio_filter = "AND sg_mes.anio = :anio AND fe_mes.anio = :anio AND ga_mes.anio = :anio"
+        anio_filter = "WHERE m.anio = :anio"
         params["anio"] = anio
 
-    sql = text("""
+    sql = text(f"""
         WITH meses AS (
             SELECT DISTINCT
                 EXTRACT(YEAR  FROM fecha_emision)::INT AS anio,
@@ -116,6 +116,7 @@ async def resumen_mensual(
         LEFT JOIN costos_men cm ON m.anio = cm.anio AND m.mes = cm.mes
         LEFT JOIN gastos_adm ga ON m.anio = ga.anio AND m.mes = ga.mes
         LEFT JOIN nom        n  ON m.anio = n.anio  AND m.mes = n.mes
+        {anio_filter}
         ORDER BY m.anio DESC, m.mes DESC
     """)
     rows = (await db.execute(sql, params)).mappings().all()
