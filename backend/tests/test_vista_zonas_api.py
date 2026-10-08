@@ -28,7 +28,7 @@ async def preparar():
     await _limpiar()
     async with AsyncSessionLocal() as db:
         await guardar_paquetes(db, [
-            PaqueteEntrada(f"{PREFIJO}0001", "Ana", None, "CL 63 # 30-11"),   # 60_1
+            PaqueteEntrada(f"{PREFIJO}0001", "Ana", None, "CL 63 # 27-11"),   # 60_1
             PaqueteEntrada(f"{PREFIJO}0002", "Luis", None, "CL 64 # 20-11"),  # 60_2
             PaqueteEntrada(f"{PREFIJO}0003", "Eva", None, "CL 21 33 40"),     # fuera de zona
         ], date(2026, 10, 8))
@@ -79,7 +79,7 @@ async def test_cada_persona_ve_solo_sus_zonas_y_todos_ven_fuera_de_zona(client):
         ("0001", "60_1", None), ("0003", None, "Fuera de zona"), ("9999", None, "Fuera de zona"),
     ]
     assert [(p["ultimos_4"], p["zona"]) for p in b] == [("0002", "60_2"), ("0003", None), ("9999", None)]
-    assert a[0]["direccion"] == "CL 63 30 11"
+    assert a[0]["direccion"] == "CL 63 27 11"
     assert "serial" not in a[0]  # solo los últimos 4 dígitos
 
 

@@ -3,7 +3,7 @@ import {
   Users, UserCheck, ShoppingCart, FileText, BarChart2,
   Clock, DollarSign, Truck, Receipt, Wallet, Calculator, List, ClipboardCheck,
   LogOut, Menu, X, ArrowDownCircle, ArrowUpCircle, Search, Building2, MapPin, PackageCheck,
-  ScanLine, Radio, RotateCcw, ShieldCheck, Hexagon, Image as ImageIcon, FileCog,
+  ScanLine, Radio, RotateCcw, ShieldCheck, Hexagon, Image as ImageIcon, FileCog, Upload,
 } from "lucide-react";
 import { useState } from "react";
 import { useAuthStore } from "@/store/authStore";
@@ -37,6 +37,7 @@ const navItems = [
   { to: "/escaneo-devoluciones", label: "Escaneo Devoluciones", icon: ScanLine, pageKey: "devoluciones_scan" },
   { to: "/escaneo-carryt", label: "Escaneo Carryt", icon: ScanLine, pageKey: "escaneo_carryt" },
   { to: "/imile-offload-scan", label: "Escaneo Offloading iMile", icon: Radio, pageKey: "imile_offload_scan" },
+  { to: "/subir-despacho", label: "Subir Base Despacho", icon: Upload, pageKey: "paquetes_despacho" },
   { to: "/admin/usuarios-roles", label: "Administración", icon: ShieldCheck, adminOnly: true },
 ];
 
