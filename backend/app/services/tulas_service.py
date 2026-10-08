@@ -11,11 +11,13 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.tulas import ESTADO_ABIERTA, ESTADO_CERRADA, Tula, TulaSerial
+from app.services.imile_ingreso import imile_ingreso
 from app.services.paquetes_despacho_service import Destino, buscar_destino
 
 AVISO_YA_ESCANEADO = "Ya escaneado en esta tula"
@@ -63,6 +65,8 @@ class ResultadoEscaneo:
     resumen: ResumenTula
     destino: Destino
     ya_escaneado: bool
+    imile_estado: str | None
+    imile_mensaje: str | None
 
 
 async def _leidos(db: AsyncSession, tula_id: int) -> int:
@@ -133,11 +137,58 @@ async def registrar_serial(db: AsyncSession, tula_id: int, serial: str) -> Resul
         .on_conflict_do_nothing(constraint="uq_tula_seriales_tula_serial")
         .returning(TulaSerial.id)
     )
-    nuevo = (await db.execute(stmt)).scalar_one_or_none()
+    nuevo_id = (await db.execute(stmt)).scalar_one_or_none()
+    # Se guarda la lectura ANTES de ir a iMile: si iMile falla o tarda, el paquete ya cuenta
     await db.commit()
+
+    if nuevo_id is not None:
+        # Paso 2.5: el ingreso en iMile se hace siempre, aunque el serial no esté en la tabla
+        await _ingresar_en_imile(db, nuevo_id, destino.serial)
+
+    registro = (
+        await db.execute(
+            select(TulaSerial).where(TulaSerial.tula_id == tula.id, TulaSerial.serial == destino.serial)
+        )
+    ).scalar_one()
     return ResultadoEscaneo(
-        resumen=await resumen(db, tula), destino=destino, ya_escaneado=nuevo is None
+        resumen=await resumen(db, tula),
+        destino=destino,
+        ya_escaneado=nuevo_id is None,
+        imile_estado=registro.imile_estado,
+        imile_mensaje=registro.imile_mensaje,
     )
+
+
+async def _ingresar_en_imile(db: AsyncSession, tula_serial_id: int, serial: str) -> None:
+    if not settings.imile_ingreso_activo:
+        estado, mensaje = "omitido", "Ingreso en iMile apagado (IMILE_INGRESO_ACTIVO)"
+    else:
+        try:
+            r = await imile_ingreso.ingresar(serial)
+            estado, mensaje = r.estado.value, r.mensaje
+        # Cualquier falla de iMile (sesión caída, no responde, la página cambió…) se guarda
+        # como error: nunca debe hacer perder la lectura del paquete en la tula
+        except Exception as exc:  # noqa: BLE001
+            estado, mensaje = "error", f"{type(exc).__name__}: {exc}"[:500]
+    await db.execute(
+        update(TulaSerial)
+        .where(TulaSerial.id == tula_serial_id)
+        .values(imile_estado=estado, imile_mensaje=mensaje, imile_fecha=func.now())
+    )
+    await db.commit()
+
+
+async def reintentar_imile(db: AsyncSession, tula_id: int, serial: str) -> TulaSerial:
+    """Vuelve a ingresar en iMile un paquete ya leído (p. ej. si la primera vez falló)."""
+    result = await db.execute(
+        select(TulaSerial).where(TulaSerial.tula_id == tula_id, TulaSerial.serial == serial.strip())
+    )
+    registro = result.scalar_one_or_none()
+    if registro is None:
+        raise TulaNoEncontradaError(f"El serial {serial} no está leído en la tula {tula_id}")
+    await _ingresar_en_imile(db, registro.id, registro.serial)
+    await db.refresh(registro)
+    return registro
 
 
 async def _cerrar(db: AsyncSession, tula: Tula) -> None:

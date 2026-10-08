@@ -10,6 +10,7 @@ from app.schemas.tulas import (
     AbrirTulaRequest,
     EscanearSerialRequest,
     EscaneoResult,
+    IngresoImile,
     TulaDetalle,
     TulaRead,
     TulaSerialRead,
@@ -24,6 +25,7 @@ from app.services.tulas_service import (
     listar_tulas,
     obtener_tula,
     registrar_serial,
+    reintentar_imile,
     resumen,
     seriales_de,
     tula_abierta,
@@ -42,10 +44,16 @@ def _tula_read(r: ResumenTula) -> TulaRead:
     )
 
 
+def _serial_read(s) -> TulaSerialRead:
+    return TulaSerialRead(
+        serial=s.serial, en_tabla=s.en_tabla, zona=s.zona, fecha_escaneo=s.fecha_escaneo,
+        imile_estado=s.imile_estado, imile_mensaje=s.imile_mensaje,
+    )
+
+
 async def _detalle(db: AsyncSession, r: ResumenTula) -> TulaDetalle:
     seriales = [
-        TulaSerialRead(serial=s.serial, en_tabla=s.en_tabla, zona=s.zona, fecha_escaneo=s.fecha_escaneo)
-        for s in await seriales_de(db, r.tula.id)
+        _serial_read(s) for s in await seriales_de(db, r.tula.id)
     ]
     return TulaDetalle(**_tula_read(r).model_dump(), seriales=seriales)
 
@@ -87,7 +95,8 @@ async def escanear(
     db: AsyncSession = Depends(get_db),
     _=_auth,
 ):
-    """Lee un paquete de la tula: lo cuenta (si no estaba ya) y devuelve su destino (2.6)."""
+    """Lee un paquete de la tula: lo cuenta (si no estaba ya), lo ingresa en iMile (2.5)
+    y devuelve su destino (2.6)."""
     try:
         r = await registrar_serial(db, tula_id, body.serial)
     except TulaNoEncontradaError as e:
@@ -95,8 +104,20 @@ async def escanear(
     except TulaCerradaError as e:
         raise HTTPException(status_code=409, detail=str(e))
     return EscaneoResult(
-        tula=_tula_read(r.resumen), destino=asdict(r.destino), ya_escaneado=r.ya_escaneado
+        tula=_tula_read(r.resumen),
+        destino=asdict(r.destino),
+        ya_escaneado=r.ya_escaneado,
+        imile=IngresoImile(estado=r.imile_estado, mensaje=r.imile_mensaje),
     )
+
+
+@router.post("/{tula_id}/seriales/{serial}/reintentar-imile", response_model=TulaSerialRead)
+async def reintentar(tula_id: int, serial: str, db: AsyncSession = Depends(get_db), _=_auth):
+    """Vuelve a ingresar en iMile un paquete ya leído (si la primera vez falló)."""
+    try:
+        return _serial_read(await reintentar_imile(db, tula_id, serial))
+    except TulaNoEncontradaError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.post("/{tula_id}/cerrar", response_model=TulaDetalle)

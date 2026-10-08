@@ -107,6 +107,14 @@ class ImileSesion:
             await self._preparar()
             return await self._estado_sin_lock()
 
+    @property
+    def base_url(self) -> str:
+        return self._base_url
+
+    async def cerrar_recorrido(self, page: Page) -> None:
+        """Para los pasos que navegan a otra página de iMile: el recorrido puede volver a salir."""
+        await self._cerrar_recorrido(page)
+
     async def estado(self) -> EstadoSesionImile:
         async with self._lock:
             return await self._estado_sin_lock()

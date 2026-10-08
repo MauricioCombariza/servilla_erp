@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     imile_user: str = ""
     imile_pass: str = ""
     imile_sesion_state_path: str = ""  # vacío → backend/.secrets/imile_sesion.json
+    # Ingreso real de paquetes en iMile (Paso 2.5). Apagado hasta validarlo contra iMile real.
+    imile_ingreso_activo: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

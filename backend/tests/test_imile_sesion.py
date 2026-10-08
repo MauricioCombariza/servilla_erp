@@ -3,8 +3,6 @@ servido en local: mismo formulario de ingreso (userCode / password), recorrido d
 bienvenida que aparece tarde y tapa la página, y selector de idioma en el encabezado.
 No tocan iMile."""
 import asyncio
-import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
@@ -14,66 +12,13 @@ from app.services.imile_sesion import (
     ImileLoginError,
     ImileSesion,
 )
-
-USUARIO, CLAVE = "operador", "clave-secreta"
-
-LOGIN_HTML = f"""<!doctype html><html><body>
-<input name="userCode"><input name="password" type="password">
-<script>
-document.querySelector("input[name=password]").addEventListener("keydown", e => {{
-  if (e.key !== "Enter") return;
-  const u = document.querySelector("input[name=userCode]").value;
-  if (u === "{USUARIO}" && e.target.value === "{CLAVE}") {{
-    document.cookie = "sesion=1; path=/"; location.href = "/#";
-  }}
-}});
-</script></body></html>"""
-
-HOME_HTML = """<!doctype html><html><body>
-<script>
-if (!document.cookie.includes("sesion=1")) location.href = "/login";
-const idioma = document.cookie.includes("LANG=es") ? "Español" : "English";
-</script>
-<header><span id="idioma"></span><ul id="menu" style="display:none">
-  <li>English</li><li>简体中文</li><li>Español</li><li>German</li></ul></header>
-<main>Inicio</main>
-<script>
-document.getElementById("idioma").textContent = idioma;
-document.getElementById("idioma").onclick = () => document.getElementById("menu").style.display = "block";
-document.querySelectorAll("#menu li").forEach(li => li.onclick = () => {
-  document.cookie = "LANG=" + (li.textContent === "Español" ? "es_MX" : "en_US") + "; path=/";
-  location.reload();
-});
-// Como en iMile real: el recorrido de bienvenida aparece un rato DESPUÉS de cargar y tapa la página
-setTimeout(() => {
-  const w = document.createElement("div");
-  w.className = "fireWrap";
-  w.innerHTML = '<div class="overlay" style="position:fixed;inset:0"></div><div class="close-icon" style="position:fixed;z-index:9">x</div>';
-  document.body.appendChild(w);
-  w.querySelector(".close-icon").onclick = () => w.remove();
-}, 600);
-</script></body></html>"""
-
-
-class _FakeImile(BaseHTTPRequestHandler):
-    def do_GET(self):  # nombre fijo de http.server
-        cuerpo = LOGIN_HTML if self.path.startswith("/login") else HOME_HTML
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.end_headers()
-        self.wfile.write(cuerpo.encode())
-
-    def log_message(self, *args):
-        pass
+from tests.fake_imile import CLAVE, USUARIO, servidor_fake_imile
 
 
 @pytest.fixture(scope="module")
 def fake_imile_url():
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _FakeImile)
-    hilo = threading.Thread(target=server.serve_forever, daemon=True)
-    hilo.start()
-    yield f"http://127.0.0.1:{server.server_address[1]}"
-    server.shutdown()
+    with servidor_fake_imile() as url:
+        yield url
 
 
 @pytest.fixture

@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, ForeignKey, String, UniqueConstraint, text
+from sqlalchemy import Boolean, ForeignKey, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import TIMESTAMP
 
@@ -40,3 +40,7 @@ class TulaSerial(Base):
     en_tabla: Mapped[bool] = mapped_column(Boolean, nullable=False)
     zona: Mapped[str | None] = mapped_column(String(50))
     fecha_escaneo: Mapped[datetime] = mapped_column(_ts, server_default=text("CURRENT_TIMESTAMP"))
+    # Ingreso en iMile (Paso 2.5): ok | repetido | bloqueado | error | sin_confirmar | omitido
+    imile_estado: Mapped[str | None] = mapped_column(String(20))
+    imile_mensaje: Mapped[str | None] = mapped_column(Text)
+    imile_fecha: Mapped[datetime | None] = mapped_column(_ts)

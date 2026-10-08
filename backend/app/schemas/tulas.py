@@ -25,6 +25,8 @@ class TulaSerialRead(BaseModel):
     en_tabla: bool
     zona: str | None
     fecha_escaneo: datetime
+    imile_estado: str | None  # ok | repetido | bloqueado | error | sin_confirmar | omitido
+    imile_mensaje: str | None
 
 
 class TulaDetalle(TulaRead):
@@ -41,7 +43,13 @@ class EscanearSerialRequest(BaseModel):
     serial: str = Field(min_length=1)
 
 
+class IngresoImile(BaseModel):
+    estado: str | None  # ok | repetido | bloqueado | error | sin_confirmar | omitido
+    mensaje: str | None
+
+
 class EscaneoResult(BaseModel):
     tula: TulaRead
     destino: DestinoPaquete
     ya_escaneado: bool
+    imile: IngresoImile

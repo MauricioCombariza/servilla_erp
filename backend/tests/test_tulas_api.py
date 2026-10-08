@@ -6,12 +6,15 @@ from datetime import date
 import pytest
 from sqlalchemy import delete
 
+from app.config import settings
 from app.database import AsyncSessionLocal
 from app.main import app
 from app.models.paquetes_despacho import PaqueteDespacho
 from app.models.tulas import Tula
 from app.routers import paquetes_despacho as paquetes_router
 from app.routers import tulas as tulas_router
+from app.services import tulas_service
+from app.services.imile_ingreso import EstadoIngreso, ResultadoIngreso
 from app.services.paquetes_despacho_service import PaqueteEntrada, guardar_paquetes
 
 USUARIO = "test-tulas"
@@ -164,6 +167,64 @@ async def test_listar_tulas_del_dia(client):
     tula = (await _abrir(client, "BAG-070")).json()
     r = (await client.get(f"{URL}/", params={"fecha": tula["fecha"]})).json()
     assert tula["id"] in [t["id"] for t in r]
+
+
+# ── Ingreso en iMile (2.5) ────────────────────────────────────────────────────
+
+class _ImileFalso:
+    def __init__(self, falla: bool = False):
+        self.llamados: list[str] = []
+        self.falla = falla
+
+    async def ingresar(self, serial):
+        self.llamados.append(serial)
+        if self.falla:
+            raise TimeoutError("iMile no respondió")
+        return ResultadoIngreso(EstadoIngreso.OK, "Escaneo exitoso")
+
+
+async def test_con_ingreso_apagado_no_toca_imile(client, monkeypatch):
+    monkeypatch.setattr(settings, "imile_ingreso_activo", False)
+    imile = _ImileFalso()
+    monkeypatch.setattr(tulas_service, "imile_ingreso", imile)
+    tula = (await _abrir(client, "BAG-080")).json()
+
+    r = (await _leer(client, tula["id"], f"{PREFIJO}1")).json()
+
+    assert r["imile"]["estado"] == "omitido"
+    assert imile.llamados == []
+
+
+async def test_cada_paquete_se_ingresa_en_imile_una_sola_vez(client, monkeypatch):
+    monkeypatch.setattr(settings, "imile_ingreso_activo", True)
+    imile = _ImileFalso()
+    monkeypatch.setattr(tulas_service, "imile_ingreso", imile)
+    tula = (await _abrir(client, "BAG-081")).json()
+
+    r1 = (await _leer(client, tula["id"], f"{PREFIJO}1")).json()
+    r2 = (await _leer(client, tula["id"], f"{PREFIJO}NO-ESTA")).json()  # se ingresa aunque no esté
+    r3 = (await _leer(client, tula["id"], f"{PREFIJO}1")).json()  # repetido en la tula
+
+    assert (r1["imile"]["estado"], r2["imile"]["estado"]) == ("ok", "ok")
+    assert r3["ya_escaneado"] is True and r3["imile"]["estado"] == "ok"
+    assert imile.llamados == [f"{PREFIJO}1", f"{PREFIJO}NO-ESTA"]
+
+
+async def test_si_imile_falla_el_paquete_igual_cuenta_y_se_puede_reintentar(client, monkeypatch):
+    monkeypatch.setattr(settings, "imile_ingreso_activo", True)
+    monkeypatch.setattr(tulas_service, "imile_ingreso", _ImileFalso(falla=True))
+    tula = (await _abrir(client, "BAG-082", total=5)).json()
+
+    r = (await _leer(client, tula["id"], f"{PREFIJO}1")).json()
+    assert (r["tula"]["leidos"], r["tula"]["contador"]) == (1, 4)
+    assert r["imile"]["estado"] == "error"
+    assert "iMile no respondió" in r["imile"]["mensaje"]
+
+    monkeypatch.setattr(tulas_service, "imile_ingreso", _ImileFalso())
+    reintento = (await client.post(f"{URL}/{tula['id']}/seriales/{PREFIJO}1/reintentar-imile")).json()
+    assert reintento["imile_estado"] == "ok"
+    detalle = (await client.get(f"{URL}/{tula['id']}")).json()
+    assert detalle["seriales"][0]["imile_estado"] == "ok"
 
 
 async def test_tula_inexistente(client):
