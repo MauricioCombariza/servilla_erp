@@ -14,3 +14,4 @@ from app.models.escaneos_carryt import EscaneoCarryt  # noqa: F401
 from app.models.devoluciones import Devolucion  # noqa: F401
 from app.models.geocercas import Geocerca  # noqa: F401
 from app.models.sectorizacion import SectorizacionLimite  # noqa: F401
+from app.models.paquetes_despacho import PaqueteDespacho  # noqa: F401
