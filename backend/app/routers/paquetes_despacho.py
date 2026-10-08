@@ -29,6 +29,8 @@ from app.services.paquetes_despacho_service import (
 
 router = APIRouter(prefix="/api/paquetes-despacho", tags=["paquetes-despacho"])
 _auth = Depends(require_page("paquetes_despacho"))
+# Quien escanea tulas (rol mensajero) también necesita ver el destino de cada paquete
+_auth_destino = Depends(require_page("paquetes_despacho", "escaneo_tulas"))
 
 # Una base de despacho diaria pesa unos cientos de KB; el límite solo evita abusos
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -93,7 +95,7 @@ async def listar(
 
 
 @router.get("/destino/{serial}", response_model=DestinoPaquete)
-async def destino(serial: str, db: AsyncSession = Depends(get_db), _=_auth):
+async def destino(serial: str, db: AsyncSession = Depends(get_db), _=_auth_destino):
     """Al escanear un paquete: últimos 4 dígitos, dirección, localidad y zona (Paso 2.6)."""
     return asdict(await buscar_destino(db, serial))
 

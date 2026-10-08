@@ -39,11 +39,14 @@ def _archivo(contenido: bytes, nombre: str = "despacho.xlsx"):
 
 @pytest.fixture(autouse=True)
 async def limpiar_y_autorizar():
-    app.dependency_overrides[router_module._auth.dependency] = lambda: {"username": "test", "rol": "administrador"}
+    usuario = {"username": "test", "rol": "administrador"}
+    app.dependency_overrides[router_module._auth.dependency] = lambda: usuario
+    app.dependency_overrides[router_module._auth_destino.dependency] = lambda: usuario
     await _limpiar()
     yield
     await _limpiar()
     app.dependency_overrides.pop(router_module._auth.dependency, None)
+    app.dependency_overrides.pop(router_module._auth_destino.dependency, None)
 
 
 async def _limpiar():
