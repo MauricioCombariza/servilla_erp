@@ -132,23 +132,28 @@ def _coordenadas_dir(dir_estandarizada):
     via2_num = int(m2.group(1))
     via2_let = codificar_letras(m2.group(2).strip())
 
+    # Cambio 2026-10-08: dirnum comparaba cardinal == 'SUR' / 'ESTE' y un compuesto
+    # ("SUR ESTE", "SUR OESTE") no activaba ninguno, así que lo ubicaba al norte-occidente.
+    # Ahora el SUR de un compuesto cuenta, y "SUR ESTE" también cuenta como ESTE.
+    # Una calle con ESTE solo ("CL 73 # 1-15 ESTE") se deja como en dirnum (sin signo en
+    # la carrera): la tabla de códigos postales casi no tiene límites del lado oriental,
+    # y darle signo deja a cientos de direcciones sin localidad.
+    partes_cardinal = cardinal.split() if cardinal else []
+    es_sur = 'SUR' in partes_cardinal
+    es_compuesto_este = len(partes_cardinal) == 2 and partes_cardinal[1] == 'ESTE'
+
     if tipo in ('CL', 'DG'):
         cl_p = via1_num * 10000 + (via1_let - 100)
-        if cardinal == 'SUR':
-            cl_p = -cl_p
         cr_p = via2_num * 10000 + (via2_let - 100)
-        return cl_p, cr_p
-
-    if tipo in ('CR', 'TR'):
+        es_este = es_compuesto_este
+    elif tipo in ('CR', 'TR'):
         cr_p = via1_num * 10000 + (via1_let - 100)
-        if cardinal == 'ESTE':
-            cr_p = -cr_p
         cl_p = via2_num * 10000 + (via2_let - 100)
-        if cardinal == 'SUR':
-            cl_p = -cl_p
-        return cl_p, cr_p
+        es_este = 'ESTE' in partes_cardinal
+    else:
+        return None, None
 
-    return None, None
+    return (-cl_p if es_sur else cl_p), (-cr_p if es_este else cr_p)
 
 
 def _texto_paridad(valor):

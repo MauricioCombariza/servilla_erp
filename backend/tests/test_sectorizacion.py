@@ -7,6 +7,7 @@ dirnum (los 3 Excel), salvo los cambios aprobados el 2026-10-08:
   - zona 70_6 = CL 78–CL 80, CR 56A (placa impar)–CR 58; 70_5 se queda con CR 56A par
   - "CLLL" se lee como calle; "Carretera" y "Carera" como carrera
   - en las zonas, la paridad de placa solo cuenta en la vía principal
+  - "SUR ESTE" (o SUR en el medio + ESTE al final) ubica la dirección al sur-oriente
 """
 import csv
 from pathlib import Path
@@ -93,7 +94,8 @@ def test_todo_codigo_postal_tiene_localidad(limites):
     ("CR 79Fbis 36A 16 BL8 INT 2 AP 403 SUR", "CR 79FBIS 36A 16 SUR", "Kennedy", None),
     ("CL 39A 73A 26 PS 2 SUR", "CL 39A 73A 26 SUR", "Kennedy", None),
     ("CR 73Bbis 26 81B 9 AP 313 SUPERMANZANA 2 SU", "CR 73BBIS 26 81B", "Fontibon", None),
-    ("CL 36B 73F 15 SUR ESTE", "CL 36B 73F 15 SUR ESTE", "Engativa", None),
+    # dirnum daba Engativa porque ignoraba el SUR de "SUR ESTE" (cambio 2026-10-08)
+    ("CL 36B 73F 15 SUR ESTE", "CL 36B 73F 15 SUR ESTE", "Kennedy", None),
     ("CR 78J 3539 BL 29 INT 04 AP 404 SUPER MANZ", "CR 78J 35 39", "Engativa", None),
     ("CR 51Dbis 42B 49 SUR", "CR 51DBIS 42B 49 SUR", "Puente Aranda", None),
     ("CR 68CbisA 38C 42 SUR", "CR 68CBISA 38C 42 SUR", "Kennedy", None),
@@ -165,6 +167,20 @@ def test_carretera_y_carera_se_leen_como_carrera(indice, direccion, dir_std, zon
     r = sectorizar(direccion, indice)
     assert r.direccion_estandarizada == dir_std
     assert r.zona == zona
+
+
+@pytest.mark.parametrize("direccion,dir_std", [
+    ("CL 11 # 16-99 SUR ESTE", "CL 11 16 99 SUR ESTE"),
+    ("CL 11 SUR # 16-99 ESTE", "CL 11 16 99 SUR ESTE"),  # SUR en el medio + ESTE al final
+])
+def test_sur_este_se_estandariza_completo(indice, direccion, dir_std):
+    assert sectorizar(direccion, indice).direccion_estandarizada == dir_std
+
+
+def test_sur_este_queda_al_sur_oriente():
+    from app.services.sectorizacion_service import _coordenadas_dir
+    cl, cr = _coordenadas_dir("CL 11 16 99 SUR ESTE")
+    assert cl < 0 and cr < 0
 
 
 # ── Paridad solo en la vía principal; la vía que cruza va por cuadras ─────────

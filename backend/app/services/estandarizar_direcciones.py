@@ -9,6 +9,7 @@ los mismos resultados; la parte que dependía de archivos Excel quedó en
 Cambios respecto a dirnum (aprobados por el usuario):
   - 2026-10-08: "CLLL" (error de digitación frecuente) se acepta como calle.
   - 2026-10-08: "Carretera" y "Carera" se aceptan como carrera.
+  - 2026-10-08: SUR en el medio + ESTE/OESTE al final se combinan ("SUR ESTE").
 """
 
 import re
@@ -220,6 +221,12 @@ def extraer_punto_cardinal(direccion):
         elif cardinal == 'NOROESTE':
             cardinal = 'NORTE OESTE'
         cardinal = re.sub(r'\s+', ' ', cardinal)
+        # "CL 11 SUR # 16-99 ESTE": SUR quedó en el medio y ESTE al final → SUR ESTE
+        # (cambio 2026-10-08: dirnum se quedaba solo con el del final)
+        if cardinal_medio and cardinal in ('ESTE', 'OESTE'):
+            medio = cardinal_medio.upper().strip()
+            if medio in ('SUR', 'NORTE', 'SUL'):
+                cardinal = f"{'SUR' if medio == 'SUL' else medio} {cardinal}"
         direccion_sin_cardinal = direccion[:match.start()].strip()
         return direccion_sin_cardinal, cardinal
 

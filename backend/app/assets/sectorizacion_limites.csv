@@ -10,7 +10,7 @@ codigo_postal,111961,Ciudad Bolivar,DG 67A SUR,,CL 97 SUR,,CR 1,,CR 24,,8
 codigo_postal,110911,Fontibon,CL 63,,CL 22,,CR 86,,CR 125,,9
 codigo_postal,111121,Suba,CL 100,,CL 250,,CR 100,,CR 61,,10
 codigo_postal,110721,Bosa,CL 59 SUR,,CL 91 SUR,,CR 80,,CR 113,,11
-codigo_postal,110441,San Cristobal,CL 34 SUR,,CL 74A SUR,,CR 20 ESTE,,CR 10,,12
+codigo_postal,110441,San Cristobal,CL 34 SUR,,CL 74A SUR,,CR 50 ESTE,,CR 10,,12
 codigo_postal,110551,Usme,CL 110 SUR,,CL 138 SUR,,CR 15 ESTE,,CR 10,,13
 codigo_postal,110561,Usme,CL 110 SUR,,CL 150 SUR,,CR 15 ESTE,,CR 20,,14
 codigo_postal,111151,Suba,CL 145,,CL 129,,TR 118,,CR 170,,15
@@ -31,7 +31,7 @@ codigo_postal,112031,Sumapaz,CL 180 SUR,,CL 240 SUR,,CR 5 ESTE,,CR 15,,29
 codigo_postal,111131,Suba,CL 145,,CL 99,,CR 91,,CR 104,,30
 codigo_postal,111611,Puente Aranda,DG 22A,,CL 3,,CR 30,,CR 68,,31
 codigo_postal,110571,Usme,CL 115 SUR,,CL 140 SUR,,CR 15 ESTE,,CR 5,,32
-codigo_postal,110421,San Cristobal,CL 20 SUR,,CL 36 SUR,,CR 15 ESTE,,CR 10,,33
+codigo_postal,110421,San Cristobal,CL 20 SUR,,CL 36 SUR,,CR 50 ESTE,,CR 10,,33
 codigo_postal,110921,Fontibon,CL 22,,CL 12,,CR 86,,CR 130,,34
 codigo_postal,110221,Chapinero,CL 100,,CL 72,,CR 1,,CR 45,,35
 codigo_postal,110741,Bosa,CL 45 SUR,,DG 57C SUR,,CR 80I,,CR 77G,,36
@@ -44,12 +44,12 @@ codigo_postal,111061,Engativa,CL 80,,CL 63,,CR 68,,CR 72,,42
 codigo_postal,111921,Ciudad Bolivar,DG 50 SUR,,CL 69A SUR,,CR 70,,CR 77F,,43
 codigo_postal,111031,Engativa,CL 80,,CL 63,,CR 110,,CR 130,,44
 codigo_postal,111021,Engativa,CL 99,,CL 80,,CR 68,,CR 96,,45
-codigo_postal,110431,San Cristobal,CL 34 SUR,,CL 46 SUR,,CR 17 ESTE,,CR 10,,46
+codigo_postal,110431,San Cristobal,CL 34 SUR,,CL 46 SUR,,CR 50 ESTE,,CR 10,,46
 codigo_postal,110731,Bosa,CL 58 SUR,,DG 73F SUR,,CR 80,,CR 77G,,47
 codigo_postal,111811,Rafael Uribe Uribe,CL 1 SUR,,CL 47A SUR,,CR 27 ESTE,,CR 14,,48
 codigo_postal,112041,Sumapaz,CL 210 SUR,,CL 250 SUR,,CR 1,,CR 30,,49
 codigo_postal,111711,Candelaria,CL 13,,CL 4,,CR 4B ESTE,,CR 10,,50
-codigo_postal,110411,San Cristobal,CL 1,,CL 20 SUR,,CR 15 ESTE,,CR 10,,51
+codigo_postal,110411,San Cristobal,CL 1,,CL 20 SUR,,CR 50 ESTE,,CR 10,,51
 codigo_postal,111511,Antonio Nariño,CL 1,,CL 22 SUR,,CR 10,,CR 45,,52
 codigo_postal,110121,Usaquen,CL 147,,CL 127,,CR 15 ESTE,,CR 45,,53
 codigo_postal,110811,Kennedy,CL 15 SUR,,CL 6,,CR 86,,CR 110,,54
