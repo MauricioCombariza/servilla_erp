@@ -35,3 +35,16 @@ class CargaDespachoResult(BaseModel):
 
 class CorregirDireccionRequest(BaseModel):
     direccion: str = Field(min_length=1)
+
+
+class DestinoPaquete(BaseModel):
+    """Lo que se muestra al escanear un paquete (Paso 2.6)."""
+    serial: str
+    ultimos_4: str
+    en_tabla: bool
+    direccion: str | None = None
+    direccion_estandarizada: str | None = None  # más corta y legible en el celular
+    localidad: str | None = None
+    zona: str | None = None
+    fuera_de_zona: bool = False
+    aviso: str | None = None  # "No está en la tabla" | "Fuera de zona"

@@ -1,3 +1,4 @@
+from dataclasses import asdict
 from datetime import date
 from typing import Literal
 
@@ -10,12 +11,14 @@ from app.database import get_db
 from app.schemas.paquetes_despacho import (
     CargaDespachoResult,
     CorregirDireccionRequest,
+    DestinoPaquete,
     PaqueteDespachoRead,
     PaqueteSinSector,
 )
 from app.services.excel_utils import XLSX_MEDIA_TYPE
 from app.services.paquetes_despacho_service import (
     ColumnasFaltantesError,
+    buscar_destino,
     corregir_direccion,
     exportar_csv,
     exportar_excel,
@@ -87,6 +90,12 @@ async def listar(
     _=_auth,
 ):
     return await listar_paquetes(db, f_emi, zona=zona, solo_sin_sector=solo_sin_sector)
+
+
+@router.get("/destino/{serial}", response_model=DestinoPaquete)
+async def destino(serial: str, db: AsyncSession = Depends(get_db), _=_auth):
+    """Al escanear un paquete: últimos 4 dígitos, dirección, localidad y zona (Paso 2.6)."""
+    return asdict(await buscar_destino(db, serial))
 
 
 @router.patch("/{serial}/direccion", response_model=PaqueteDespachoRead)

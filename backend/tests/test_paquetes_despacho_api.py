@@ -183,6 +183,41 @@ async def test_exportar(client, formato, tipo):
         assert f"{PREFIJO}1" in seriales
 
 
+# ── Destino al escanear (Paso 2.6) ────────────────────────────────────────────
+
+async def test_destino_de_un_paquete_con_zona(client):
+    await _cargar_tres(client)
+
+    r = await client.get(f"{URL}/destino/ {PREFIJO}2 ")  # el lector puede mandar espacios
+
+    assert r.status_code == 200
+    assert r.json() == {
+        "serial": f"{PREFIJO}2", "ultimos_4": "11-2",
+        "en_tabla": True, "direccion": "CR 20 # 66-15", "direccion_estandarizada": "CR 20 66 15",
+        "localidad": "Chapinero",
+        "zona": "60_4", "fuera_de_zona": False, "aviso": None,
+    }
+
+
+async def test_destino_fuera_de_zona(client):
+    await _cargar(client, _excel(COLUMNAS_EN, [[f"{PREFIJO}9", "Ana", "300", "CL 21 33 40", None]]))
+
+    body = (await client.get(f"{URL}/destino/{PREFIJO}9")).json()
+
+    assert (body["localidad"], body["zona"]) == ("Puente Aranda", None)
+    assert body["fuera_de_zona"] is True
+    assert body["aviso"] == "Fuera de zona"
+
+
+async def test_destino_de_un_serial_que_no_esta_en_la_tabla(client):
+    body = (await client.get(f"{URL}/destino/{PREFIJO}NUEVO1234")).json()
+
+    assert body["en_tabla"] is False
+    assert body["ultimos_4"] == "1234"
+    assert body["aviso"] == "No está en la tabla"
+    assert (body["direccion"], body["zona"]) == (None, None)
+
+
 # ── Permisos ──────────────────────────────────────────────────────────────────
 
 async def test_sin_token_se_rechaza(client):

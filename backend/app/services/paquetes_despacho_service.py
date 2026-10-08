@@ -159,6 +159,49 @@ def leer_excel_despacho(contenido: bytes) -> list[PaqueteEntrada]:
 
 # ========== CONSULTA, CORRECCIÓN Y EXPORTACIÓN ==========
 
+AVISO_NO_ESTA = "No está en la tabla"
+AVISO_FUERA_DE_ZONA = "Fuera de zona"
+
+
+@dataclass(frozen=True)
+class Destino:
+    serial: str
+    ultimos_4: str
+    en_tabla: bool
+    direccion: str | None = None
+    direccion_estandarizada: str | None = None
+    localidad: str | None = None
+    zona: str | None = None
+    fuera_de_zona: bool = False
+    aviso: str | None = None
+
+
+async def buscar_destino(db: AsyncSession, serial: str) -> Destino:
+    """Paso 2.6: serial escaneado → últimos 4 dígitos, dirección, localidad y zona.
+
+    Un serial que no está en la tabla se informa, pero no es un error: el ingreso en
+    iMile (2.5) se hace igual. Un paquete sin zona específica es "Fuera de zona" (2.7).
+    """
+    serial = serial.strip()
+    ultimos_4 = serial[-4:]
+    result = await db.execute(select(PaqueteDespacho).where(PaqueteDespacho.serial == serial))
+    paquete = result.scalar_one_or_none()
+    if paquete is None:
+        return Destino(serial=serial, ultimos_4=ultimos_4, en_tabla=False, aviso=AVISO_NO_ESTA)
+
+    fuera = paquete.zona is None
+    return Destino(
+        serial=serial,
+        ultimos_4=ultimos_4,
+        en_tabla=True,
+        direccion=paquete.direccion,
+        direccion_estandarizada=paquete.direccion_estandarizada,
+        localidad=paquete.localidad,
+        zona=paquete.zona,
+        fuera_de_zona=fuera,
+        aviso=AVISO_FUERA_DE_ZONA if fuera else None,
+    )
+
 async def listar_paquetes(
     db: AsyncSession,
     f_emi: date,
