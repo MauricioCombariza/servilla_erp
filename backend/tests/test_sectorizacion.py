@@ -110,10 +110,10 @@ def test_igual_que_dirnum(indice, direccion, dir_std, localidad, zona):
 # ── Cada una de las 33 zonas reconoce una dirección de su centro ──────────────
 
 @pytest.mark.parametrize("zona,direccion", [
-    ("60_1", "CL 63 # 30-11"), ("60_2", "CL 64 # 20-11"), ("60_3", "CL 65 # 15-11"),
+    ("60_1", "CL 63 # 27-11"), ("60_2", "CL 64 # 20-11"), ("60_3", "CL 65 # 15-11"),
     ("60_4", "CL 67 # 20-11"), ("60_5", "CL 70 # 15-11"), ("60_6", "CL 70 # 20-11"),
     ("60_7", "CL 67 # 27-11"), ("60_8", "CL 70 # 27-11"), ("60_9", "CL 70 # 49-11"),
-    ("60_10", "CL 65 # 42-11"), ("60_11", "CL 65 # 57-11"), ("60_12", "CL 65 # 64-11"),
+    ("60_10", "CR 45 # 66-50"), ("60_11", "CR 45 # 63-50"), ("60_12", "CL 65 # 64-11"),
     ("60_13", "CL 64 # 27-11"), ("70_1", "CL 78 # 22-11"), ("70_2", "CL 74 # 22-11"),
     ("70_3", "CL 74 # 27-11"), ("70_4", "CL 78 # 27-11"), ("70_5", "CL 76 # 43-11"),
     ("70_6", "CL 79 # 57-11"), ("70_7", "CL 76 # 58-11"), ("70_8", "CL 76 # 62-11"),
@@ -212,3 +212,17 @@ def test_direccion_que_no_se_puede_ubicar(indice, direccion):
     r = sectorizar(direccion, indice)
     assert r.localidad is None
     assert r.zona is None
+
+
+# ── Ajuste de zonas 60_1, 60_10 y 60_11 (2026-10-08) ──────────────────────────
+
+@pytest.mark.parametrize("direccion,zona", [
+    ("CR 45 # 63-50", "60_11"),  # cuadra CL 63–64: 60_11
+    ("CR 45 # 64-10", "60_10"),  # desde la CL 64: 60_10
+    ("CR 58 # 66-20", "60_10"),  # 60_10 llega ahora hasta la CR 60
+    ("CR 35 # 63-20", "60_11"),  # 60_11 empieza ahora en la CR 30
+    ("CR 32 # 63B-20", "60_11"), # 60_1 ya no pasa de la CR 30: ahí sigue 60_11
+    ("CL 63 # 30-11", None),     # cuadra CR 30–31 sobre la CL 63 (placa impar): fuera de zona
+])
+def test_ajuste_zonas_60(indice, direccion, zona):
+    assert sectorizar(direccion, indice).zona == zona

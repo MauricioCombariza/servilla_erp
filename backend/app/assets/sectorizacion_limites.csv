@@ -80,7 +80,7 @@ codigo_postal,110321,Santa Fe,CL 19,,CL 1,,CR 3 ESTE,,CR 14,,78
 codigo_postal,110831,Kennedy,CL 13,,CL 26 SUR,,CR 68,,CR 72,,79
 codigo_postal,110211,Chapinero,CL 100,,CL 76,,CR 25,,CR 7,,80
 codigo_postal,110141,Usaquen,CL 205,,CL 170,,CR 7 ESTE,,CR 45,,81
-zona,60_1,,CL 63F,par,CL 63,impar,CR 24,impar,CR 36,par,1
+zona,60_1,,CL 63F,par,CL 63,impar,CR 24,impar,CR 30,par,1
 zona,60_2,,CL 63,par,CL 66,impar,CR 17,impar,CR 24,par,2
 zona,60_3,,CL 63,par,CL 68,impar,CR 14,impar,CR 17,par,3
 zona,60_4,,CL 66,par,CL 68,impar,CR 17,impar,CR 24,par,4
@@ -89,8 +89,8 @@ zona,60_6,,CL 68,par,CL 72,impar,CR 17,impar,CR 24,par,6
 zona,60_7,,CL 66,par,CL 68,impar,CR 24,impar,CR 30,par,7
 zona,60_8,,CL 68,par,CL 72,impar,CR 24,impar,CR 30,par,8
 zona,60_9,,CL 68,par,CL 72,impar,CR 30,impar,CR 68,par,9
-zona,60_10,,CL 63,par,CL 68,impar,CR 30,impar,CR 54,par,10
-zona,60_11,,CL 63,par,CL 68,impar,CR 54,impar,CR 60,par,11
+zona,60_10,,CL 64,par,CL 68,impar,CR 30,impar,CR 60,par,10
+zona,60_11,,CL 63,par,CL 64,impar,CR 30,impar,CR 60,par,11
 zona,60_12,,CL 63,par,CL 68,impar,CR 60,impar,CR 68,par,12
 zona,60_13,,CL 63F,par,CL 66,impar,CR 24,impar,CR 30,par,13
 zona,70_1,,CL 76,par,CL 80,impar,CR 20,impar,CR 24,par,14
