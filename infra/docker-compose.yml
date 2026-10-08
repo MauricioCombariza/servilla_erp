@@ -29,6 +29,12 @@ services:
       JWT_SECRET:       ${JWT_SECRET}
       ALLOWED_ORIGINS:  ${ALLOWED_ORIGINS:-http://localhost}
       ENVIRONMENT:      ${ENVIRONMENT:-production}
+      IMILE_USER:       ${IMILE_USER:-}
+      IMILE_PASS:       ${IMILE_PASS:-}
+    volumes:
+      # Sesión de iMile (app/services/imile_sesion.py): sobrevive a reinicios del
+      # contenedor, así no hay que volver a iniciar sesión (~30 s) cada vez
+      - imile_secrets:/app/.secrets
     depends_on:
       postgres:
         condition: service_healthy
@@ -58,3 +64,4 @@ services:
 
 volumes:
   pg_data:
+  imile_secrets:

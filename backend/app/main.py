@@ -26,17 +26,20 @@ from app.routers.usuarios_admin import router as usuarios_admin_router
 from app.routers.devoluciones import router as devoluciones_router
 from app.routers.geocercas import router as geocercas_router
 from app.routers.paquetes_despacho import router as paquetes_despacho_router
+from app.routers.imile_sesion import router as imile_sesion_router
 from app.routers.imagenes import router as imagenes_router
 from app.routers.generar_dat import router as generar_dat_router
 from app.config import settings
 from app.database import engine
 from app.services.imile_automation import imile_automation
+from app.services.imile_sesion import imile_sesion
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
     await imile_automation.shutdown()
+    await imile_sesion.cerrar()
     await engine.dispose()
 
 
@@ -77,6 +80,7 @@ app.include_router(usuarios_admin_router)
 app.include_router(devoluciones_router)
 app.include_router(geocercas_router)
 app.include_router(paquetes_despacho_router)
+app.include_router(imile_sesion_router)
 app.include_router(imagenes_router)
 app.include_router(generar_dat_router)
 
