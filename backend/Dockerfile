@@ -10,6 +10,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml .
 RUN pip install --no-cache-dir -e ".[dev]" || pip install --no-cache-dir -e .
 
+# Navegador para la automatización de iMile (app/services/imile_sesion.py) con sus
+# librerías del sistema; sin esto Playwright no puede abrir Chromium en el servidor
+RUN playwright install --with-deps chromium
+
 COPY . .
 
 EXPOSE 8000

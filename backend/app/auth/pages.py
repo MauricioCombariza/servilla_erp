@@ -37,6 +37,9 @@ PAGE_CATALOG: list[PageDef] = [
     PageDef("imile_offload_scan", "Escaneo Offloading iMile", "/imile-offload-scan"),
     PageDef("geocercas", "Geocercas Barrios Unidos", "/geocercas"),
     PageDef("generar_dat", "Generar DAT BCS", "/generar-dat"),
+    PageDef("paquetes_despacho", "Ingreso de Paquetes", "/subir-despacho"),
+    PageDef("escaneo_tulas", "Escaneo de Tulas", "/escaneo-tulas"),
+    PageDef("asignacion_zonas", "Asignación de Zonas", "/asignacion-zonas"),
 ]
 
 PAGE_KEYS: set[str] = {p.key for p in PAGE_CATALOG}

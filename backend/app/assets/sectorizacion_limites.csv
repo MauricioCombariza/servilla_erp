@@ -1,0 +1,115 @@
+tipo,nombre,localidad,limite_norte,placas_norte,limite_sur,placas_sur,limite_oriente,placas_oriente,limite_occidente,placas_occidente,orden
+codigo_postal,111321,Teusaquillo,CL 63,,DG 22A,,CR 30,,CR 68,,1
+codigo_postal,110231,Chapinero,CL 72,,CL 39,,CR 20 ESTE,,CR 20,,2
+codigo_postal,110931,Fontibon,CL 26,,CL 17,,CR 68,,CR 86,,3
+codigo_postal,110511,Usme,CL 81A SUR,,CL 89A SUR,,CR 51,,TR 5C,,4
+codigo_postal,110841,Kennedy,CL 11 SUR,,CL 48 SUR,,CR 68,,CL 44 SUR,,5
+codigo_postal,111161,Suba,CL 170,,CL 145,,CR 92,,CR 160,,6
+codigo_postal,111221,Barrios Unidos,CL 72,,CL 63,,CR 20,,CR 68,,7
+codigo_postal,111961,Ciudad Bolivar,DG 67A SUR,,CL 97 SUR,,CR 1,,CR 24,,8
+codigo_postal,110911,Fontibon,CL 63,,CL 22,,CR 86,,CR 125,,9
+codigo_postal,111121,Suba,CL 100,,CL 250,,CR 100,,CR 61,,10
+codigo_postal,110721,Bosa,CL 59 SUR,,CL 91 SUR,,CR 80,,CR 113,,11
+codigo_postal,110441,San Cristobal,CL 34 SUR,,CL 74A SUR,,CR 50 ESTE,,CR 10,,12
+codigo_postal,110551,Usme,CL 110 SUR,,CL 138 SUR,,CR 15 ESTE,,CR 10,,13
+codigo_postal,110561,Usme,CL 110 SUR,,CL 150 SUR,,CR 15 ESTE,,CR 20,,14
+codigo_postal,111151,Suba,CL 145,,CL 129,,TR 118,,CR 170,,15
+codigo_postal,110871,Kennedy,CL 63,,CL 40 SUR,,CR 86,,CR 125,,16
+codigo_postal,111821,Rafael Uribe Uribe,CL 1 SUR,,CL 47 SUR,,CR 14 ESTE,,CR 10,,17
+codigo_postal,111041,Engativa,CL 80,,CL 63,,CR 96,,CR 110,,18
+codigo_postal,111621,Puente Aranda,CL 3,,DG 45 SUR,,CR 50,,CR 68,,19
+codigo_postal,111971,Ciudad Bolivar,CL 97 SUR,,CL 110 SUR,,CR 1,,CR 80,,20
+codigo_postal,111941,Ciudad Bolivar,CL 62 SUR,,CL 73 SUR,,CR 19,,CR 51,,21
+codigo_postal,110311,Santa Fe,DG 39,,CL 19,,CR 1 ESTE,,CR 14,,22
+codigo_postal,111156,Suba,CL 170,,CL 138,,CR 45,,CR 92,,23
+codigo_postal,111176,Suba,CL 245,,CL 170,,CR 45,,CR 92,,24
+codigo_postal,110111,Usaquen,CL 127,,CL 100,,CR 15 ESTE,,CR 45,,25
+codigo_postal,111631,Puente Aranda,CL 3,,DG 45 SUR,,CR 30,,CR 50,,26
+codigo_postal,110151,Usaquen,CL 245,,CL 205,,CR 7 ESTE,,CR 45,,27
+codigo_postal,112021,Sumapaz,CL 160 SUR,,CL 310 SUR,,CR 35,,CR 10,,28
+codigo_postal,112031,Sumapaz,CL 180 SUR,,CL 240 SUR,,CR 5 ESTE,,CR 15,,29
+codigo_postal,111131,Suba,CL 145,,CL 99,,CR 91,,CR 104,,30
+codigo_postal,111611,Puente Aranda,DG 22A,,CL 3,,CR 30,,CR 68,,31
+codigo_postal,110571,Usme,CL 115 SUR,,CL 140 SUR,,CR 15 ESTE,,CR 5,,32
+codigo_postal,110421,San Cristobal,CL 20 SUR,,CL 36 SUR,,CR 50 ESTE,,CR 10,,33
+codigo_postal,110921,Fontibon,CL 22,,CL 12,,CR 86,,CR 130,,34
+codigo_postal,110221,Chapinero,CL 100,,CL 72,,CR 1,,CR 45,,35
+codigo_postal,110741,Bosa,CL 45 SUR,,DG 57C SUR,,CR 80I,,CR 77G,,36
+codigo_postal,111911,Ciudad Bolivar,DG 57C SUR,,CL 44 SUR,,CR 1,,CR 40,,37
+codigo_postal,111311,Teusaquillo,CL 63,,CL 26,,CR 14,,CR 30,,38
+codigo_postal,111011,Engativa,CL 99,,CL 80,,CR 96,,CR 130,,39
+codigo_postal,112011,Sumapaz,CL 140 SUR,,CL 180 SUR,,CR 15,,CR 35,,40
+codigo_postal,110881,Kennedy,CL 40 SUR,,CL 49 SUR,,CR 86,,CR 110,,41
+codigo_postal,111061,Engativa,CL 80,,CL 63,,CR 68,,CR 72,,42
+codigo_postal,111921,Ciudad Bolivar,DG 50 SUR,,CL 69A SUR,,CR 70,,CR 77F,,43
+codigo_postal,111031,Engativa,CL 80,,CL 63,,CR 110,,CR 130,,44
+codigo_postal,111021,Engativa,CL 99,,CL 80,,CR 68,,CR 96,,45
+codigo_postal,110431,San Cristobal,CL 34 SUR,,CL 46 SUR,,CR 50 ESTE,,CR 10,,46
+codigo_postal,110731,Bosa,CL 58 SUR,,DG 73F SUR,,CR 80,,CR 77G,,47
+codigo_postal,111811,Rafael Uribe Uribe,CL 1 SUR,,CL 47A SUR,,CR 27 ESTE,,CR 14,,48
+codigo_postal,112041,Sumapaz,CL 210 SUR,,CL 250 SUR,,CR 1,,CR 30,,49
+codigo_postal,111711,Candelaria,CL 13,,CL 4,,CR 4B ESTE,,CR 10,,50
+codigo_postal,110411,San Cristobal,CL 1,,CL 20 SUR,,CR 50 ESTE,,CR 10,,51
+codigo_postal,111511,Antonio Nariño,CL 1,,CL 22 SUR,,CR 10,,CR 45,,52
+codigo_postal,110121,Usaquen,CL 147,,CL 127,,CR 15 ESTE,,CR 45,,53
+codigo_postal,110811,Kennedy,CL 15 SUR,,CL 6,,CR 86,,CR 110,,54
+codigo_postal,110531,Usme,CL 81A SUR,,CL 115 SUR,,TR 11C,,CR 5,,55
+codigo_postal,111051,Engativa,CL 80,,CL 66A,,CR 72,,CR 96,,56
+codigo_postal,111951,Ciudad Bolivar,CL 59B SUR,,DG 64ABIS SUR,,TR 28 ESTE,,CR 17N,,57
+codigo_postal,111831,Rafael Uribe Uribe,CL 47 SUR,,CL 49BIS SUR,,CL 39B SUR,,CR 14,,58
+codigo_postal,111211,Barrios Unidos,CL 100,,CL 72,,CR 45,,CR 68,,59
+codigo_postal,110851,Kennedy,CL 3,,CL 43 SUR,,CL 1 SUR,,CR 86,,60
+codigo_postal,111411,Los Martires,CL 26,,CL 1,,CR 14,,CR 30,,61
+codigo_postal,111111,Suba,CL 138,,CL 100,,CR 45,,CR 60,,62
+codigo_postal,111071,Engativa,CL 66A,,CL 26,,CR 72,,TR 93,,63
+codigo_postal,111171,Suba,CL 235,,CL 170,,CR 92,,CR 130,,64
+codigo_postal,110861,Kennedy,CL 43 SUR,,CL 58 SUR,,CR 79,,CR 86,,65
+codigo_postal,110611,Tunjuelito,DG 45 SUR,,CR 25,,CL 47A,,CR 54,,66
+codigo_postal,110711,Bosa,CL 49 SUR,,CL 59 SUR,,CR 82B,,CR 113,,67
+codigo_postal,111166,Suba,CL 235,,CL 170,,CR 45,,CR 92,,68
+codigo_postal,110541,Usme,CL 75 SUR,,CL 91 SUR,,CR 5,,CR 15,,69
+codigo_postal,110821,Kennedy,CL 16C,,CL 3 SUR,,CR 72,,CR 86,,70
+codigo_postal,110131,Usaquen,CL 170,,CL 147,,CR 7 ESTE,,CR 45,,71
+codigo_postal,111981,Usme,CL 91 SUR,,CL 150 SUR,,CR 15,,CR 50,,72
+codigo_postal,111931,Ciudad Bolivar,CL 69A SUR,,CL 140 SUR,,CR 45B,,CR 75,,73
+codigo_postal,110621,Tunjuelito,CR 25,,DG 60 SUR,,CL 46A SUR,,CR 54,,74
+codigo_postal,111141,Suba,CL 145,,CL 99,,CR 104,,TR 127,,75
+codigo_postal,111841,Rafael Uribe Uribe,CL 49BIS SUR,,DG 53A SUR,,CL 48O SUR,,CR 14,,76
+codigo_postal,110521,Usme,CL 55 SUR,,CL 84 SUR,,CR 1,,CR 51,,77
+codigo_postal,110321,Santa Fe,CL 19,,CL 1,,CR 3 ESTE,,CR 14,,78
+codigo_postal,110831,Kennedy,CL 13,,CL 26 SUR,,CR 68,,CR 72,,79
+codigo_postal,110211,Chapinero,CL 100,,CL 76,,CR 25,,CR 7,,80
+codigo_postal,110141,Usaquen,CL 205,,CL 170,,CR 7 ESTE,,CR 45,,81
+zona,60_1,,CL 63F,par,CL 63,impar,CR 24,impar,CR 36,par,1
+zona,60_2,,CL 63,par,CL 66,impar,CR 17,impar,CR 24,par,2
+zona,60_3,,CL 63,par,CL 68,impar,CR 14,impar,CR 17,par,3
+zona,60_4,,CL 66,par,CL 68,impar,CR 17,impar,CR 24,par,4
+zona,60_5,,CL 68,par,CL 72,impar,CR 14,impar,CR 17,par,5
+zona,60_6,,CL 68,par,CL 72,impar,CR 17,impar,CR 24,par,6
+zona,60_7,,CL 66,par,CL 68,impar,CR 24,impar,CR 30,par,7
+zona,60_8,,CL 68,par,CL 72,impar,CR 24,impar,CR 30,par,8
+zona,60_9,,CL 68,par,CL 72,impar,CR 30,impar,CR 68,par,9
+zona,60_10,,CL 63,par,CL 68,impar,CR 30,impar,CR 54,par,10
+zona,60_11,,CL 63,par,CL 68,impar,CR 54,impar,CR 60,par,11
+zona,60_12,,CL 63,par,CL 68,impar,CR 60,impar,CR 68,par,12
+zona,60_13,,CL 63F,par,CL 66,impar,CR 24,impar,CR 30,par,13
+zona,70_1,,CL 76,par,CL 80,impar,CR 20,impar,CR 24,par,14
+zona,70_2,,CL 72,par,CL 76,impar,CR 20,impar,CR 24,par,15
+zona,70_3,,CL 72,par,CL 76,impar,CR 24,impar,CR 30,par,16
+zona,70_4,,CL 76,par,CL 80,impar,CR 24,impar,CR 30,par,17
+zona,70_5,,CL 72,par,CL 80,impar,CR 30,impar,CR 56A,par,18
+zona,70_6,,CL 78,par,CL 80,impar,CR 56A,impar,CR 58,par,19
+zona,70_7,,CL 72,par,CL 80,impar,CR 56A,impar,CR 60,par,20
+zona,70_8,,CL 72,par,CL 80,impar,CR 60,impar,CR 64,par,21
+zona,70_9,,CL 72,par,CL 80,impar,CR 64,impar,CR 68,par,22
+zona,80_1,,CL 80,par,CL 92,impar,CR 20,impar,CR 24,par,23
+zona,80_2,,CL 80,par,CL 92,impar,CR 24,impar,CR 30,par,24
+zona,80_3,,CL 80,par,CL 90,impar,CR 30,impar,CR 50,par,25
+zona,80_4,,CL 80,par,CL 90,impar,CR 58,cualquiera,CR 68,par,26
+zona,90_1,,CL 90,par,CL 95,impar,CR 45,impar,CR 50,par,27
+zona,90_2,,CL 95,par,CL 100,impar,CR 45,impar,CR 55,par,28
+zona,90_3,,CL 97,par,CL 100,impar,CR 55,impar,CR 64,par,29
+zona,90_4,,CL 90,par,CL 97,impar,CR 50,impar,CR 60C,par,30
+zona,90_5,,CL 90,par,CL 97,impar,CR 60C,impar,CR 64,par,31
+zona,90_6,,CL 90,par,CL 100,impar,CR 64,impar,CR 68,par,32
+zona,10_1,,CL 80,par,CL 116,impar,CR 68,impar,CR 72,par,33
