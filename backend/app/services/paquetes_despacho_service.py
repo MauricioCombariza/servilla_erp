@@ -3,18 +3,44 @@
 Un serial que ya existe se reemplaza con los datos nuevos y vuelve a 'sin gestión'
 (llega en un despacho nuevo, así que es un ingreso nuevo).
 """
+import csv
+import io
 from dataclasses import dataclass, field
 from datetime import date
 
-from sqlalchemy import func, literal_column
+import pandas as pd
+from sqlalchemy import func, literal_column, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.paquetes_despacho import ESTADO_SIN_GESTION, PaqueteDespacho
+from app.services.excel_utils import construir_excel
 from app.services.sectorizacion_service import obtener_indice, sectorizar
 
 # PostgreSQL acepta hasta 32.767 parámetros por sentencia; 1.000 filas x 10 columnas cabe holgado
 _TAMANO_LOTE = 1000
+
+
+# Nombres aceptados por columna interna (iMile exporta en inglés o en español);
+# los mismos del sistema anterior (dashboard/pages_home/Ingreso_paquetes.py)
+COL_ALIASES = {
+    "serial": ["Waybill number", "Número de Guía"],
+    "nombre": ["Recipient's name", "El nombre del destinatario"],
+    "telefono": ["Customer phone", "Teléfono entrante"],
+    "direccion": ["Address2", "Dirección detallada del destinatario"],
+}
+
+COLUMNAS_EXPORTAR = [
+    "serial", "nombre", "telefono", "direccion", "direccion_estandarizada",
+    "codigo_postal", "localidad", "zona", "f_emi", "estado",
+]
+
+
+class ColumnasFaltantesError(ValueError):
+    def __init__(self, faltantes: list[str], columnas_archivo: list[str]):
+        self.faltantes = faltantes
+        self.columnas_archivo = columnas_archivo
+        super().__init__(f"Columnas requeridas no encontradas: {', '.join(faltantes)}")
 
 
 @dataclass(frozen=True)
@@ -93,3 +119,100 @@ async def guardar_paquetes(
     # Un solo commit: o se guarda todo el despacho o nada
     await db.commit()
     return resultado
+
+
+# ========== LECTURA DEL EXCEL ==========
+
+def leer_excel_despacho(contenido: bytes) -> list[PaqueteEntrada]:
+    """Excel de despacho → paquetes. Lanza ColumnasFaltantesError o ValueError (archivo ilegible/vacío)."""
+    try:
+        # dtype=str: los seriales numéricos no deben pasar por float ("3671050719461.0")
+        df = pd.read_excel(io.BytesIO(contenido), engine="openpyxl", dtype=str)
+    except Exception as e:  # cualquier archivo corrupto o que no sea Excel llega aquí
+        raise ValueError(f"No se pudo leer el archivo Excel: {e}") from e
+    if df.empty:
+        raise ValueError("El archivo Excel está vacío.")
+
+    columnas = [str(c).strip() for c in df.columns]
+    df.columns = columnas
+    col_map, faltantes = {}, []
+    for interno, aliases in COL_ALIASES.items():
+        encontrada = next((a for a in aliases if a in columnas), None)
+        if encontrada:
+            col_map[interno] = encontrada
+        else:
+            faltantes.append(f"{interno} (esperado: {' o '.join(aliases)})")
+    if faltantes:
+        raise ColumnasFaltantesError(faltantes, columnas)
+
+    df = df.astype(object).where(df.notna(), None)
+    return [
+        PaqueteEntrada(
+            serial=fila[col_map["serial"]],
+            nombre=fila[col_map["nombre"]],
+            telefono=fila[col_map["telefono"]],
+            direccion=fila[col_map["direccion"]],
+        )
+        for _, fila in df.iterrows()
+    ]
+
+
+# ========== CONSULTA, CORRECCIÓN Y EXPORTACIÓN ==========
+
+async def listar_paquetes(
+    db: AsyncSession,
+    f_emi: date,
+    zona: str | None = None,
+    solo_sin_sector: bool = False,
+) -> list[PaqueteDespacho]:
+    q = select(PaqueteDespacho).where(PaqueteDespacho.f_emi == f_emi)
+    if zona:
+        q = q.where(PaqueteDespacho.zona == zona)
+    if solo_sin_sector:
+        q = q.where(PaqueteDespacho.localidad.is_(None))
+    q = q.order_by(PaqueteDespacho.zona.nulls_first(), PaqueteDespacho.serial)
+    return list((await db.execute(q)).scalars().all())
+
+
+async def corregir_direccion(db: AsyncSession, serial: str, direccion: str) -> PaqueteDespacho | None:
+    """Corrección manual de una dirección que no se pudo sectorizar; se vuelve a sectorizar."""
+    result = await db.execute(select(PaqueteDespacho).where(PaqueteDespacho.serial == serial.strip()))
+    paquete = result.scalar_one_or_none()
+    if paquete is None:
+        return None
+
+    sector = sectorizar(direccion, await obtener_indice(db))
+    paquete.direccion = direccion.strip()
+    paquete.direccion_estandarizada = sector.direccion_estandarizada
+    paquete.codigo_postal = sector.codigo_postal
+    paquete.localidad = sector.localidad
+    paquete.zona = sector.zona
+    paquete.fecha_modificacion = func.now()
+    await db.commit()
+    await db.refresh(paquete)
+    return paquete
+
+
+def _filas_exportar(paquetes: list[PaqueteDespacho]) -> list[dict]:
+    return [
+        {c: (getattr(p, c).isoformat() if c == "f_emi" else getattr(p, c)) for c in COLUMNAS_EXPORTAR}
+        for p in paquetes
+    ]
+
+
+def exportar_excel(paquetes: list[PaqueteDespacho], f_emi: date) -> bytes:
+    return construir_excel(
+        f"Paquetes sectorizados — {f_emi.isoformat()}",
+        COLUMNAS_EXPORTAR,
+        _filas_exportar(paquetes),
+        [18, 28, 14, 45, 22, 12, 18, 8, 12, 16],
+    )
+
+
+def exportar_csv(paquetes: list[PaqueteDespacho]) -> bytes:
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=COLUMNAS_EXPORTAR)
+    writer.writeheader()
+    writer.writerows(_filas_exportar(paquetes))
+    # utf-8-sig: Excel abre bien tildes y ñ
+    return buffer.getvalue().encode("utf-8-sig")
