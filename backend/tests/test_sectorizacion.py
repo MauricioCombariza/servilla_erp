@@ -71,7 +71,7 @@ def test_todo_codigo_postal_tiene_localidad(limites):
     ("CL 54A 50 92 AP 201", "CL 54A 50 92", "Teusaquillo", None),
     ("CL 57A 66 BB 96 LC DOS ESQUINAS", "CL 57A 66B 96", "Teusaquillo", None),
     ("calle 95 # 49-22 clinica del pie y spa", "CL 95 49 22", "Barrios Unidos", "90_2"),
-    ("Calle 63f #28A-11 Panaderia mil delicias", "CL 63F 28A 11", "Barrios Unidos", None),
+    ("Calle 63f #28A-11 Panaderia mil delicias", "CL 63F 28A 11", "Barrios Unidos", "60_13"),  # antes None: CL 63F impar no caía en ninguna zona (2026-10-09)
     ("KR 21 A 83 21 CASA,Bogota, D.C.~~~Barrios Unidos~~~~~~KR 21 A 83 21 CASA",
      "CR 21A 83 21", "Chapinero", "80_1"),
     ("Cr 60 D # 90 04 apartamento 614,Bogota, D.C.~~~Barrios Unidos~~~~~~Cr 60 D # 90 04 apartamento 614",
@@ -110,7 +110,7 @@ def test_igual_que_dirnum(indice, direccion, dir_std, localidad, zona):
 # ── Cada una de las 33 zonas reconoce una dirección de su centro ──────────────
 
 @pytest.mark.parametrize("zona,direccion", [
-    ("60_1", "CL 63 # 27-11"), ("60_2", "CL 64 # 20-11"), ("60_3", "CL 65 # 15-11"),
+    ("60_1", "CL 63 # 27-12"), ("60_2", "CL 64 # 20-11"), ("60_3", "CL 65 # 15-11"),
     ("60_4", "CL 67 # 20-11"), ("60_5", "CL 70 # 15-11"), ("60_6", "CL 70 # 20-11"),
     ("60_7", "CL 67 # 27-11"), ("60_8", "CL 70 # 27-11"), ("60_9", "CL 70 # 49-11"),
     ("60_10", "CR 45 # 66-50"), ("60_11", "CR 45 # 63-50"), ("60_12", "CL 65 # 64-11"),
@@ -225,4 +225,17 @@ def test_direccion_que_no_se_puede_ubicar(indice, direccion):
     ("CL 63 # 30-11", None),     # cuadra CR 30–31 sobre la CL 63 (placa impar): fuera de zona
 ])
 def test_ajuste_zonas_60(indice, direccion, zona):
+    assert sectorizar(direccion, indice).zona == zona
+
+
+# ── Paridad en los bordes de 60_1 y 60_13 (prueba de exactitud, 2026-10-09) ───
+
+@pytest.mark.parametrize("direccion,zona", [
+    ("CL 63 # 26-62", "60_1"),    # CL 63 placa par: lado de 60_1 (antes quedaba fuera de zona)
+    ("CL 63 # 24-44", "60_1"),
+    ("CL 63 # 27-11", None),      # CL 63 placa impar: el otro lado de la calle (Teusaquillo)
+    ("CL 63F # 25-15", "60_13"),  # CL 63F placa impar: 60_13 (antes no caía en ninguna zona)
+    ("CL 63F # 26-22", "60_1"),   # CL 63F placa par: sigue en 60_1
+])
+def test_paridad_bordes_60_1_y_60_13(indice, direccion, zona):
     assert sectorizar(direccion, indice).zona == zona
