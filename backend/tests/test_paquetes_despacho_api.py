@@ -73,6 +73,7 @@ async def test_cargar_excel_en_ingles(client):
     body = r.json()
     assert (body["total"], body["creados"], body["reemplazados"]) == (3, 3, 0)
     assert body["sin_sector"] == [{"serial": f"{PREFIJO}3", "direccion": "direccion rara"}]
+    assert body["devoluciones"] == 1  # el que no cae en ninguna zona
     assert body["f_emi"] == F_EMI.isoformat()
 
 
@@ -204,6 +205,23 @@ async def test_exportar(client, formato, tipo):
         ws = openpyxl.load_workbook(io.BytesIO(r.content)).active
         seriales = [ws.cell(row=i, column=1).value for i in range(4, ws.max_row + 1)]
         assert f"{PREFIJO}1" in seriales
+
+
+async def test_devoluciones_son_los_fuera_de_zona_con_el_formato_de_devoluciones_enriquecidas(client):
+    await _cargar_tres(client)
+
+    r = await client.get(f"{URL}/devoluciones", params={"f_emi": F_EMI.isoformat()})
+
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    assert f"devoluciones_{F_EMI.isoformat()}.xlsx" in r.headers["content-disposition"]
+    ws = openpyxl.load_workbook(io.BytesIO(r.content)).active
+    filas = [fila for fila in ws.iter_rows(values_only=True) if fila[0] == "serial" or str(fila[0]).startswith(PREFIJO)]
+    assert filas == [
+        ("serial", "nombre", "telefono", "direccion", "localidad"),
+        (f"{PREFIJO}3", "Eva", "302", "Calle Ac11sur#16este99", None),  # fuera de zona (y sin localidad)
+    ]
+    assert ws["A1"].font.b
 
 
 # ── Destino al escanear (Paso 2.6) ────────────────────────────────────────────

@@ -31,6 +31,7 @@ class CargaDespachoResult(BaseModel):
     creados: int
     reemplazados: int
     sin_sector: list[PaqueteSinSector]
+    devoluciones: int  # paquetes que no caen en ninguna zona específica
 
 
 class CorregirDireccionRequest(BaseModel):

@@ -12,6 +12,7 @@ export interface CargaDespachoResult {
   creados: number;
   reemplazados: number;
   sin_sector: PaqueteSinSector[];
+  devoluciones: number; // paquetes que no caen en ninguna zona
 }
 
 /** detail del 400 cuando al Excel le faltan columnas */
@@ -47,6 +48,10 @@ export const paquetesDespachoApi = {
 
   sinSector: (fEmi: string) =>
     api.get<PaqueteDespacho[]>("/paquetes-despacho/", { params: { f_emi: fEmi, solo_sin_sector: true } }),
+
+  /** Excel de devoluciones del día (fuera de zona): serial, nombre, telefono, direccion, localidad */
+  devolucionesExcel: (fEmi: string) =>
+    api.get("/paquetes-despacho/devoluciones", { params: { f_emi: fEmi }, responseType: "blob" }),
 
   corregirDireccion: (serial: string, direccion: string) =>
     api.patch<PaqueteDespacho>(`/paquetes-despacho/${encodeURIComponent(serial)}/direccion`, { direccion }),

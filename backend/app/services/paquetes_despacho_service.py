@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from datetime import date
 
 import pandas as pd
+from openpyxl import Workbook
+from openpyxl.styles import Font
 from sqlalchemy import func, literal_column, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +33,9 @@ COL_ALIASES = {
     # si el archivo trae Address2 y Address, manda Address2
     "direccion": ["Address2", "Address", "Dirección detallada del destinatario"],
 }
+
+# Mismo formato del archivo que se usaba (devoluciones_enriquecidas.xlsx)
+COLUMNAS_DEVOLUCIONES = ["serial", "nombre", "telefono", "direccion", "localidad"]
 
 COLUMNAS_EXPORTAR = [
     "serial", "nombre", "telefono", "direccion", "direccion_estandarizada",
@@ -58,6 +63,8 @@ class ResultadoGuardado:
     creados: int = 0
     reemplazados: int = 0
     seriales_sin_sector: list[str] = field(default_factory=list)
+    # Devolución = paquete que no cae en ninguna zona específica (decisión del usuario 2026-10-09)
+    seriales_devolucion: list[str] = field(default_factory=list)
 
     @property
     def total(self) -> int:
@@ -93,6 +100,8 @@ async def guardar_paquetes(
         sector = sectorizar(direccion, indice)
         if sector.localidad is None:
             resultado.seriales_sin_sector.append(serial)
+        if sector.zona is None:
+            resultado.seriales_devolucion.append(serial)
         filas.append({
             "serial": serial,
             "nombre": _texto(p.nombre),
@@ -209,8 +218,11 @@ async def listar_paquetes(
     f_emi: date,
     zona: str | None = None,
     solo_sin_sector: bool = False,
+    solo_devoluciones: bool = False,
 ) -> list[PaqueteDespacho]:
     q = select(PaqueteDespacho).where(PaqueteDespacho.f_emi == f_emi)
+    if solo_devoluciones:
+        q = q.where(PaqueteDespacho.zona.is_(None))
     if zona:
         q = q.where(PaqueteDespacho.zona == zona)
     if solo_sin_sector:
@@ -261,3 +273,19 @@ def exportar_csv(paquetes: list[PaqueteDespacho]) -> bytes:
     writer.writerows(_filas_exportar(paquetes))
     # utf-8-sig: Excel abre bien tildes y ñ
     return buffer.getvalue().encode("utf-8-sig")
+
+
+def exportar_devoluciones(paquetes: list[PaqueteDespacho]) -> bytes:
+    """Excel de devoluciones con el mismo formato de devoluciones_enriquecidas.xlsx:
+    una hoja, encabezado en la fila 1 y las columnas serial, nombre, telefono, direccion, localidad."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(COLUMNAS_DEVOLUCIONES)
+    for celda in ws[1]:
+        celda.font = Font(bold=True)
+    for p in paquetes:
+        ws.append([getattr(p, c) for c in COLUMNAS_DEVOLUCIONES])
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
