@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { CheckCircle2, FileSpreadsheet, Upload } from "lucide-react";
+import { CheckCircle2, Download, FileSpreadsheet, Upload } from "lucide-react";
 import {
   paquetesDespachoApi,
   type CargaDespachoResult,
@@ -149,7 +149,10 @@ function Resultado({ resultado, onOtraBase }: { resultado: CargaDespachoResult; 
         <Dato etiqueta="Nuevos" valor={resultado.creados} />
         <Dato etiqueta="Reemplazados" valor={resultado.reemplazados} />
         <Dato etiqueta="Sin sector" valor={pendientes} alerta={pendientes > 0} />
+        <Dato etiqueta="Devoluciones (fuera de zona)" valor={resultado.devoluciones} ancho />
       </dl>
+
+      {resultado.devoluciones > 0 && <DescargarDevoluciones fEmi={resultado.f_emi} />}
 
       {pendientes > 0 && (
         <div className="mt-5">
@@ -174,9 +177,40 @@ function Resultado({ resultado, onOtraBase }: { resultado: CargaDespachoResult; 
   );
 }
 
-function Dato({ etiqueta, valor, alerta = false }: { etiqueta: string; valor: number; alerta?: boolean }) {
+function DescargarDevoluciones({ fEmi }: { fEmi: string }) {
+  const descargar = useMutation({
+    mutationFn: async () => {
+      const r = await paquetesDespachoApi.devolucionesExcel(fEmi);
+      const url = URL.createObjectURL(r.data as Blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `devoluciones_${fEmi}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+  });
+
   return (
-    <div className={`rounded-lg p-3 ${alerta ? "bg-amber-50" : "bg-gray-50"}`}>
+    <>
+      <button
+        type="button"
+        disabled={descargar.isPending}
+        onClick={() => descargar.mutate()}
+        className="w-full mt-4 inline-flex items-center justify-center gap-2 border border-primary text-primary font-medium py-2.5 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-40"
+      >
+        <Download size={16} />
+        {descargar.isPending ? "Preparando Excel..." : "Descargar devoluciones (Excel)"}
+      </button>
+      {descargar.isError && <p className="text-xs mt-2 text-red-600">No se pudo descargar el Excel</p>}
+    </>
+  );
+}
+
+function Dato({ etiqueta, valor, alerta = false, ancho = false }: {
+  etiqueta: string; valor: number; alerta?: boolean; ancho?: boolean;
+}) {
+  return (
+    <div className={`rounded-lg p-3 ${alerta ? "bg-amber-50" : "bg-gray-50"} ${ancho ? "col-span-2" : ""}`}>
       <dd className={`text-2xl font-bold ${alerta ? "text-amber-700" : "text-gray-900"}`}>{valor}</dd>
       <dt className="text-xs text-gray-500">{etiqueta}</dt>
     </div>

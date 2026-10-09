@@ -21,6 +21,7 @@ from app.services.paquetes_despacho_service import (
     buscar_destino,
     corregir_direccion,
     exportar_csv,
+    exportar_devoluciones,
     exportar_excel,
     guardar_paquetes,
     leer_excel_despacho,
@@ -80,6 +81,7 @@ async def cargar(
             PaqueteSinSector(serial=s, direccion=direccion_por_serial.get(s))
             for s in resultado.seriales_sin_sector
         ],
+        devoluciones=len(resultado.seriales_devolucion),
     )
 
 
@@ -111,6 +113,17 @@ async def corregir(
     if paquete is None:
         raise HTTPException(status_code=404, detail="Serial no encontrado")
     return paquete
+
+
+@router.get("/devoluciones")
+async def devoluciones(f_emi: date, db: AsyncSession = Depends(get_db), _=_auth):
+    """Excel de las devoluciones del día (paquetes fuera de zona), para descargar en el celular."""
+    paquetes = await listar_paquetes(db, f_emi, solo_devoluciones=True)
+    return Response(
+        content=exportar_devoluciones(paquetes),
+        media_type=XLSX_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="devoluciones_{f_emi.isoformat()}.xlsx"'},
+    )
 
 
 @router.get("/exportar")
