@@ -84,6 +84,26 @@ async def test_cargar_excel_en_espanol_y_volver_a_cargar_reemplaza(client):
     assert (r.json()["creados"], r.json()["reemplazados"]) == (0, 1)
 
 
+async def test_cargar_base_de_whatsapp_con_columna_address(client):
+    # Así llega la base de despacho por WhatsApp (DESPACHO SERVILLA 0810.xlsx): "Address", sin "Address2"
+    columnas = ["Waybill number", "Destino", "Recipient's name", "Address", "Customer phone"]
+    contenido = _excel(columnas, [[f"{PREFIJO}1", "BOG-Doce de Octubre.DS", "Ana", "carrera 27 #76-54 Bodega", "573202511797"]])
+    r = await _cargar(client, contenido)
+
+    assert r.status_code == 200, r.text
+    assert (r.json()["creados"], r.json()["sin_sector"]) == (1, [])
+    paquetes = (await client.get(f"{URL}/", params={"f_emi": F_EMI.isoformat()})).json()
+    assert next(p for p in paquetes if p["serial"] == f"{PREFIJO}1")["direccion"] == "carrera 27 #76-54 Bodega"
+
+
+async def test_con_address2_y_address_manda_address2(client):
+    columnas = ["Waybill number", "Recipient's name", "Customer phone", "Address", "Address2"]
+    await _cargar(client, _excel(columnas, [[f"{PREFIJO}1", "Ana", "300", "texto viejo", "CL 82 38 10"]]))
+
+    paquetes = (await client.get(f"{URL}/", params={"f_emi": F_EMI.isoformat()})).json()
+    assert next(p for p in paquetes if p["serial"] == f"{PREFIJO}1")["direccion"] == "CL 82 38 10"
+
+
 async def test_serial_numerico_no_se_vuelve_decimal(client):
     contenido = _excel(COLUMNAS_EN, [[9_900_000_000_001, "Ana", 3001112233, "CL 82 38 10", None]])
     await _cargar(client, contenido)

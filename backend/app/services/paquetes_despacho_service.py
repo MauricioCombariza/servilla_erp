@@ -27,7 +27,9 @@ COL_ALIASES = {
     "serial": ["Waybill number", "Número de Guía"],
     "nombre": ["Recipient's name", "El nombre del destinatario"],
     "telefono": ["Customer phone", "Teléfono entrante"],
-    "direccion": ["Address2", "Dirección detallada del destinatario"],
+    # "Address" es como llega la base de despacho de WhatsApp (DESPACHO SERVILLA 0810.xlsx);
+    # si el archivo trae Address2 y Address, manda Address2
+    "direccion": ["Address2", "Address", "Dirección detallada del destinatario"],
 }
 
 COLUMNAS_EXPORTAR = [
