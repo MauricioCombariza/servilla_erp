@@ -77,6 +77,9 @@ def _respuesta(**ro):
      EstadoIngreso.REPETIDO, "1121", "No registrar Motivo Problema"),
     (_respuesta(blockInfo="Sin información de pedido()", blockCode="1119", msgCode="1119", voiceType="fail"),
      EstadoIngreso.ERROR, "1119", "Sin información de pedido()"),
+    # Respuesta real del 2026-10-09 al volver a pasar un paquete ya ingresado
+    (_respuesta(blockInfo="Escaneo repetido", blockCode="31000", voiceType="fail"),
+     EstadoIngreso.REPETIDO, "31000", "Escaneo repetido"),
     # Un bloqueo con código desconocido queda para revisión
     (_respuesta(blockInfo="Otro motivo", blockCode="9999", voiceType="fail"),
      EstadoIngreso.BLOQUEADO, "9999", "Otro motivo"),

@@ -10,7 +10,8 @@ la respuesta siempre trae status "success"; lo que importa está en resultObject
   - blockCode / blockInfo → iMile abre una ventana "bloquear" con Cancelar / Confirmar;
     la automatización SIEMPRE cancela. 1121 "No registrar Motivo Problema" = el paquete
     ya estaba ingresado (repetido); 1119 "Sin información de pedido()" = el serial no
-    existe en iMile (error); cualquier otro código queda "bloqueado" para revisión.
+    existe en iMile (error); 31000 "Escaneo repetido" = repetido (2026-10-09, al repasar
+    un paquete que se acababa de ingresar); cualquier otro código queda "bloqueado" para revisión.
   - repeat = true → el paquete ya se había ingresado.
   - voiceType = "fail" sin bloqueo → error.
 
@@ -47,6 +48,7 @@ class EstadoIngreso(str, Enum):
 _BLOQUEOS_CONOCIDOS = {
     "1121": EstadoIngreso.REPETIDO,  # "No registrar Motivo Problema": ya estaba ingresado
     "1119": EstadoIngreso.ERROR,  # "Sin información de pedido()": no existe en iMile
+    "31000": EstadoIngreso.REPETIDO,  # "Escaneo repetido" (visto 2026-10-09 al repasar un ingresado)
 }
 
 
