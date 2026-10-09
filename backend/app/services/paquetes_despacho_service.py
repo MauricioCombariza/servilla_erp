@@ -34,8 +34,9 @@ COL_ALIASES = {
     "direccion": ["Address2", "Address", "Dirección detallada del destinatario"],
 }
 
-# Mismo formato del archivo que se usaba (devoluciones_enriquecidas.xlsx)
-COLUMNAS_DEVOLUCIONES = ["serial", "nombre", "telefono", "direccion", "localidad"]
+# Mismo formato del archivo que se usaba (devoluciones_enriquecidas.xlsx), más "digitos":
+# los 4 últimos dígitos del serial, por los que se ordena de mayor a menor (pedido 2026-10-09)
+COLUMNAS_DEVOLUCIONES = ["serial", "nombre", "telefono", "direccion", "localidad", "digitos"]
 
 COLUMNAS_EXPORTAR = [
     "serial", "nombre", "telefono", "direccion", "direccion_estandarizada",
@@ -275,17 +276,27 @@ def exportar_csv(paquetes: list[PaqueteDespacho]) -> bytes:
     return buffer.getvalue().encode("utf-8-sig")
 
 
+def _ultimos_4(serial: str) -> str:
+    return serial[-4:]
+
+
+def _valor_digitos(serial: str) -> int:
+    digitos = _ultimos_4(serial)
+    return int(digitos) if digitos.isdigit() else -1  # uno raro (con letras) va al final
+
+
 def exportar_devoluciones(paquetes: list[PaqueteDespacho]) -> bytes:
-    """Excel de devoluciones con el mismo formato de devoluciones_enriquecidas.xlsx:
-    una hoja, encabezado en la fila 1 y las columnas serial, nombre, telefono, direccion, localidad."""
+    """Excel de devoluciones con el formato de devoluciones_enriquecidas.xlsx (una hoja,
+    encabezado en la fila 1) más la columna "digitos" con los 4 últimos dígitos del serial,
+    ordenado por esos dígitos de mayor a menor. "digitos" va como texto para no perder ceros (0419)."""
     wb = Workbook()
     ws = wb.active
     ws.title = "Sheet1"
     ws.append(COLUMNAS_DEVOLUCIONES)
     for celda in ws[1]:
         celda.font = Font(bold=True)
-    for p in paquetes:
-        ws.append([getattr(p, c) for c in COLUMNAS_DEVOLUCIONES])
+    for p in sorted(paquetes, key=lambda p: (_valor_digitos(p.serial), p.serial), reverse=True):
+        ws.append([p.serial, p.nombre, p.telefono, p.direccion, p.localidad, _ultimos_4(p.serial)])
     buffer = io.BytesIO()
     wb.save(buffer)
     return buffer.getvalue()

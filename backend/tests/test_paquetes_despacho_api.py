@@ -218,10 +218,26 @@ async def test_devoluciones_son_los_fuera_de_zona_con_el_formato_de_devoluciones
     ws = openpyxl.load_workbook(io.BytesIO(r.content)).active
     filas = [fila for fila in ws.iter_rows(values_only=True) if fila[0] == "serial" or str(fila[0]).startswith(PREFIJO)]
     assert filas == [
-        ("serial", "nombre", "telefono", "direccion", "localidad"),
-        (f"{PREFIJO}3", "Eva", "302", "Calle Ac11sur#16este99", None),  # fuera de zona (y sin localidad)
+        ("serial", "nombre", "telefono", "direccion", "localidad", "digitos"),
+        (f"{PREFIJO}3", "Eva", "302", "Calle Ac11sur#16este99", None, "11-3"),  # fuera de zona (y sin localidad)
     ]
     assert ws["A1"].font.b
+
+
+async def test_devoluciones_ordenadas_por_los_4_ultimos_digitos_de_mayor_a_menor(client):
+    fuera_de_zona = "CL 21 33 40"
+    await _cargar(client, _excel(COLUMNAS_EN, [
+        [f"{PREFIJO}0419", "A", "1", fuera_de_zona, None],
+        [f"{PREFIJO}7102", "B", "2", fuera_de_zona, None],
+        [f"{PREFIJO}0009", "C", "3", fuera_de_zona, None],
+        [f"{PREFIJO}9999", "D", "4", "CR 20 # 66-15", None],  # en zona: no es devolución
+    ]))
+
+    r = await client.get(f"{URL}/devoluciones", params={"f_emi": F_EMI.isoformat()})
+
+    ws = openpyxl.load_workbook(io.BytesIO(r.content)).active
+    digitos = [fila[5] for fila in ws.iter_rows(min_row=2, values_only=True) if str(fila[0]).startswith(PREFIJO)]
+    assert digitos == ["7102", "0419", "0009"]  # texto: conserva los ceros
 
 
 # ── Destino al escanear (Paso 2.6) ────────────────────────────────────────────
