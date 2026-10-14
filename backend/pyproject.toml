@@ -38,6 +38,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
+markers = ["e2e: recorrido de punta a punta del flujo de paquetes (scripts/e2e_flujo_paquetes.sh)"]
 
 [tool.ruff]
 line-length = 100

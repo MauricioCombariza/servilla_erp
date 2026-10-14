@@ -15,7 +15,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": "http://localhost:8000",
+      // VITE_API_PROXY: otro backend local (lo usa backend/scripts/e2e_flujo_paquetes.sh)
+      "/api": process.env.VITE_API_PROXY ?? "http://localhost:8000",
     },
   },
 });
