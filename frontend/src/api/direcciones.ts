@@ -11,6 +11,19 @@ export interface AjusteDireccionesResult {
   filas: string[][];
 }
 
+export interface FilaDirNum {
+  serial: string;
+  direccion: string;
+  direccion_ajustada: string;
+  dir_num: string;
+}
+
+export interface AjusteDirNumResult {
+  total_filas: number;
+  sin_dir_num: number;
+  filas: FilaDirNum[];
+}
+
 export const direccionesApi = {
   ajustar: (file: File, cliente: ClienteDirecciones) => {
     const form = new FormData();
@@ -25,6 +38,21 @@ export const direccionesApi = {
     api.post(
       "/direcciones/descargar",
       { cliente, nombre_archivo: nombreArchivo, filas },
+      { responseType: "blob" },
+    ),
+
+  dirnum: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.post<AjusteDirNumResult>("/direcciones/dirnum", form, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+  },
+
+  descargarDirnum: (nombreArchivo: string, filas: FilaDirNum[]) =>
+    api.post(
+      "/direcciones/dirnum/descargar",
+      { nombre_archivo: nombreArchivo, filas },
       { responseType: "blob" },
     ),
 };

@@ -4,13 +4,19 @@ from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 
 from app.auth.dependencies import require_page
-from app.schemas.direcciones import AjusteDireccionesResult, DescargarDireccionesRequest
+from app.schemas.direcciones import (
+    AjusteDireccionesResult,
+    AjusteDirNumResult,
+    DescargarDireccionesRequest,
+    DescargarDirNumRequest,
+)
 from app.services.direcciones_service import (
     generar_txt_leonisa,
     generar_txt_vehigrupo,
     procesar_archivo_leonisa,
     procesar_archivo_vehigrupo,
 )
+from app.services.dirnum_service import generar_excel_dirnum, procesar_excel_dirnum
 
 router = APIRouter(prefix="/api/direcciones", tags=["direcciones"])
 _auth = Depends(require_page("direcciones"))
@@ -62,4 +68,33 @@ async def descargar(body: DescargarDireccionesRequest, _=_auth):
         # engañoso: los bytes están codificados en latin-1, no utf-8.
         media_type="application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{nombre}.txt"'},
+    )
+
+
+@router.post("/dirnum", response_model=AjusteDirNumResult)
+async def dirnum(file: UploadFile, _=_auth):
+    fname = (file.filename or "").lower()
+    if not fname.endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Solo se aceptan archivos .xlsx")
+
+    contenido = await file.read()
+    if len(contenido) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Archivo demasiado grande (máximo {MAX_UPLOAD_BYTES // (1024 * 1024)} MB).",
+        )
+
+    try:
+        return procesar_excel_dirnum(contenido)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/dirnum/descargar")
+async def dirnum_descargar(body: DescargarDirNumRequest, _=_auth):
+    nombre = _NOMBRE_INVALIDO_RE.sub("", body.nombre_archivo).strip() or "direcciones"
+    return Response(
+        content=generar_excel_dirnum(body.filas),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nombre}_dirnum.xlsx"'},
     )
