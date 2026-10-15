@@ -1,0 +1,53 @@
+PUNTO 1 DE DEVOLUCIONES (arrastre.prg) - AJUSTE DE DIRECCION + DIR_NUM DEL ERP
+===============================================================================
+
+Que hace
+--------
+En arrastre.prg, despues de pegar la orden (pegado01/53/51) y ANTES de las reglas
+de devolucion, las guias SIN digitos en dir_num se mandan al servidor web. Alli se
+ajusta la direccion y se genera el dir_num con la misma logica de
+https://erp.servilla.com.co/direcciones (pestana Dir_num). arrastre.prg actualiza
+dirdes1 y dir_num de esas guias (dir_ori no se toca) y sigue igual que antes. Asi,
+menos guias caen en *DEV_21 por "sin numero en dir_num".
+
+  SCO /u/tmp/dn_<orden>.req  --FTP-->  dirnum_sco.py  --FTP-->  /u/tmp/dn_<orden>.ok
+
+Si el servidor web no responde en 2 minutos, arrastre avisa y sigue SIN ajuste.
+
+Archivos
+--------
+  dirnum_sco.py     vigilante que atiende los .req (Python 3.8, sin dependencias)
+  dirnum_legacy.py  copia SIN pandas de la logica del ERP (no editar a mano;
+                    tests/test_dirnum_legacy_paridad.py verifica que sea igual)
+  sco/arrastre.prg  arrastre.prg con el PUNTO 1 (va en /u/admin2 del SCO)
+
+1. Servidor web
+---------------
+1. Copiar dirnum_sco.py y dirnum_legacy.py a H:\act_Web\auto\ (junto a
+   actualizar_bases_web.py: usa su config.ini [ftp] y su correo de errores).
+2. Probar sin FTP:      python dirnum_sco.py --archivo prueba.req
+   Probar con el SCO:   python dirnum_sco.py --once
+3. Dejarlo corriendo siempre (tarea al iniciar el sistema):
+     schtasks /create /tn "dirnum SCO" /tr "python H:\act_Web\auto\dirnum_sco.py" ^
+              /sc onstart /ru WEB\Administrador /rp *
+   En el Programador de tareas: "Ejecutar tanto si el usuario inicio sesion como si no"
+   y desmarcar "Detener la tarea si se ejecuta durante mas de 3 dias".
+   Iniciar ya:  schtasks /run /tn "dirnum SCO"
+   Log: H:\act_Web\auto\logs\dirnum_AAAA-MM-DD.log
+
+2. SCO (192.160.30.11)
+----------------------
+1. Respaldo:   cp /u/admin2/arrastre.prg /u/admin2/arrastre_antes_dirnum.prg
+2. Subir sco/arrastre.prg a /u/admin2/arrastre.prg por FTP en modo BINARIO
+   (el archivo ya tiene fin de linea Unix).
+3. Recompilar desde FoxPro:  compile /u/admin2/arrastre
+   (o borrar /u/admin2/arrastre.fxp para que se compile al ejecutarlo).
+
+Volver atras: cp /u/admin2/arrastre_antes_dirnum.prg /u/admin2/arrastre.prg y recompilar.
+
+Verificacion
+------------
+Con una orden de prueba, correr arrastre con la version anterior y con la nueva y
+comparar "Devoluciones encontradas" y la cantidad de *DEV_21. Debe bajar *DEV_21 y
+aparecer "Direcciones ajustadas (ERP): N". Con el vigilante apagado, arrastre debe
+avisar a los 2 minutos y terminar como antes.
