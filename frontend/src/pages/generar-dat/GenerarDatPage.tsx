@@ -9,7 +9,7 @@ import { InformeGlobalTab } from "./InformeGlobalTab";
 const MAX_ARCHIVOS = 5;
 const TIPOS: { value: TipoInforme; label: string; descripcion: string }[] = [
   { value: "centralizado", label: "Centralizado", descripcion: "Registro completo (375 caracteres)" },
-  { value: "terceros", label: "Terceros", descripcion: "Solo de fecha inicial a F_GESTION" },
+  { value: "terceros", label: "Terceros", descripcion: "Oficina + gestión (46 caracteres)" },
 ];
 
 function Resumen({ data }: { data: GenerarDatResult }) {

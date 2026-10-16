@@ -125,7 +125,7 @@ def test_formato_servilla_se_puede_subir_al_generador():
     dat = generar_dat("123791", "20260731", [("servilla.xlsx", r.contenido)], HISTO, "terceros")
     lineas = dat.contenido_dat.decode("latin-1").split("\n")
     assert dat.registros == 5
-    assert any(l.startswith("20260731DEV0520260803000001672696010") for l in lineas)
+    assert any(l.startswith("0000000010DEV0520260803000001672696010") for l in lineas)
 
 
 def test_orden_solo_prindel_lecta():
