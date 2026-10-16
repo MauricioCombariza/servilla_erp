@@ -1,0 +1,56 @@
+name: Desplegar en producción
+
+# Al unir algo a master se despliega en erp.servilla.com.co (infra/deploy.sh en el servidor).
+# Desde la pestaña Actions también se puede lanzar a mano; con "todo" reconstruye todo.
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      todo:
+        description: "Reconstruir backend, frontend y nginx aunque no hayan cambiado"
+        type: boolean
+        default: false
+
+# Un despliegue a la vez; si llega otro mientras corre, espera (no se cancela a mitad)
+concurrency:
+  group: produccion
+  cancel-in-progress: false
+
+jobs:
+  desplegar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: produccion
+    steps:
+      - name: Revisar configuración
+        id: config
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          if [ -z "$DEPLOY_HOST" ]; then
+            echo "::warning::Faltan los secretos DEPLOY_*: no se despliega (ver configurar_despliegue_automatico.sh)"
+            echo "listo=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "listo=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Preparar llave ssh
+        if: steps.config.outputs.listo == 'true'
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Desplegar
+        if: steps.config.outputs.listo == 'true'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          TODO: ${{ inputs.todo && '--todo' || '' }}
+        # La llave solo puede correr infra/deploy.sh en el servidor (command= en authorized_keys);
+        # lo que se manda aquí llega como argumento en SSH_ORIGINAL_COMMAND
+        run: ssh -i ~/.ssh/deploy -o BatchMode=yes -o ServerAliveInterval=30 "root@$DEPLOY_HOST" "$TODO"
