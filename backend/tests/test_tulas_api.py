@@ -236,17 +236,23 @@ async def test_tula_inexistente(client):
 
 
 class _ImileTulaFalso:
-    def __init__(self, total=None, falla=False):
+    """total: lo que responde siempre; o seriales: lista de respuestas, una por consulta
+    (None = iMile todavía no tiene la tula)."""
+
+    def __init__(self, total=None, falla=False, respuestas=None):
         self.total, self.falla, self.consultas = total, falla, []
+        self.respuestas = list(respuestas) if respuestas is not None else None
 
     async def consultar(self, codigo):
         from app.services.imile_tula import ConsultaTula
         self.consultas.append(codigo)
         if self.falla:
             raise TimeoutError("iMile no respondió")
-        if self.total is None:
+        seriales = self.respuestas.pop(0) if self.respuestas is not None else (
+            None if self.total is None else [f"S{i}" for i in range(self.total)])
+        if seriales is None:
             return ConsultaTula(False, None, ())
-        return ConsultaTula(True, self.total, tuple(f"S{i}" for i in range(self.total)))
+        return ConsultaTula(True, len(seriales), tuple(sorted(seriales)))
 
 
 async def test_2_3_al_abrir_la_tula_el_total_sale_de_imile(client, monkeypatch):
@@ -326,3 +332,59 @@ async def test_2_3_el_total_se_puede_escribir_con_la_tula_ya_abierta(client):
     await client.post(f"{URL}/{tula['id']}/cerrar")
     cerrada = await client.patch(f"{URL}/{tula['id']}/total", json={"total_esperado": 9})
     assert cerrada.status_code == 409
+
+
+# ── Al cerrar: qué faltó y qué llegó sin venir en la tula (según iMile) ─────
+
+
+async def test_2_3_al_cerrar_dice_que_seriales_faltaron_y_cuales_no_venian(client, monkeypatch):
+    esperados = [f"{PREFIJO}1", f"{PREFIJO}2", f"{PREFIJO}X"]
+    monkeypatch.setattr(settings, "imile_consulta_tula_activa", True)
+    monkeypatch.setattr(tulas_service, "imile_tula", _ImileTulaFalso(respuestas=[esperados]))
+    tula = (await client.post(f"{URL}/", json={"codigo": "2610154964301"})).json()
+    for s in (f"{PREFIJO}1", f"{PREFIJO}2", f"{PREFIJO}3"):
+        await client.post(f"{URL}/{tula['id']}/seriales", json={"serial": s})
+
+    cerrada = (await client.post(f"{URL}/{tula['id']}/cerrar")).json()
+
+    assert cerrada["faltantes"] == [f"{PREFIJO}X"]
+    assert cerrada["no_esperados"] == [f"{PREFIJO}3"]
+    # El detalle de la tula también lo dice
+    detalle = (await client.get(f"{URL}/{tula['id']}")).json()
+    assert detalle["faltantes"] == [f"{PREFIJO}X"]
+
+
+async def test_2_3_si_imile_no_la_tenia_al_abrir_se_pregunta_al_cerrar(client, monkeypatch):
+    falso = _ImileTulaFalso(respuestas=[None, [f"{PREFIJO}1", f"{PREFIJO}2"]])
+    monkeypatch.setattr(settings, "imile_consulta_tula_activa", True)
+    monkeypatch.setattr(tulas_service, "imile_tula", falso)
+    tula = (await client.post(f"{URL}/", json={"codigo": "2610154964301"})).json()
+    assert tula["total_esperado"] is None
+    await client.post(f"{URL}/{tula['id']}/seriales", json={"serial": f"{PREFIJO}1"})
+
+    cerrada = (await client.post(f"{URL}/{tula['id']}/cerrar")).json()
+
+    assert falso.consultas == ["2610154964301", "2610154964301"]
+    assert cerrada["total_esperado"] == 2
+    assert cerrada["faltantes"] == [f"{PREFIJO}2"]
+    assert cerrada["no_esperados"] == []
+
+
+async def test_2_3_sin_datos_de_imile_no_hay_lista_de_faltantes(client, monkeypatch):
+    monkeypatch.setattr(settings, "imile_consulta_tula_activa", False)
+    tula = (await client.post(f"{URL}/", json={"codigo": "BAG-SIN-IMILE", "total_esperado": 3})).json()
+
+    cerrada = (await client.post(f"{URL}/{tula['id']}/cerrar")).json()
+
+    assert cerrada["faltantes"] is None
+    assert cerrada["no_esperados"] is None
+
+
+async def test_base_del_dia_cuenta_lo_subido_hoy(client):
+    r = await client.get(f"{URL}/base-del-dia")
+
+    assert r.status_code == 200
+    assert r.json()["paquetes_hoy"] >= 3  # la base de la prueba se acaba de subir
+    async with AsyncSessionLocal() as db:
+        manana = date.today().replace(year=date.today().year + 1)
+        assert await tulas_service.paquetes_cargados_hoy(db, hoy=manana) == 0

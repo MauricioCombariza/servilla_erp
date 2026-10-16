@@ -36,6 +36,13 @@ class TulaSerialRead(BaseModel):
 
 class TulaDetalle(TulaRead):
     seriales: list[TulaSerialRead]
+    # Contra lo que iMile dice que trae la tula (Paso 2.3); None si iMile no lo dijo
+    faltantes: list[str] | None = None
+    no_esperados: list[str] | None = None
+
+
+class BaseDelDia(BaseModel):
+    paquetes_hoy: int  # paquetes de la base de despacho subidos hoy (hora de Bogotá)
 
 
 class AbrirTulaRequest(BaseModel):

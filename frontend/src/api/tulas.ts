@@ -34,6 +34,9 @@ export interface TulaSerial {
 
 export interface TulaDetalle extends Tula {
   seriales: TulaSerial[];
+  // Contra lo que iMile dice que trae la tula (Paso 2.3); null si iMile no lo dijo
+  faltantes: string[] | null;
+  no_esperados: string[] | null;
 }
 
 export interface DestinoPaquete {
@@ -63,6 +66,9 @@ export interface TulaAbiertaConflicto {
 
 export const tulasApi = {
   abierta: () => api.get<Tula | null>("/tulas/abierta"),
+
+  /** Paquetes de la base de despacho subidos hoy: 0 = falta subir la base */
+  baseDelDia: () => api.get<{ paquetes_hoy: number }>("/tulas/base-del-dia"),
 
   detalle: (id: number) => api.get<TulaDetalle>(`/tulas/${id}`),
 
