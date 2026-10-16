@@ -1,0 +1,73 @@
+import api from "./client";
+
+/** ok | repetido | bloqueado | error | sin_confirmar | omitido (ingreso en iMile apagado) */
+export type ImileEstado = string | null;
+
+export interface Tula {
+  id: number;
+  codigo: string | null;
+  sin_etiqueta: boolean;
+  total_esperado: number | null;
+  estado: string; // abierta | cerrada
+  usuario: string;
+  fecha: string;
+  fecha_apertura: string;
+  fecha_cierre: string | null;
+  leidos: number;
+  contador: number; // lo que se muestra grande (Paso 2.4): baja con esperado, sube sin etiqueta
+  diferencia: number | null; // positiva: faltan · negativa: sobran
+}
+
+export interface TulaSerial {
+  serial: string;
+  en_tabla: boolean;
+  zona: string | null;
+  fecha_escaneo: string;
+  imile_estado: ImileEstado;
+  imile_mensaje: string | null;
+}
+
+export interface TulaDetalle extends Tula {
+  seriales: TulaSerial[];
+}
+
+export interface DestinoPaquete {
+  serial: string;
+  ultimos_4: string;
+  en_tabla: boolean;
+  direccion: string | null;
+  direccion_estandarizada: string | null;
+  localidad: string | null;
+  zona: string | null;
+  fuera_de_zona: boolean;
+  aviso: string | null; // "No está en la tabla" | "Fuera de zona"
+}
+
+export interface EscaneoResult {
+  tula: Tula;
+  destino: DestinoPaquete;
+  ya_escaneado: boolean;
+  imile: { estado: ImileEstado; mensaje: string | null };
+}
+
+/** detail del 409 al abrir una tula con otra abierta */
+export interface TulaAbiertaConflicto {
+  mensaje: string;
+  tula_abierta: Tula;
+}
+
+export const tulasApi = {
+  abierta: () => api.get<Tula | null>("/tulas/abierta"),
+
+  detalle: (id: number) => api.get<TulaDetalle>(`/tulas/${id}`),
+
+  abrir: (body: { codigo: string | null; total_esperado?: number | null; cerrar_anterior?: boolean }) =>
+    api.post<Tula>("/tulas/", body),
+
+  escanear: (id: number, serial: string) => api.post<EscaneoResult>(`/tulas/${id}/seriales`, { serial }),
+
+  reintentarImile: (id: number, serial: string) =>
+    api.post<TulaSerial>(`/tulas/${id}/seriales/${encodeURIComponent(serial)}/reintentar-imile`),
+
+  cerrar: (id: number) => api.post<TulaDetalle>(`/tulas/${id}/cerrar`),
+};

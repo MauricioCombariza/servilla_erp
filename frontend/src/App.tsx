@@ -32,6 +32,7 @@ import { DevolucionesPage } from "@/pages/devoluciones/DevolucionesPage";
 import { EscaneoDevolucionesPage } from "@/pages/devoluciones/EscaneoDevolucionesPage";
 import { EscaneoCarrytPage } from "@/pages/carryt/EscaneoCarrytPage";
 import { EscaneoOffloadPage } from "@/pages/imile/EscaneoOffloadPage";
+import { EscaneoTulasPage } from "@/pages/paquetes/EscaneoTulasPage";
 import { SubirDespachoPage } from "@/pages/paquetes/SubirDespachoPage";
 import { UsuariosRolesPage } from "@/pages/admin/UsuariosRolesPage";
 import { GeocercasPage } from "@/pages/geocercas/GeocercasPage";
@@ -92,6 +93,16 @@ export default function App() {
               <ProtectedRoute>
                 <PageGuard pageKey="paquetes_despacho">
                   <SubirDespachoPage />
+                </PageGuard>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/escaneo-tulas"
+            element={
+              <ProtectedRoute>
+                <PageGuard pageKey="escaneo_tulas">
+                  <EscaneoTulasPage />
                 </PageGuard>
               </ProtectedRoute>
             }
