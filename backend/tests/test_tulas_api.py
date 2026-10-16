@@ -230,3 +230,99 @@ async def test_si_imile_falla_el_paquete_igual_cuenta_y_se_puede_reintentar(clie
 async def test_tula_inexistente(client):
     assert (await client.get(f"{URL}/999999999")).status_code == 404
     assert (await _leer(client, 999999999, "X")).status_code == 404
+
+
+# ── Paso 2.3: total de la tula consultado en iMile ───────────────────────────
+
+
+class _ImileTulaFalso:
+    def __init__(self, total=None, falla=False):
+        self.total, self.falla, self.consultas = total, falla, []
+
+    async def consultar(self, codigo):
+        from app.services.imile_tula import ConsultaTula
+        self.consultas.append(codigo)
+        if self.falla:
+            raise TimeoutError("iMile no respondió")
+        if self.total is None:
+            return ConsultaTula(False, None, ())
+        return ConsultaTula(True, self.total, tuple(f"S{i}" for i in range(self.total)))
+
+
+async def test_2_3_al_abrir_la_tula_el_total_sale_de_imile(client, monkeypatch):
+    falso = _ImileTulaFalso(total=36)
+    monkeypatch.setattr(settings, "imile_consulta_tula_activa", True)
+    monkeypatch.setattr(tulas_service, "imile_tula", falso)
+
+    r = await client.post(f"{URL}/", json={"codigo": "2610154964301"})
+
+    assert r.status_code == 201
+    assert r.json()["total_esperado"] == 36
+    assert r.json()["contador"] == 36
+    assert r.json()["imile_total"] == "iMile: la tula trae 36 paquetes"
+    assert falso.consultas == ["2610154964301"]
+
+
+async def test_2_3_el_total_escrito_a_mano_manda_y_no_consulta(client, monkeypatch):
+    falso = _ImileTulaFalso(total=36)
+    monkeypatch.setattr(settings, "imile_consulta_tula_activa", True)
+    monkeypatch.setattr(tulas_service, "imile_tula", falso)
+
+    r = await client.post(f"{URL}/", json={"codigo": "2610154964301", "total_esperado": 10})
+
+    assert r.json()["total_esperado"] == 10
+    assert r.json()["imile_total"] is None
+    assert falso.consultas == []
+
+
+async def test_2_3_tula_sin_etiqueta_no_consulta(client, monkeypatch):
+    falso = _ImileTulaFalso(total=36)
+    monkeypatch.setattr(settings, "imile_consulta_tula_activa", True)
+    monkeypatch.setattr(tulas_service, "imile_tula", falso)
+
+    r = await client.post(f"{URL}/", json={"codigo": None})
+
+    assert r.json()["sin_etiqueta"] is True
+    assert r.json()["total_esperado"] is None
+    assert falso.consultas == []
+
+
+@pytest.mark.parametrize("falso, aviso", [
+    (_ImileTulaFalso(total=None), "iMile todavía no tiene esta tula descargada"),
+    (_ImileTulaFalso(falla=True), "No se pudo consultar iMile (TimeoutError)"),
+])
+async def test_2_3_sin_total_de_imile_la_tula_se_abre_igual(client, monkeypatch, falso, aviso):
+    monkeypatch.setattr(settings, "imile_consulta_tula_activa", True)
+    monkeypatch.setattr(tulas_service, "imile_tula", falso)
+
+    r = await client.post(f"{URL}/", json={"codigo": "2610169999901"})
+
+    assert r.status_code == 201
+    assert r.json()["total_esperado"] is None
+    assert r.json()["imile_total"].startswith(aviso)
+
+
+async def test_2_3_con_la_consulta_apagada_no_pregunta_a_imile(client, monkeypatch):
+    falso = _ImileTulaFalso(total=36)
+    monkeypatch.setattr(settings, "imile_consulta_tula_activa", False)
+    monkeypatch.setattr(tulas_service, "imile_tula", falso)
+
+    r = await client.post(f"{URL}/", json={"codigo": "2610154964301"})
+
+    assert r.json()["total_esperado"] is None
+    assert falso.consultas == []
+
+
+async def test_2_3_el_total_se_puede_escribir_con_la_tula_ya_abierta(client):
+    tula = (await client.post(f"{URL}/", json={"codigo": "2610169999901"})).json()
+    await client.post(f"{URL}/{tula['id']}/seriales", json={"serial": f"{PREFIJO}1"})
+
+    r = await client.patch(f"{URL}/{tula['id']}/total", json={"total_esperado": 5})
+
+    assert r.status_code == 200
+    assert r.json()["total_esperado"] == 5
+    assert r.json()["contador"] == 4  # 5 esperados − 1 leído
+
+    await client.post(f"{URL}/{tula['id']}/cerrar")
+    cerrada = await client.patch(f"{URL}/{tula['id']}/total", json={"total_esperado": 9})
+    assert cerrada.status_code == 409

@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.tulas import ESTADO_ABIERTA, ESTADO_CERRADA, Tula, TulaSerial
 from app.services.imile_ingreso import imile_ingreso
+from app.services.imile_tula import imile_tula
 from app.services.paquetes_despacho_service import Destino, buscar_destino
 
 AVISO_YA_ESCANEADO = "Ya escaneado en esta tula"
@@ -94,6 +95,25 @@ async def obtener_tula(db: AsyncSession, tula_id: int) -> Tula:
     return tula
 
 
+@dataclass(frozen=True)
+class AperturaTula:
+    tula: Tula
+    # Paso 2.3: qué dijo iMile del total (None si no se consultó)
+    imile_total: str | None = None
+
+
+async def _total_en_imile(codigo: str) -> tuple[int | None, str]:
+    """Paso 2.3: cuántos paquetes trae la tula según iMile. Cualquier falla deja el total
+    en blanco con el motivo: la tula se abre igual y se puede contar sin total."""
+    try:
+        consulta = await imile_tula.consultar(codigo)
+    except Exception as exc:  # noqa: BLE001
+        return None, f"No se pudo consultar iMile ({type(exc).__name__}): escribe el total a mano"
+    if not consulta.encontrada:
+        return None, "iMile todavía no tiene esta tula descargada: escribe el total a mano"
+    return consulta.total, f"iMile: la tula trae {consulta.total} paquetes"
+
+
 async def abrir_tula(
     db: AsyncSession,
     usuario: str,
@@ -101,15 +121,20 @@ async def abrir_tula(
     total_esperado: int | None = None,
     cerrar_anterior: bool = False,
     hoy: date | None = None,
-) -> Tula:
+) -> AperturaTula:
     codigo = (codigo or "").strip() or None
     anterior = await tula_abierta(db, usuario)
     if anterior is not None:
         if codigo is not None and anterior.codigo == codigo:
-            return anterior  # se volvió a escanear la misma tula: sigue abierta
+            return AperturaTula(anterior)  # se volvió a escanear la misma tula: sigue abierta
         if not cerrar_anterior:
             raise TulaAbiertaError(anterior)
         await _cerrar(db, anterior)
+
+    # El total escrito a mano manda; si no hay, se pregunta a iMile
+    imile_total = None
+    if codigo is not None and total_esperado is None and settings.imile_consulta_tula_activa:
+        total_esperado, imile_total = await _total_en_imile(codigo)
 
     tula = Tula(
         codigo=codigo,
@@ -122,7 +147,18 @@ async def abrir_tula(
     db.add(tula)
     await db.commit()
     await db.refresh(tula)
-    return tula
+    return AperturaTula(tula, imile_total)
+
+
+async def fijar_total(db: AsyncSession, tula_id: int, total_esperado: int | None) -> ResumenTula:
+    """Total escrito a mano después de abrir la tula (p. ej. si iMile no lo tenía)."""
+    tula = await obtener_tula(db, tula_id)
+    if tula.estado != ESTADO_ABIERTA:
+        raise TulaCerradaError("La tula ya está cerrada")
+    tula.total_esperado = total_esperado
+    await db.commit()
+    await db.refresh(tula)
+    return await resumen(db, tula)
 
 
 async def registrar_serial(db: AsyncSession, tula_id: int, serial: str) -> ResultadoEscaneo:

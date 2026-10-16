@@ -10,6 +10,9 @@ necesita de ds.imile.com, sin tocar el iMile real.
   bloqueo 1119 "Sin información de pedido()" (seriales NOEXISTE…), bloqueo 1121
   "No registrar Motivo Problema" (seriales BLOQ…), repeat=true si ya se ingresó, o éxito.
   Un bloqueo abre la ventana "bloquear" con Cancelar / Confirmar (textos, no <button>).
+- POST .../unloading/search (Paso 2.3): lo descargado en la estación, un renglón por paquete
+  con su tula (bagNo), paginado con pageNum / pageSize. Como iMile real, ignora cualquier
+  filtro. Cualquier POST a .../unloading/submit (descargar de verdad) queda en `descargas`.
 """
 import json
 import threading
@@ -20,6 +23,11 @@ from typing import ClassVar
 USUARIO, CLAVE = "operador", "clave-secreta"
 BLOQUEO_NO_EXISTE = ("1119", "Sin información de pedido()")
 BLOQUEO_PROBLEMA = ("1121", "No registrar Motivo Problema")
+# Paso 2.3: tulas ya descargadas en la estación y sus paquetes
+DESCARGADOS = {
+    "2610154964301": ["FAKE-T1-01", "FAKE-T1-02", "FAKE-T1-03", "FAKE-T1-04"],
+    "2610154963701": ["FAKE-T2-01", "FAKE-T2-02"],
+}
 
 LOGIN_HTML = f"""<!doctype html><html><body>
 <input name="userCode"><input name="password" type="password">
@@ -90,6 +98,7 @@ render();
 class _FakeImile(BaseHTTPRequestHandler):
     # Compartido entre peticiones (http.server crea un handler por petición)
     ingresados: ClassVar[set[str]] = set()
+    descargas: ClassVar[list[dict]] = []
 
     def do_GET(self):  # nombre fijo de http.server
         cuerpo = LOGIN_HTML if self.path.startswith("/login") else HOME_HTML
@@ -97,7 +106,18 @@ class _FakeImile(BaseHTTPRequestHandler):
 
     def do_POST(self):  # nombre fijo de http.server
         largo = int(self.headers.get("Content-Length", 0))
-        serial = json.loads(self.rfile.read(largo) or b"{}").get("scanNumber", "")
+        datos = json.loads(self.rfile.read(largo) or b"{}")
+        if "/unloading/submit" in self.path:
+            self.descargas.append(datos)
+            return self._json({"status": "success", "resultObject": None})
+        if "/unloading/search" in self.path:
+            filas = [{"waybillNo": w, "bagNo": b, "scanNumber": b, "scanNumberType": "bag", "scanType": "Offloading"}
+                     for b, ws in DESCARGADOS.items() for w in ws]
+            tam, num = int(datos.get("pageSize", 20)), int(datos.get("pageNum", 1))
+            pagina = filas[(num - 1) * tam:num * tam]
+            return self._json({"status": "success", "resultObject": {
+                "results": pagina, "pagination": {"currentPage": num, "pageSize": tam, "totalResult": len(filas)}}})
+        serial = datos.get("scanNumber", "")
         ro = {"scanNumber": serial, "scanTypeDesc": "Llegar", "status": 2, "popup": True,
               "repeat": False, "voiceType": "success"}
         if serial.startswith("NOEXISTE"):
@@ -108,7 +128,9 @@ class _FakeImile(BaseHTTPRequestHandler):
             ro.update(repeat=True, warnMsg="Ya escaneado")
         else:
             self.ingresados.add(serial)
-        cuerpo = {"status": "success", "resultCode": "", "message": "Successful operation!", "resultObject": ro}
+        self._json({"status": "success", "resultCode": "", "message": "Successful operation!", "resultObject": ro})
+
+    def _json(self, cuerpo: dict):
         self._responder(json.dumps(cuerpo).encode(), "application/json")
 
     def _responder(self, cuerpo: bytes, tipo: str):

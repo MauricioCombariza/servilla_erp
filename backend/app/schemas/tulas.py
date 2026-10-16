@@ -20,6 +20,11 @@ class TulaRead(BaseModel):
     diferencia: int | None  # positiva: faltan · negativa: sobran
 
 
+class TulaAbierta(TulaRead):
+    """Respuesta al abrir: qué dijo iMile del total (Paso 2.3), si se le preguntó."""
+    imile_total: str | None = None
+
+
 class TulaSerialRead(BaseModel):
     serial: str
     en_tabla: bool
@@ -37,6 +42,10 @@ class AbrirTulaRequest(BaseModel):
     codigo: str | None = None  # vacío → "Sin etiqueta"
     total_esperado: int | None = Field(default=None, ge=0)  # lo llenará iMile (Paso 2.3)
     cerrar_anterior: bool = False
+
+
+class FijarTotalRequest(BaseModel):
+    total_esperado: int | None = Field(default=None, ge=0)
 
 
 class EscanearSerialRequest(BaseModel):
