@@ -61,6 +61,9 @@ export function EscaneoTulasPage() {
   const [confirmarCierre, setConfirmarCierre] = useState(false);
   const [cerrada, setCerrada] = useState<TulaDetalle | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
+  // Paso 2.3: lo que dijo iMile del total al abrir la tula (queda visible mientras esté abierta)
+  const [imileTotal, setImileTotal] = useState<string | null>(null);
+  const [abriendo, setAbriendo] = useState(false);
   const [ocupado, setOcupado] = useState(false);
   const [camara, setCamara] = useState(false);
   const campoRef = useRef<HTMLInputElement>(null);
@@ -107,12 +110,14 @@ export function EscaneoTulasPage() {
 
   async function abrirTula(cod: string | null, cerrarAnterior = false) {
     setOcupado(true);
+    setAbriendo(true);
     try {
       const total = totalEsperado.trim() === "" ? null : Number(totalEsperado);
       const nueva = (
         await tulasApi.abrir({ codigo: cod, total_esperado: total, cerrar_anterior: cerrarAnterior })
       ).data;
       setTula(nueva);
+      setImileTotal(nueva.imile_total);
       setModo("paquetes");
       setLecturas([]);
       setUltimo(null);
@@ -130,6 +135,19 @@ export function EscaneoTulasPage() {
       }
     } finally {
       setOcupado(false);
+      setAbriendo(false);
+      enfocar();
+    }
+  }
+
+  async function guardarTotal(total: number) {
+    if (!tula) return;
+    try {
+      setTula((await tulasApi.fijarTotal(tula.id, total)).data);
+      setImileTotal(null);
+    } catch {
+      setAviso("No se pudo guardar el total");
+    } finally {
       enfocar();
     }
   }
@@ -141,6 +159,7 @@ export function EscaneoTulasPage() {
       const detalle = (await tulasApi.cerrar(tula.id)).data;
       setCerrada(detalle);
       setTula(null);
+      setImileTotal(null);
       setModo("tula");
       setLecturas([]);
       setUltimo(null);
@@ -284,7 +303,7 @@ export function EscaneoTulasPage() {
         {modo === "tula" && (
           <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
             <label className="block text-sm text-gray-700" htmlFor="total">
-              Paquetes que trae (opcional)
+              Paquetes que trae <span className="text-gray-400">(vacío: se consulta en iMile)</span>
             </label>
             <input
               id="total"
@@ -344,6 +363,26 @@ export function EscaneoTulasPage() {
         </form>
 
         {camara && <div id={SCANNER_ELEMENT_ID} className="w-full rounded-xl overflow-hidden bg-black" />}
+
+        {abriendo && (
+          <div className="rounded-lg px-4 py-2.5 text-sm text-center bg-gray-100 text-gray-700">
+            Abriendo la tula y consultando en iMile cuántos paquetes trae…
+          </div>
+        )}
+
+        {tula && modo === "paquetes" && imileTotal && (
+          <div
+            className={`rounded-lg px-4 py-2.5 text-sm ${
+              tula.total_esperado != null ? "bg-green-50 text-green-800" : "bg-amber-50 text-amber-900"
+            }`}
+          >
+            {imileTotal}
+          </div>
+        )}
+
+        {tula && modo === "paquetes" && !tula.sin_etiqueta && tula.total_esperado == null && (
+          <TotalAMano onGuardar={guardarTotal} />
+        )}
 
         {aviso && (
           <div role="alert" className="rounded-lg px-4 py-2.5 text-sm font-medium text-center bg-red-100 text-red-800">
@@ -431,6 +470,40 @@ export function EscaneoTulasPage() {
         )}
       </div>
     </div>
+  );
+}
+
+/** Total escrito a mano con la tula ya abierta (cuando iMile no lo tenía). */
+function TotalAMano({ onGuardar }: { onGuardar: (total: number) => void }) {
+  const [valor, setValor] = useState("");
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (valor.trim() !== "") onGuardar(Number(valor));
+      }}
+      className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2"
+    >
+      <label htmlFor="total-a-mano" className="text-sm text-gray-700 flex-1">
+        ¿Cuántos paquetes trae?
+      </label>
+      <input
+        id="total-a-mano"
+        type="number"
+        inputMode="numeric"
+        min={0}
+        value={valor}
+        onChange={(e) => setValor(e.target.value)}
+        className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-base outline-none focus:ring-2 focus:ring-primary"
+      />
+      <button
+        type="submit"
+        disabled={valor.trim() === ""}
+        className="bg-gray-800 text-white text-sm font-medium px-3 py-1.5 rounded-lg disabled:opacity-40"
+      >
+        Guardar
+      </button>
+    </form>
   );
 }
 

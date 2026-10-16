@@ -96,7 +96,7 @@ async def test_2_2_leer_la_tula_y_sus_paquetes_en_la_misma_pantalla(pagina):
     await expect(page.get_by_text("Lee el código de la TULA", exact=True)).to_be_visible()
 
     # Tula con 3 paquetes esperados
-    await page.get_by_label("Paquetes que trae (opcional)").fill("3")
+    await page.get_by_label("Paquetes que trae").fill("3")
     await _leer(page, "BAG-E2E-1")
     await expect(page.get_by_text("Tula BAG-E2E-1")).to_be_visible()
     await expect(page.get_by_text("Lee los PAQUETES de la tula", exact=True)).to_be_visible()
@@ -143,9 +143,15 @@ async def test_2_2_leer_la_tula_y_sus_paquetes_en_la_misma_pantalla(pagina):
     await expect(page.get_by_text("Tula BAG-E2E-2")).to_be_visible()
     await expect(_contador(page)).to_have_text("0leídos")
 
+    # Sin total (iMile no lo dio): se escribe con la tula ya abierta y el contador pasa a "faltan"
+    await page.get_by_label("¿Cuántos paquetes trae?").fill("5")
+    await page.get_by_role("button", name="Guardar").click()
+    await expect(_contador(page)).to_have_text("5faltan")
+    await expect(page.get_by_label("¿Cuántos paquetes trae?")).to_have_count(0)
+
     # Cerrar a mano: resumen
     await _leer(page, "TESTE2ET-0002")
-    await expect(_contador(page)).to_have_text("1leídos")
+    await expect(_contador(page)).to_have_text("4faltan")
     await page.get_by_role("button", name="Cerrar tula").click()
     await page.get_by_role("button", name="Sí, cerrar").click()
     await expect(page.get_by_text("Tula BAG-E2E-2 cerrada")).to_be_visible()

@@ -18,6 +18,11 @@ export interface Tula {
   diferencia: number | null; // positiva: faltan · negativa: sobran
 }
 
+/** Respuesta al abrir: qué dijo iMile del total (Paso 2.3), si se le preguntó */
+export interface TulaAbierta extends Tula {
+  imile_total: string | null;
+}
+
 export interface TulaSerial {
   serial: string;
   en_tabla: boolean;
@@ -62,7 +67,10 @@ export const tulasApi = {
   detalle: (id: number) => api.get<TulaDetalle>(`/tulas/${id}`),
 
   abrir: (body: { codigo: string | null; total_esperado?: number | null; cerrar_anterior?: boolean }) =>
-    api.post<Tula>("/tulas/", body),
+    api.post<TulaAbierta>("/tulas/", body),
+
+  fijarTotal: (id: number, totalEsperado: number | null) =>
+    api.patch<Tula>(`/tulas/${id}/total`, { total_esperado: totalEsperado }),
 
   escanear: (id: number, serial: string) => api.post<EscaneoResult>(`/tulas/${id}/seriales`, { serial }),
 

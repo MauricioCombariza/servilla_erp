@@ -9,8 +9,10 @@ from app.database import get_db
 from app.schemas.tulas import (
     AbrirTulaRequest,
     EscanearSerialRequest,
+    FijarTotalRequest,
     EscaneoResult,
     IngresoImile,
+    TulaAbierta,
     TulaDetalle,
     TulaRead,
     TulaSerialRead,
@@ -22,6 +24,7 @@ from app.services.tulas_service import (
     TulaNoEncontradaError,
     abrir_tula,
     cerrar_tula,
+    fijar_total,
     listar_tulas,
     obtener_tula,
     registrar_serial,
@@ -58,16 +61,17 @@ async def _detalle(db: AsyncSession, r: ResumenTula) -> TulaDetalle:
     return TulaDetalle(**_tula_read(r).model_dump(), seriales=seriales)
 
 
-@router.post("/", response_model=TulaRead, status_code=201)
+@router.post("/", response_model=TulaAbierta, status_code=201)
 async def abrir(
     body: AbrirTulaRequest,
     db: AsyncSession = Depends(get_db),
     usuario: dict = _auth,
 ):
     """Abre una tula (codigo vacío = "Sin etiqueta"). Si hay otra abierta responde 409
-    con la tula abierta; la pantalla pregunta y reenvía con cerrar_anterior=true."""
+    con la tula abierta; la pantalla pregunta y reenvía con cerrar_anterior=true.
+    Sin total escrito, lo consulta en iMile (Paso 2.3) y dice el resultado en imile_total."""
     try:
-        tula = await abrir_tula(
+        apertura = await abrir_tula(
             db, usuario["username"], body.codigo, body.total_esperado, body.cerrar_anterior
         )
     except TulaAbiertaError as e:
@@ -78,7 +82,9 @@ async def abrir(
                 "tula_abierta": _tula_read(await resumen(db, e.tula)).model_dump(mode="json"),
             },
         )
-    return _tula_read(await resumen(db, tula))
+    return TulaAbierta(
+        **_tula_read(await resumen(db, apertura.tula)).model_dump(), imile_total=apertura.imile_total
+    )
 
 
 @router.get("/abierta", response_model=TulaRead | None)
@@ -86,6 +92,17 @@ async def abierta(db: AsyncSession = Depends(get_db), usuario: dict = _auth):
     """La tula abierta del usuario (para retomar si se recarga la pantalla), o null."""
     tula = await tula_abierta(db, usuario["username"])
     return _tula_read(await resumen(db, tula)) if tula else None
+
+
+@router.patch("/{tula_id}/total", response_model=TulaRead)
+async def total(tula_id: int, body: FijarTotalRequest, db: AsyncSession = Depends(get_db), _=_auth):
+    """Total esperado escrito a mano con la tula ya abierta (si iMile no lo tenía)."""
+    try:
+        return _tula_read(await fijar_total(db, tula_id, body.total_esperado))
+    except TulaNoEncontradaError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except TulaCerradaError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 @router.post("/{tula_id}/seriales", response_model=EscaneoResult)
