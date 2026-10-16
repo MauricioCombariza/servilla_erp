@@ -99,7 +99,7 @@ def test_orden_sin_registros():
         generar_dat("1", "20260731", [("a.xlsx", EXCEL_1)], [])
 
 
-def test_terceros_solo_bloque_de_gestion():
+def test_terceros_oficina_y_gestion():
     r = generar_dat(
         "123791", "20260731", [("a.xlsx", EXCEL_1), ("b.xlsx", EXCEL_2)], HISTO, tipo="terceros"
     )
@@ -109,9 +109,17 @@ def test_terceros_solo_bloque_de_gestion():
     assert lineas[0] == "*BCSEXTCON0220260731".ljust(312)
     assert lineas[-2] == "*00000002".ljust(312) + "NOC"
     assert lineas[1:-2] == [
-        "20260731DEV0520260806000150018205324" + " " * 8,
-        "20260731ENT0020260803000150018205327" + "20260806",
+        "0000000001DEV0520260806000150018205324" + " " * 8,
+        "0000000300ENT0020260803000150018205327" + "20260806",
     ]
+
+
+def test_terceros_ordena_oficina_numericamente():
+    histo = [_histo("1672696003", "15184"), _histo("1672693019", "3053", "PRINDEL")]
+    r = generar_dat("1", "20260903", [("a.xlsx", EXCEL_1), ("b.xlsx", EXCEL_2)], histo, tipo="terceros")
+    lineas = r.contenido_dat.decode("latin-1").split("\n")[1:-2]
+    assert [l[:10] for l in lineas] == ["0000003053", "0000015184"]
+    assert all(len(l) == 46 for l in lineas)
 
 
 def test_tipo_invalido():
@@ -136,4 +144,4 @@ def test_formato_excel_es_aceptado_por_el_lector():
     buffer = io.BytesIO()
     ws.parent.save(buffer)
     r = generar_dat("123791", "20260731", [("formato.xlsx", buffer.getvalue())], HISTO, "terceros")
-    assert r.contenido_dat.decode("latin-1").split("\n")[1] == "20260731ENT002026080300015001820532720260806"
+    assert r.contenido_dat.decode("latin-1").split("\n")[1] == "0000000300ENT002026080300015001820532720260806"

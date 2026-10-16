@@ -47,8 +47,8 @@ FORMATO_NUMERO = "#,##0"
 
 # Centralizado: bloque de gestión (fecha_corte, estado, estadoBCS, fecha_inicio,
 # serial, fecha_cierra) ubicado por la primera fecha AAAAMMDD válida de la línea,
-# seguido opcionalmente de 'NOC' + '1<COURIER>'. El formato terceros (44
-# caracteres) es solo el bloque, sin NOC ni courier.
+# seguido opcionalmente de 'NOC' + '1<COURIER>'. El formato terceros (46
+# caracteres: oficina + bloque sin fecha_corte) se lee con la estructura de entregas.
 ESTRUCTURA_CENTRALIZADO = [8, 3, 2, 8, 15, 8]
 COLUMNAS_CENTRALIZADO = ["fecha_corte", "estado", "estadoBCS", "fecha_inicio", "serial", "fecha_cierra"]
 PATRON_FECHA = re.compile(r"\b20\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])")

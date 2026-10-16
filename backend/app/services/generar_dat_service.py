@@ -3,8 +3,8 @@ Genera el informe .dat de BCS (ancho fijo, latin-1) cruzando los Excel de gesti�
 con los registros de la orden en bases_web.histo.
 
 Formato tomado del archivo BCS_<INFORME>_EXT_02_<fecha>.dat existente (p. ej. CON, CLP): encabezado de 312
-caracteres, registros de 375 (centralizado) o de 44 (terceros: solo el bloque
-de gestión) y pie con el conteo + 'NOC'.
+caracteres, registros de 375 (centralizado) o de 46 (terceros: oficina en 10
+caracteres + el bloque de gestión sin la fecha inicial) y pie con el conteo + 'NOC'.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ TIPO_DOC = "NI"
 INFORME_DEFAULT = "CON"
 MARCA_NOC = "NOC1"
 ANCHO_REGISTRO = 375
-ANCHO_TERCEROS = 44
+ANCHO_TERCEROS = 46
 TIPO_CENTRALIZADO = "centralizado"
 TIPO_TERCEROS = "terceros"
 TIPOS_INFORME = (TIPO_CENTRALIZADO, TIPO_TERCEROS)
@@ -86,10 +86,9 @@ def campo(valor, ancho: int, alinear: str = "izq", relleno: str = " ") -> str:
     return valor.ljust(ancho, relleno)[:ancho]
 
 
-def _bloque_gestion(reg: dict, fecha_ini: str) -> str:
-    """fecha_ini + Estado + Causal_Dev + F_recepcio + guía (15) + F_GESTION: 44 caracteres."""
+def _gestion(reg: dict) -> str:
+    """Estado + Causal_Dev + F_recepcio + guía (15) + F_GESTION: 36 caracteres."""
     return "".join([
-        campo(fecha_ini, 8),
         campo(reg["Estado"], 3),
         campo(reg["Causal_Dev"], 2, "der", "0"),
         campo(reg["F_recepcio"], 8),
@@ -100,9 +99,9 @@ def _bloque_gestion(reg: dict, fecha_ini: str) -> str:
 
 def construir_linea(reg: dict, fecha_ini: str, tipo: str = TIPO_CENTRALIZADO) -> str:
     """Centralizado: registro completo de 375 caracteres.
-    Terceros: solo el bloque de gestión (de fecha_ini hasta F_GESTION)."""
+    Terceros: oficina (10, con ceros a la izquierda) + gestión (de Estado hasta F_GESTION)."""
     if tipo == TIPO_TERCEROS:
-        linea = _bloque_gestion(reg, fecha_ini)
+        linea = campo(reg["oficina"], 10, "der", "0") + _gestion(reg)
         ancho = ANCHO_TERCEROS
     else:
         linea = "".join([
@@ -115,7 +114,8 @@ def construir_linea(reg: dict, fecha_ini: str, tipo: str = TIPO_CENTRALIZADO) ->
             "0" * 11,
             campo(reg["ciudad1"], 35),
             campo(reg["dpto1"], 35),
-            _bloque_gestion(reg, fecha_ini),
+            campo(fecha_ini, 8),
+            _gestion(reg),
             MARCA_NOC,
             campo(reg["courrier"], 35),
             campo(reg["orden"], 6, "der"),
@@ -147,7 +147,9 @@ def generar_dat(
     df_histo["serial"] = normalizar_serial(df_histo["serial"])
     df_histo = df_histo.drop_duplicates(subset=["serial"], keep="last")
 
-    df = df_excel.merge(df_histo, on="serial", how="inner").sort_values("oficina")
+    df = df_excel.merge(df_histo, on="serial", how="inner").sort_values(
+        "oficina", key=lambda s: pd.to_numeric(s, errors="coerce"), kind="stable"
+    )
 
     lineas = [campo(f"*BCSEXT{informe}02{fecha_ini}", ANCHO_ENCABEZADO)]
     lineas += [construir_linea(reg, fecha_ini, tipo) for reg in df.to_dict("records")]
