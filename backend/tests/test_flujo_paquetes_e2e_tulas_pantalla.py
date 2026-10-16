@@ -192,3 +192,16 @@ async def test_2_5_tula_sin_etiqueta_y_reintentar_imile_desde_la_pantalla(pagina
 
     await fila.get_by_role("button", name="Reintentar").click()
     await expect(fila).to_contain_text("iMile ✓")
+
+    # Al cerrar, lo que iMile dice que traía la tula: qué faltó y qué no venía en ella
+    async def con_faltantes(route):
+        resp = await route.fetch()
+        body = await resp.json()
+        body.update(faltantes=["TESTE2ET-0001", "TESTE2ET-0003"], no_esperados=["TESTE2ET-0002"])
+        await route.fulfill(response=resp, body=json.dumps(body))
+
+    await page.route("**/api/tulas/*/cerrar", con_faltantes)
+    await page.get_by_role("button", name="Cerrar tula").click()
+    await page.get_by_role("button", name="Sí, cerrar").click()
+    await expect(page.get_by_text("Faltaron (2)")).to_be_visible()
+    await expect(page.get_by_text("Leídos que no venían en esta tula según iMile (1)")).to_be_visible()

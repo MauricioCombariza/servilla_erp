@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
-import { Camera, CameraOff, PackageOpen, RotateCw } from "lucide-react";
+import { AlertTriangle, Camera, CameraOff, PackageOpen, RotateCw } from "lucide-react";
 import {
   tulasApi,
   type DestinoPaquete,
@@ -78,6 +79,13 @@ export function EscaneoTulasPage() {
     },
     refetchOnWindowFocus: false,
   });
+
+  // Sin la base de despacho de hoy, todo saldría "No está en la tabla" y sin zona
+  const baseQuery = useQuery({
+    queryKey: ["tulas-base-del-dia"],
+    queryFn: () => tulasApi.baseDelDia().then((r) => r.data),
+  });
+  const sinBase = baseQuery.data?.paquetes_hoy === 0;
 
   useEffect(() => {
     const d = abiertaQuery.data;
@@ -291,6 +299,21 @@ export function EscaneoTulasPage() {
       </header>
 
       <div className="p-4 flex flex-col gap-3 flex-1 w-full max-w-md mx-auto">
+        {sinBase && (
+          <div role="alert" className="rounded-lg px-4 py-3 bg-amber-100 text-amber-900 flex items-start gap-2 text-sm">
+            <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold">No se ha subido la base de despacho de hoy</p>
+              <p>
+                Súbela antes de escanear: sin ella los paquetes salen "No está en la tabla" y sin zona.
+              </p>
+              <Link to="/subir-despacho" className="inline-block mt-1 font-medium underline">
+                Subir base de despacho
+              </Link>
+            </div>
+          </div>
+        )}
+
         {/* Qué se va a leer ahora */}
         <div
           className={`rounded-lg px-4 py-2 text-sm font-medium text-center ${
@@ -627,6 +650,35 @@ function ResumenCierre({ tula }: { tula: TulaDetalle }) {
           <dt className="text-xs text-gray-500">{!conTotal ? "Diferencia" : diferencia > 0 ? "Faltan" : diferencia < 0 ? "Sobran" : "Completa"}</dt>
         </div>
       </dl>
+      {tula.faltantes && tula.faltantes.length > 0 && (
+        <ListaSeriales titulo={`Faltaron (${tula.faltantes.length})`} seriales={tula.faltantes} clase="text-red-700" />
+      )}
+      {tula.no_esperados && tula.no_esperados.length > 0 && (
+        <ListaSeriales
+          titulo={`Leídos que no venían en esta tula según iMile (${tula.no_esperados.length})`}
+          seriales={tula.no_esperados}
+          clase="text-amber-700"
+        />
+      )}
+      {tula.faltantes && tula.faltantes.length === 0 && (
+        <p className="mt-3 text-sm text-green-700">Llegaron todos los paquetes que iMile dice que trae.</p>
+      )}
+    </div>
+  );
+}
+
+function ListaSeriales({ titulo, seriales, clase }: { titulo: string; seriales: string[]; clase: string }) {
+  return (
+    <div className="mt-3">
+      <p className={`text-sm font-medium ${clase}`}>{titulo}</p>
+      <ul className="mt-1 grid grid-cols-2 gap-x-3 text-sm font-mono">
+        {seriales.map((s) => (
+          <li key={s} className="truncate">
+            <span className="text-gray-400">{s.slice(0, -4)}</span>
+            <span className="font-bold text-gray-900">{s.slice(-4)}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
