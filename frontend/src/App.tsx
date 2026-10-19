@@ -34,6 +34,7 @@ import { EscaneoCarrytPage } from "@/pages/carryt/EscaneoCarrytPage";
 import { EscaneoOffloadPage } from "@/pages/imile/EscaneoOffloadPage";
 import { EscaneoTulasPage } from "@/pages/paquetes/EscaneoTulasPage";
 import { SubirDespachoPage } from "@/pages/paquetes/SubirDespachoPage";
+import { VerZonasPage } from "@/pages/paquetes/VerZonasPage";
 import { UsuariosRolesPage } from "@/pages/admin/UsuariosRolesPage";
 import { GeocercasPage } from "@/pages/geocercas/GeocercasPage";
 import { GenerarDatPage } from "@/pages/generar-dat/GenerarDatPage";
@@ -67,6 +68,8 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
+          {/* Paso 2.7: pública, se abre con el QR del día (sin iniciar sesión) */}
+          <Route path="/ver-zonas/:token" element={<VerZonasPage />} />
           <Route
             path="/escaneo-carryt"
             element={

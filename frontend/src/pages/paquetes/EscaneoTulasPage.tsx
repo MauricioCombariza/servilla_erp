@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
-import { AlertTriangle, Camera, CameraOff, PackageOpen, RotateCw } from "lucide-react";
+import { AlertTriangle, Camera, CameraOff, PackageOpen, QrCode, RotateCw } from "lucide-react";
 import {
   tulasApi,
   type DestinoPaquete,
@@ -11,6 +11,7 @@ import {
   type TulaAbiertaConflicto,
   type TulaDetalle,
 } from "@/api/tulas";
+import { CompartirVista } from "./CompartirVista";
 
 const SCANNER_ELEMENT_ID = "tulas-qr-reader";
 const SCAN_FORMATS = [
@@ -50,6 +51,7 @@ function vibrar(patron: number | number[]) {
  * Pasos 2.2, 2.4, 2.5, 2.6 y 2.8 en una sola pantalla para celular: se lee la tula y ahí
  * mismo sus paquetes. Cada paquete se cuenta, se muestra su destino y se ingresa en iMile.
  * Sirve con el lector Bluetooth (escribe en el campo y manda Enter) o con la cámara.
+ * El botón del QR comparte la vista por zonas (2.7) con los demás celulares.
  */
 export function EscaneoTulasPage() {
   const [tula, setTula] = useState<Tula | null>(null);
@@ -67,6 +69,7 @@ export function EscaneoTulasPage() {
   const [abriendo, setAbriendo] = useState(false);
   const [ocupado, setOcupado] = useState(false);
   const [camara, setCamara] = useState(false);
+  const [compartir, setCompartir] = useState(false); // Paso 2.7: QR de la vista por zonas
   const campoRef = useRef<HTMLInputElement>(null);
   const ultimaLecturaRef = useRef({ codigo: "", at: 0 });
 
@@ -296,7 +299,18 @@ export function EscaneoTulasPage() {
             Nueva tula
           </button>
         )}
+        <button
+          type="button"
+          onClick={() => setCompartir(true)}
+          aria-label="Compartir vista por zonas (QR)"
+          title="Compartir vista por zonas (QR)"
+          className="shrink-0 text-gray-600 hover:text-primary p-1"
+        >
+          <QrCode size={24} />
+        </button>
       </header>
+
+      {compartir && <CompartirVista onCerrar={() => { setCompartir(false); enfocar(); }} />}
 
       <div className="p-4 flex flex-col gap-3 flex-1 w-full max-w-md mx-auto">
         {sinBase && (
