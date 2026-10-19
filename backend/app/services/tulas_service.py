@@ -16,9 +16,10 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.models.paquetes_despacho import PaqueteDespacho
 from app.models.tulas import ESTADO_ABIERTA, ESTADO_CERRADA, Tula, TulaSerial
 from app.services.imile_ingreso import imile_ingreso
-from app.services.imile_tula import imile_tula
+from app.services.imile_tula import ConsultaTula, imile_tula
 from app.services.paquetes_despacho_service import Destino, buscar_destino
 
 AVISO_YA_ESCANEADO = "Ya escaneado en esta tula"
@@ -102,16 +103,16 @@ class AperturaTula:
     imile_total: str | None = None
 
 
-async def _total_en_imile(codigo: str) -> tuple[int | None, str]:
-    """Paso 2.3: cuántos paquetes trae la tula según iMile. Cualquier falla deja el total
-    en blanco con el motivo: la tula se abre igual y se puede contar sin total."""
+async def _consultar_imile(codigo: str) -> tuple[ConsultaTula | None, str]:
+    """Paso 2.3: qué paquetes trae la tula según iMile. Cualquier falla devuelve None con
+    el motivo: la tula se abre (o se cierra) igual y se puede contar sin total."""
     try:
         consulta = await imile_tula.consultar(codigo)
     except Exception as exc:  # noqa: BLE001
         return None, f"No se pudo consultar iMile ({type(exc).__name__}): escribe el total a mano"
     if not consulta.encontrada:
         return None, "iMile todavía no tiene esta tula descargada: escribe el total a mano"
-    return consulta.total, f"iMile: la tula trae {consulta.total} paquetes"
+    return consulta, f"iMile: la tula trae {consulta.total} paquetes"
 
 
 async def abrir_tula(
@@ -133,13 +134,17 @@ async def abrir_tula(
 
     # El total escrito a mano manda; si no hay, se pregunta a iMile
     imile_total = None
+    esperados = None
     if codigo is not None and total_esperado is None and settings.imile_consulta_tula_activa:
-        total_esperado, imile_total = await _total_en_imile(codigo)
+        consulta, imile_total = await _consultar_imile(codigo)
+        if consulta is not None:
+            total_esperado, esperados = consulta.total, list(consulta.seriales)
 
     tula = Tula(
         codigo=codigo,
         sin_etiqueta=codigo is None,
         total_esperado=total_esperado,
+        seriales_esperados=esperados,
         estado=ESTADO_ABIERTA,
         usuario=usuario,
         fecha=hoy or datetime.now(_ZONA_HORARIA).date(),
@@ -237,8 +242,33 @@ async def _cerrar(db: AsyncSession, tula: Tula) -> None:
 async def cerrar_tula(db: AsyncSession, tula_id: int) -> ResumenTula:
     tula = await obtener_tula(db, tula_id)
     if tula.estado != ESTADO_CERRADA:
+        # Si al abrirla iMile aún no la tenía (se descargó en la app mientras tanto), se
+        # vuelve a preguntar para poder decir qué faltó. Si falla, se cierra igual.
+        if tula.codigo and tula.seriales_esperados is None and settings.imile_consulta_tula_activa:
+            consulta, _ = await _consultar_imile(tula.codigo)
+            if consulta is not None:
+                tula.seriales_esperados = list(consulta.seriales)
+                if tula.total_esperado is None:
+                    tula.total_esperado = consulta.total
         await _cerrar(db, tula)
     return await resumen(db, tula)
+
+
+def comparar_con_esperados(tula: Tula, leidos: list[str]) -> tuple[list[str] | None, list[str] | None]:
+    """(faltantes, no esperados) contra lo que iMile dice que trae la tula; (None, None) si no se sabe."""
+    if tula.seriales_esperados is None:
+        return None, None
+    esperados, vistos = set(tula.seriales_esperados), set(leidos)
+    return sorted(esperados - vistos), sorted(vistos - esperados)
+
+
+async def paquetes_cargados_hoy(db: AsyncSession, hoy: date | None = None) -> int:
+    """Paquetes de la base de despacho subidos (o reemplazados) hoy, en hora de Bogotá."""
+    hoy = hoy or datetime.now(_ZONA_HORARIA).date()
+    desde = datetime.combine(hoy, datetime.min.time(), tzinfo=_ZONA_HORARIA)
+    return (
+        await db.execute(select(func.count()).select_from(PaqueteDespacho).where(PaqueteDespacho.fecha_modificacion >= desde))
+    ).scalar_one()
 
 
 async def seriales_de(db: AsyncSession, tula_id: int) -> list[TulaSerial]:

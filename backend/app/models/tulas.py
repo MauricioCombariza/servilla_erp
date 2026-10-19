@@ -1,6 +1,7 @@
 from datetime import date, datetime
 
 from sqlalchemy import Boolean, ForeignKey, String, Text, UniqueConstraint, text
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import TIMESTAMP
 
@@ -21,6 +22,8 @@ class Tula(Base):
     codigo: Mapped[str | None] = mapped_column(String(80))  # NULL si es "Sin etiqueta"
     sin_etiqueta: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     total_esperado: Mapped[int | None] = mapped_column()  # lo trae iMile (2.3)
+    # Seriales que trae según iMile (2.3): al cerrar se ven los que faltaron. NULL si no se sabe
+    seriales_esperados: Mapped[list[str] | None] = mapped_column(ARRAY(String(50)))
     estado: Mapped[str] = mapped_column(String(10), nullable=False, default=ESTADO_ABIERTA)
     usuario: Mapped[str] = mapped_column(String(50), nullable=False)
     fecha: Mapped[date] = mapped_column(nullable=False)

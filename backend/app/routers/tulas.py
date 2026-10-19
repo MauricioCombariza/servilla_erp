@@ -8,6 +8,7 @@ from app.auth.dependencies import require_page
 from app.database import get_db
 from app.schemas.tulas import (
     AbrirTulaRequest,
+    BaseDelDia,
     EscanearSerialRequest,
     FijarTotalRequest,
     EscaneoResult,
@@ -24,9 +25,11 @@ from app.services.tulas_service import (
     TulaNoEncontradaError,
     abrir_tula,
     cerrar_tula,
+    comparar_con_esperados,
     fijar_total,
     listar_tulas,
     obtener_tula,
+    paquetes_cargados_hoy,
     registrar_serial,
     reintentar_imile,
     resumen,
@@ -55,10 +58,12 @@ def _serial_read(s) -> TulaSerialRead:
 
 
 async def _detalle(db: AsyncSession, r: ResumenTula) -> TulaDetalle:
-    seriales = [
-        _serial_read(s) for s in await seriales_de(db, r.tula.id)
-    ]
-    return TulaDetalle(**_tula_read(r).model_dump(), seriales=seriales)
+    leidos = await seriales_de(db, r.tula.id)
+    faltantes, no_esperados = comparar_con_esperados(r.tula, [s.serial for s in leidos])
+    return TulaDetalle(
+        **_tula_read(r).model_dump(), seriales=[_serial_read(s) for s in leidos],
+        faltantes=faltantes, no_esperados=no_esperados,
+    )
 
 
 @router.post("/", response_model=TulaAbierta, status_code=201)
@@ -85,6 +90,12 @@ async def abrir(
     return TulaAbierta(
         **_tula_read(await resumen(db, apertura.tula)).model_dump(), imile_total=apertura.imile_total
     )
+
+
+@router.get("/base-del-dia", response_model=BaseDelDia)
+async def base_del_dia(db: AsyncSession = Depends(get_db), _=_auth):
+    """Para avisar en la pantalla si todavía no se subió la base de despacho de hoy."""
+    return BaseDelDia(paquetes_hoy=await paquetes_cargados_hoy(db))
 
 
 @router.get("/abierta", response_model=TulaRead | None)
