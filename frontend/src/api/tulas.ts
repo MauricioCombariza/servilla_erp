@@ -27,6 +27,7 @@ export interface TulaSerial {
   serial: string;
   en_tabla: boolean;
   zona: string | null;
+  localidad: string | null; // de la base de despacho: se muestra si va fuera de zona
   fecha_escaneo: string;
   imile_estado: ImileEstado;
   imile_mensaje: string | null;
@@ -51,6 +52,13 @@ export interface DestinoPaquete {
   aviso: string | null; // "No está en la tabla" | "Fuera de zona"
 }
 
+/** Lo leído hoy entre todos los usuarios */
+export interface ResumenDelDia {
+  fecha: string;
+  tulas: number;
+  paquetes: number; // cada serial contado una sola vez
+}
+
 export interface EscaneoResult {
   tula: Tula;
   destino: DestinoPaquete;
@@ -69,6 +77,8 @@ export const tulasApi = {
 
   /** Paquetes de la base de despacho subidos hoy: 0 = falta subir la base */
   baseDelDia: () => api.get<{ paquetes_hoy: number }>("/tulas/base-del-dia"),
+
+  delDia: () => api.get<ResumenDelDia>("/tulas/del-dia"),
 
   detalle: (id: number) => api.get<TulaDetalle>(`/tulas/${id}`),
 

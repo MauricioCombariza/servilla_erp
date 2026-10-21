@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { AlertTriangle, Camera, CameraOff, PackageOpen, QrCode, RotateCw } from "lucide-react";
@@ -31,6 +31,7 @@ type Lectura = {
   serial: string;
   envio: "enviando" | "listo" | "falla";
   zona: string | null;
+  localidad: string | null;
   aviso: string | null;
   imile: ImileEstado;
   imileMensaje: string | null;
@@ -72,6 +73,7 @@ export function EscaneoTulasPage() {
   const [compartir, setCompartir] = useState(false); // Paso 2.7: QR de la vista por zonas
   const campoRef = useRef<HTMLInputElement>(null);
   const ultimaLecturaRef = useRef({ codigo: "", at: 0 });
+  const queryClient = useQueryClient();
 
   // Al entrar (o recargar) se retoma la tula abierta con lo que ya se había leído
   const abiertaQuery = useQuery({
@@ -90,6 +92,14 @@ export function EscaneoTulasPage() {
   });
   const sinBase = baseQuery.data?.paquetes_hoy === 0;
 
+  // Tulas y paquetes leídos hoy entre todos (otros también escanean: se refresca solo)
+  const delDiaQuery = useQuery({
+    queryKey: ["tulas-del-dia"],
+    queryFn: () => tulasApi.delDia().then((r) => r.data),
+    refetchInterval: 15000,
+  });
+  const refrescarDelDia = () => void queryClient.invalidateQueries({ queryKey: ["tulas-del-dia"] });
+
   useEffect(() => {
     const d = abiertaQuery.data;
     if (!d) return;
@@ -100,6 +110,7 @@ export function EscaneoTulasPage() {
         serial: s.serial,
         envio: "listo",
         zona: s.zona,
+        localidad: s.localidad,
         aviso: s.en_tabla ? (s.zona ? null : "Fuera de zona") : "No está en la tabla",
         imile: s.imile_estado,
         imileMensaje: s.imile_mensaje,
@@ -135,6 +146,7 @@ export function EscaneoTulasPage() {
       setConflicto(null);
       setCerrada(null);
       setTotalEsperado("");
+      refrescarDelDia();
       vibrar(80);
     } catch (e) {
       const detalle = leerDetalle(e);
@@ -174,6 +186,7 @@ export function EscaneoTulasPage() {
       setModo("tula");
       setLecturas([]);
       setUltimo(null);
+      refrescarDelDia();
     } catch {
       setAviso("No se pudo cerrar la tula");
     } finally {
@@ -197,7 +210,7 @@ export function EscaneoTulasPage() {
       const previa = ls.find((l) => l.serial === serial);
       const fila: Lectura = previa
         ? { ...previa, envio: "enviando", error: undefined }
-        : { serial, envio: "enviando", zona: null, aviso: null, imile: null, imileMensaje: null };
+        : { serial, envio: "enviando", zona: null, localidad: null, aviso: null, imile: null, imileMensaje: null };
       return [fila, ...ls.filter((l) => l.serial !== serial)];
     });
     try {
@@ -208,10 +221,12 @@ export function EscaneoTulasPage() {
       actualizarLectura(serial, {
         envio: "listo",
         zona: r.destino.zona,
+        localidad: r.destino.localidad,
         aviso: r.destino.aviso,
         imile: r.imile.estado,
         imileMensaje: r.imile.mensaje,
       });
+      if (!r.ya_escaneado) refrescarDelDia();
       vibrar(r.ya_escaneado ? [40, 60, 40] : 80);
     } catch (e) {
       const detalle = leerDetalle(e);
@@ -309,6 +324,15 @@ export function EscaneoTulasPage() {
           <QrCode size={24} />
         </button>
       </header>
+
+      {delDiaQuery.data && (
+        <div className="bg-white border-b border-gray-200 px-4 py-1.5 text-sm text-gray-600 text-center">
+          Hoy: <span className="font-semibold text-gray-900">{delDiaQuery.data.tulas}</span>{" "}
+          tula{delDiaQuery.data.tulas === 1 ? "" : "s"} ·{" "}
+          <span className="font-semibold text-gray-900">{delDiaQuery.data.paquetes}</span>{" "}
+          paquete{delDiaQuery.data.paquetes === 1 ? "" : "s"} leído{delDiaQuery.data.paquetes === 1 ? "" : "s"}
+        </div>
+      )}
 
       {compartir && <CompartirVista onCerrar={() => { setCompartir(false); enfocar(); }} />}
 
@@ -610,7 +634,10 @@ function FilaLectura({ lectura: l, onReenviar, onReintentarImile }: {
           <span className="text-gray-400">{l.serial.slice(0, -4)}</span>
           <span className="font-bold">{l.serial.slice(-4)}</span>
         </span>
-        <span className="shrink-0 font-medium text-gray-700">{l.zona ?? ""}</span>
+        {/* Fuera de zona: la localidad, para saber hacia dónde va */}
+        <span className={`shrink-0 font-medium ${l.zona ? "text-gray-700" : "text-amber-700"}`}>
+          {l.zona ?? l.localidad ?? ""}
+        </span>
       </div>
       <div className="flex items-center justify-between gap-2 mt-0.5 text-xs">
         <span className={l.aviso ? "text-amber-700" : "text-gray-400"}>

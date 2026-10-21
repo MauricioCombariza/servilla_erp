@@ -117,6 +117,13 @@ async def test_2_2_leer_la_tula_y_sus_paquetes_en_la_misma_pantalla(pagina):
     # Fuera de zona y uno que no está en la base
     await _leer(page, "TESTE2ET-0003")
     await expect(_fila(page, "TESTE2ET-0003")).to_contain_text("Fuera de zona")
+    # En la lista, el fuera de zona muestra su localidad en lugar de la zona
+    async with AsyncSessionLocal() as db:
+        localidad = (await db.execute(
+            select(PaqueteDespacho.localidad).where(PaqueteDespacho.serial == "TESTE2ET-0003")
+        )).scalar_one()
+    assert localidad, "la dirección de prueba fuera de zona debería tener localidad"
+    await expect(_fila(page, "TESTE2ET-0003")).to_contain_text(localidad)
     await _leer(page, NO_EN_TABLA)
     await expect(page.get_by_text("No está en la tabla").first).to_be_visible()
     await expect(_contador(page)).to_have_text("0faltan")
@@ -133,6 +140,11 @@ async def test_2_2_leer_la_tula_y_sus_paquetes_en_la_misma_pantalla(pagina):
     await expect(page.get_by_text("Tula BAG-E2E-1")).to_be_visible()
     await expect(_contador(page)).to_have_text("1sobran")
     await expect(page.locator("li")).to_have_count(4)
+    await expect(_fila(page, "TESTE2ET-0003")).to_contain_text(localidad)  # también al retomar
+
+    # Totales del día de todos los usuarios, bajo el encabezado
+    await expect(page.get_by_text("Hoy:")).to_contain_text("tula")
+    await expect(page.get_by_text("Hoy:")).to_contain_text("paquetes leídos")
 
     # Otra tula con esta abierta: pregunta antes de cerrarla (2.8)
     await page.get_by_role("button", name="Nueva tula").click()

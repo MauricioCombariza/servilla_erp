@@ -35,6 +35,7 @@ import { EscaneoOffloadPage } from "@/pages/imile/EscaneoOffloadPage";
 import { EscaneoTulasPage } from "@/pages/paquetes/EscaneoTulasPage";
 import { SubirDespachoPage } from "@/pages/paquetes/SubirDespachoPage";
 import { VerZonasPage } from "@/pages/paquetes/VerZonasPage";
+import { AsignacionZonasPage } from "@/pages/paquetes/AsignacionZonasPage";
 import { UsuariosRolesPage } from "@/pages/admin/UsuariosRolesPage";
 import { GeocercasPage } from "@/pages/geocercas/GeocercasPage";
 import { GenerarDatPage } from "@/pages/generar-dat/GenerarDatPage";
@@ -156,6 +157,7 @@ export default function App() {
             <Route path="/devoluciones" element={<PageGuard pageKey="devoluciones"><DevolucionesPage /></PageGuard>} />
             <Route path="/geocercas" element={<PageGuard pageKey="geocercas"><GeocercasPage /></PageGuard>} />
             <Route path="/generar-dat" element={<PageGuard pageKey="generar_dat"><GenerarDatPage /></PageGuard>} />
+            <Route path="/asignacion-zonas" element={<PageGuard pageKey="asignacion_zonas"><AsignacionZonasPage /></PageGuard>} />
             <Route path="/admin/usuarios-roles" element={<AdminOnlyRoute><UsuariosRolesPage /></AdminOnlyRoute>} />
           </Route>
         </Routes>

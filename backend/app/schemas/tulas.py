@@ -29,6 +29,7 @@ class TulaSerialRead(BaseModel):
     serial: str
     en_tabla: bool
     zona: str | None
+    localidad: str | None = None  # de la base de despacho: es lo que se muestra si va fuera de zona
     fecha_escaneo: datetime
     imile_estado: str | None  # ok | repetido | bloqueado | error | sin_confirmar | omitido
     imile_mensaje: str | None
@@ -43,6 +44,12 @@ class TulaDetalle(TulaRead):
 
 class BaseDelDia(BaseModel):
     paquetes_hoy: int  # paquetes de la base de despacho subidos hoy (hora de Bogotá)
+
+
+class ResumenDelDia(BaseModel):
+    fecha: date
+    tulas: int  # tulas abiertas en el día, de todos los usuarios
+    paquetes: int  # seriales leídos en esas tulas, cada uno contado una sola vez
 
 
 class AbrirTulaRequest(BaseModel):

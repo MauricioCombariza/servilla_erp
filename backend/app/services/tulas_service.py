@@ -271,6 +271,30 @@ async def paquetes_cargados_hoy(db: AsyncSession, hoy: date | None = None) -> in
     ).scalar_one()
 
 
+async def resumen_del_dia(db: AsyncSession, fecha: date | None = None) -> tuple[date, int, int]:
+    """Tulas leídas en el día (de todos los usuarios) y paquetes leídos sin repetir serial."""
+    fecha = fecha or datetime.now(_ZONA_HORARIA).date()
+    tulas = (await db.execute(select(func.count()).select_from(Tula).where(Tula.fecha == fecha))).scalar_one()
+    paquetes = (
+        await db.execute(
+            select(func.count(func.distinct(TulaSerial.serial)))
+            .join(Tula, Tula.id == TulaSerial.tula_id)
+            .where(Tula.fecha == fecha)
+        )
+    ).scalar_one()
+    return fecha, tulas, paquetes
+
+
+async def localidades_de(db: AsyncSession, seriales: list[str]) -> dict[str, str | None]:
+    """Localidad de cada serial según la base de despacho (los que no están, no aparecen)."""
+    if not seriales:
+        return {}
+    result = await db.execute(
+        select(PaqueteDespacho.serial, PaqueteDespacho.localidad).where(PaqueteDespacho.serial.in_(seriales))
+    )
+    return dict(result.all())
+
+
 async def seriales_de(db: AsyncSession, tula_id: int) -> list[TulaSerial]:
     result = await db.execute(
         select(TulaSerial).where(TulaSerial.tula_id == tula_id).order_by(TulaSerial.fecha_escaneo)
