@@ -118,7 +118,7 @@ async def test_tablero_del_dia_con_mensajeros_y_paquetes_leidos(client):
     r = (await client.get(f"{URL}/", params={"fecha": FECHA.isoformat()})).json()
     por_zona = {z["zona"]: z for z in r}
 
-    assert len(r) == 33
+    assert len(r) == 28
     assert por_zona["60_1"] == {"zona": "60_1", "paquetes_leidos": 2,
                                 "mensajero": {"codigo": "T901", "nombre": "Mensajero Prueba Uno"}}
     assert por_zona["60_2"]["paquetes_leidos"] == 1 and por_zona["60_2"]["mensajero"] is None

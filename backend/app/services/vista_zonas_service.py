@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enlaces_vista import EnlaceVista
@@ -80,12 +80,24 @@ async def validar_enlace(db: AsyncSession, token: str, ahora: datetime | None = 
 
 
 async def zonas_disponibles(db: AsyncSession) -> list[str]:
+    # Una zona puede tener varias filas de límites (desde la migración 043): cada nombre una vez.
+    # Orden: las series como en la tabla (60, 70, 80, 90, 10) y dentro de cada una por número.
     result = await db.execute(
-        select(SectorizacionLimite.nombre)
+        select(SectorizacionLimite.nombre, func.min(SectorizacionLimite.orden))
         .where(SectorizacionLimite.tipo == TIPO_ZONA, SectorizacionLimite.activo.is_(True))
-        .order_by(SectorizacionLimite.orden)
+        .group_by(SectorizacionLimite.nombre)
     )
-    return list(result.scalars().all())
+    filas = result.all()
+    serie_orden: dict[str, int] = {}
+    for nombre, orden in filas:
+        serie = nombre.split("_")[0]
+        serie_orden[serie] = min(orden, serie_orden.get(serie, orden))
+
+    def clave(fila):
+        serie, _, numero = fila[0].partition("_")
+        return (serie_orden[serie], int(numero) if numero.isdigit() else 0, fila[0])
+
+    return [nombre for nombre, _ in sorted(filas, key=clave)]
 
 
 async def paquetes_nuevos(

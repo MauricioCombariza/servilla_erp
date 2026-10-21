@@ -28,8 +28,8 @@ async def preparar():
     await _limpiar()
     async with AsyncSessionLocal() as db:
         await guardar_paquetes(db, [
-            PaqueteEntrada(f"{PREFIJO}0001", "Ana", None, "CL 63 # 27-12"),   # 60_1
-            PaqueteEntrada(f"{PREFIJO}0002", "Luis", None, "CL 64 # 20-11"),  # 60_2
+            PaqueteEntrada(f"{PREFIJO}0001", "Ana", None, "CL 63 # 27-12"),   # 60_3
+            PaqueteEntrada(f"{PREFIJO}0002", "Luis", None, "CL 64 # 20-11"),  # 60_1
             PaqueteEntrada(f"{PREFIJO}0003", "Eva", None, "CL 21 33 40"),     # fuera de zona
         ], date(2026, 10, 8))
     yield
@@ -72,13 +72,13 @@ async def test_cada_persona_ve_solo_sus_zonas_y_todos_ven_fuera_de_zona(client):
     token = await _token(client)
     await _escanear(client, f"{PREFIJO}0001", f"{PREFIJO}0002", f"{PREFIJO}0003", f"{PREFIJO}9999")
 
-    a = (await _ver(client, token, "60_1")).json()["paquetes"]
-    b = (await _ver(client, token, "60_2")).json()["paquetes"]
+    a = (await _ver(client, token, "60_3")).json()["paquetes"]
+    b = (await _ver(client, token, "60_1")).json()["paquetes"]
 
     assert [(p["ultimos_4"], p["zona"], p["aviso"]) for p in a] == [
-        ("0001", "60_1", None), ("0003", None, "Fuera de zona"), ("9999", None, "Fuera de zona"),
+        ("0001", "60_3", None), ("0003", None, "Fuera de zona"), ("9999", None, "Fuera de zona"),
     ]
-    assert [(p["ultimos_4"], p["zona"]) for p in b] == [("0002", "60_2"), ("0003", None), ("9999", None)]
+    assert [(p["ultimos_4"], p["zona"]) for p in b] == [("0002", "60_1"), ("0003", None), ("9999", None)]
     assert a[0]["direccion"] == "CL 63 27 12"
     assert "serial" not in a[0]  # solo los últimos 4 dígitos
 
@@ -94,11 +94,11 @@ async def test_sin_zonas_elegidas_solo_se_ven_los_fuera_de_zona(client):
 async def test_cada_consulta_trae_solo_lo_nuevo(client):
     token = await _token(client)
     await _escanear(client, f"{PREFIJO}0001")
-    primera = (await _ver(client, token, "60_1,60_2")).json()
+    primera = (await _ver(client, token, "60_3,60_1")).json()
 
     await _escanear(client, f"{PREFIJO}0002")
-    segunda = (await _ver(client, token, "60_1,60_2", desde=primera["ultimo_id"])).json()
-    tercera = (await _ver(client, token, "60_1,60_2", desde=segunda["ultimo_id"])).json()
+    segunda = (await _ver(client, token, "60_3,60_1", desde=primera["ultimo_id"])).json()
+    tercera = (await _ver(client, token, "60_3,60_1", desde=segunda["ultimo_id"])).json()
 
     assert [p["ultimos_4"] for p in primera["paquetes"]] == ["0001"]
     assert [p["ultimos_4"] for p in segunda["paquetes"]] == ["0002"]
@@ -108,19 +108,19 @@ async def test_cada_consulta_trae_solo_lo_nuevo(client):
 async def test_el_cursor_avanza_aunque_el_paquete_sea_de_otra_zona(client):
     token = await _token(client)
     await _escanear(client, f"{PREFIJO}0002")  # 60_2, la persona mira 60_1
-    r = (await _ver(client, token, "60_1")).json()
+    r = (await _ver(client, token, "60_3")).json()
     assert r["paquetes"] == []
     assert r["ultimo_id"] > 0  # no lo vuelve a revisar en la siguiente consulta
 
 
 async def test_zonas_para_elegir(client):
     zonas = (await client.get(f"{URL}/{await _token(client)}/zonas")).json()
-    assert len(zonas) == 33
+    assert len(zonas) == 28
     assert zonas[0] == "60_1"
 
 
 async def test_enlace_inventado_o_vencido_no_muestra_nada(client):
-    assert (await _ver(client, "no-existe", "60_1")).status_code == 404
+    assert (await _ver(client, "no-existe", "60_3")).status_code == 404
     assert (await client.get(f"{URL}/no-existe/zonas")).status_code == 404
 
     token = await _token(client)
@@ -128,12 +128,12 @@ async def test_enlace_inventado_o_vencido_no_muestra_nada(client):
         await db.execute(update(EnlaceVista).where(EnlaceVista.token == token)
                          .values(expira=datetime(2020, 1, 1, tzinfo=UTC)))
         await db.commit()
-    assert (await _ver(client, token, "60_1")).status_code == 404
+    assert (await _ver(client, token, "60_3")).status_code == 404
 
 
 async def test_la_vista_no_pide_sesion_pero_crear_el_enlace_si(client):
     token = await _token(client)
     app.dependency_overrides.pop(vista_router._auth.dependency, None)
 
-    assert (await _ver(client, token, "60_1")).status_code == 200
+    assert (await _ver(client, token, "60_3")).status_code == 200
     assert (await client.post(f"{URL}/enlace")).status_code in (401, 403)

@@ -100,7 +100,7 @@ async def test_cada_lectura_devuelve_el_destino_del_paquete(client):
     fuera = (await _leer(client, tula["id"], f"{PREFIJO}3")).json()["destino"]
     no_esta = (await _leer(client, tula["id"], f"{PREFIJO}X999")).json()["destino"]
 
-    assert (con_zona["zona"], con_zona["ultimos_4"]) == ("60_4", "28-2")
+    assert (con_zona["zona"], con_zona["ultimos_4"]) == ("60_1", "28-2")
     assert fuera["aviso"] == "Fuera de zona"
     assert no_esta["aviso"] == "No está en la tabla"
 

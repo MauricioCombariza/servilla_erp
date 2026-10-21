@@ -162,7 +162,7 @@ async def test_listar_por_fecha_zona_y_sin_sector(client):
     todos = (await client.get(f"{URL}/", params=params)).json()
     assert {p["serial"] for p in todos} >= {f"{PREFIJO}1", f"{PREFIJO}2", f"{PREFIJO}3"}
 
-    zona = (await client.get(f"{URL}/", params={**params, "zona": "60_4"})).json()
+    zona = (await client.get(f"{URL}/", params={**params, "zona": "60_1"})).json()
     assert [p["serial"] for p in zona if p["serial"].startswith(PREFIJO)] == [f"{PREFIJO}2"]
 
     sin_sector = (await client.get(f"{URL}/", params={**params, "solo_sin_sector": True})).json()
@@ -177,7 +177,7 @@ async def test_corregir_direccion_vuelve_a_sectorizar(client):
     assert r.status_code == 200, r.text
     p = r.json()
     assert (p["direccion"], p["direccion_estandarizada"]) == ("CR 17 # 63-49", "CR 17 63 49")
-    assert (p["localidad"], p["zona"]) == ("Chapinero", "60_2")
+    assert (p["localidad"], p["zona"]) == ("Chapinero", "60_1")
 
 
 async def test_corregir_serial_inexistente(client):
@@ -200,7 +200,7 @@ async def test_exportar(client, formato, tipo):
     if formato == "csv":
         texto = r.content.decode("utf-8-sig")
         assert texto.splitlines()[0] == "serial,nombre,telefono,direccion,direccion_estandarizada,codigo_postal,localidad,zona,f_emi,estado"
-        assert f"{PREFIJO}2,Luis,301,CR 20 # 66-15,CR 20 66 15,110231,Chapinero,60_4,2026-10-08,sin gestión" in texto
+        assert f"{PREFIJO}2,Luis,301,CR 20 # 66-15,CR 20 66 15,110231,Chapinero,60_1,2026-10-08,sin gestión" in texto
     else:
         ws = openpyxl.load_workbook(io.BytesIO(r.content)).active
         seriales = [ws.cell(row=i, column=1).value for i in range(4, ws.max_row + 1)]
@@ -252,7 +252,7 @@ async def test_destino_de_un_paquete_con_zona(client):
         "serial": f"{PREFIJO}2", "ultimos_4": "11-2",
         "en_tabla": True, "direccion": "CR 20 # 66-15", "direccion_estandarizada": "CR 20 66 15",
         "localidad": "Chapinero",
-        "zona": "60_4", "fuera_de_zona": False, "aviso": None,
+        "zona": "60_1", "fuera_de_zona": False, "aviso": None,
     }
 
 

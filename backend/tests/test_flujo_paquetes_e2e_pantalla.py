@@ -107,7 +107,7 @@ async def test_1_4_subir_la_base_y_corregir_desde_el_celular(pagina):
     corregir = page.locator("li").filter(has_text="…0004")
     await corregir.locator("input").fill("CL 64 # 25-12")
     await corregir.get_by_role("button", name="Guardar").click()
-    await expect(corregir.get_by_text("✓ Barrios Unidos · zona 60_13")).to_be_visible()
+    await expect(corregir.get_by_text("✓ Barrios Unidos · zona 60_3")).to_be_visible()
 
 
 async def test_1_4_un_archivo_que_no_es_base_de_imile_avisa_las_columnas(pagina):

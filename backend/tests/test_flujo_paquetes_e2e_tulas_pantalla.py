@@ -29,8 +29,8 @@ pytestmark = [
 
 USUARIO, CLAVE = "test-e2e-tulas", "clave-e2e-tulas"
 BASE = {
-    "TESTE2ET-0001": "CL 63 # 27-12",  # 60_1
-    "TESTE2ET-0002": "CL 64 # 20-11",  # 60_2
+    "TESTE2ET-0001": "CL 63 # 27-12",  # 60_3
+    "TESTE2ET-0002": "CL 64 # 20-11",  # 60_1
     "TESTE2ET-0003": "CL 21 33 40",    # fuera de zona
 }
 NO_EN_TABLA = "TESTE2ET-9999"
@@ -105,7 +105,7 @@ async def test_2_2_leer_la_tula_y_sus_paquetes_en_la_misma_pantalla(pagina):
     # Paquete en zona: destino grande (2.6), cuenta (2.4) y queda en la lista con iMile apagado (2.5)
     await _leer(page, "TESTE2ET-0001")
     await expect(_contador(page)).to_have_text("2faltan")
-    await expect(page.get_by_text("60_1", exact=True).first).to_be_visible()
+    await expect(page.get_by_text("60_3", exact=True).first).to_be_visible()
     await expect(_fila(page, "TESTE2ET-0001")).to_contain_text("iMile apagado")
 
     # El mismo paquete otra vez: avisa y no cuenta

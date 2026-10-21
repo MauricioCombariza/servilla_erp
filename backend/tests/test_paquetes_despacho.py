@@ -57,7 +57,7 @@ async def test_guarda_paquetes_sectorizados_en_sin_gestion(db):
     assert (p1.localidad, p1.zona) == ("Barrios Unidos", "90_2")
 
     p2 = await _paquete(db, f"{PREFIJO}2")
-    assert (p2.localidad, p2.zona) == ("Chapinero", "60_4")
+    assert (p2.localidad, p2.zona) == ("Chapinero", "60_1")
 
     p3 = await _paquete(db, f"{PREFIJO}3")
     assert (p3.localidad, p3.zona, p3.estado) == (None, None, ESTADO_SIN_GESTION)
@@ -81,7 +81,7 @@ async def test_serial_repetido_se_reemplaza_y_vuelve_a_sin_gestion(db):
     assert await _contar(db) == 3
     p2 = await _paquete(db, f"{PREFIJO}2")
     assert (p2.nombre, p2.telefono, p2.direccion, p2.f_emi) == ("Luis P", "309", "CR 17 # 63-49", nuevo_dia)
-    assert (p2.zona, p2.estado) == ("60_2", ESTADO_SIN_GESTION)
+    assert (p2.zona, p2.estado) == ("60_1", ESTADO_SIN_GESTION)
 
 
 async def test_serial_repetido_en_el_mismo_archivo_se_queda_el_ultimo(db):
