@@ -8,6 +8,7 @@ dirnum (los 3 Excel), salvo los cambios aprobados el 2026-10-08:
   - "CLLL" se lee como calle; "Carretera" y "Carera" como carrera
   - en las zonas, la paridad de placa solo cuenta en la vía principal
   - "SUR ESTE" (o SUR en el medio + ESTE al final) ubica la dirección al sur-oriente
+Y los del 2026-10-21: "_" separa como "-"; Avenida La Esperanza (cualquier forma) = CR 60.
 """
 import csv
 from pathlib import Path
@@ -168,6 +169,36 @@ def test_carretera_y_carera_se_leen_como_carrera(indice, direccion, dir_std, zon
     assert r.direccion_estandarizada == dir_std
     assert r.zona == zona
 
+
+
+@pytest.mark.parametrize("direccion,dir_std", [
+    ("calle 24_78_17", "CL 24 78 17"),
+    ("Calle 24_78_17 apto 301", "CL 24 78 17"),
+    ("Calle Calle 98b#68b_67 Casa", "CL 98B 68B 67"),
+    ("Cra 22#86_28 casa rejas negras de 8_5pm L_V", "CR 22 86 28"),
+])
+def test_guion_bajo_separa_como_guion(indice, direccion, dir_std):
+    assert sectorizar(direccion, indice).direccion_estandarizada == dir_std
+
+
+@pytest.mark.parametrize("direccion,dir_std", [
+    ("AV LA ESPERANZA # 72-15", "CR 60 72 15"),
+    ("av la esperanza 68 50", "CR 60 68 50"),
+    ("Avenida la Esperanza 75-20", "CR 60 75 20"),
+    ("Av. La Esperanza No 68A-30", "CR 60 68A 30"),
+    ("Av.La Esperanza #70-10", "CR 60 70 10"),
+    ("AVDA LA ESPERANZA 70 10", "CR 60 70 10"),
+    ("Avenida de la Esperanza 70 10", "CR 60 70 10"),
+    ("avenida esperanza 70 10", "CR 60 70 10"),
+    ("av laesperanza 70-10", "CR 60 70 10"),
+])
+def test_avenida_la_esperanza_es_la_carrera_60(indice, direccion, dir_std):
+    assert sectorizar(direccion, indice).direccion_estandarizada == dir_std
+
+
+def test_barrio_la_esperanza_no_cambia_la_via(indice):
+    r = sectorizar("Carrera 15 # 63- 32 Apto 202 Barrio La Esperanza Edificio Modulor", indice)
+    assert (r.direccion_estandarizada, r.zona) == ("CR 15 63 32", "60_3")
 
 @pytest.mark.parametrize("direccion,dir_std", [
     ("CL 11 # 16-99 SUR ESTE", "CL 11 16 99 SUR ESTE"),

@@ -10,6 +10,9 @@ Cambios respecto a dirnum (aprobados por el usuario):
   - 2026-10-08: "CLLL" (error de digitación frecuente) se acepta como calle.
   - 2026-10-08: "Carretera" y "Carera" se aceptan como carrera.
   - 2026-10-08: SUR en el medio + ESTE/OESTE al final se combinan ("SUR ESTE").
+  - 2026-10-21: "_" separa como "-" ("calle 24_78_17" → "CL 24 78 17").
+  - 2026-10-21: Avenida La Esperanza (cualquier forma: AV/AV./AVENIDA/AVDA, mayúsculas o
+    minúsculas, con o sin "LA"/"DE LA") → CR 60. "Barrio La Esperanza" no se toca.
 """
 
 import re
@@ -48,6 +51,9 @@ def preprocesar_direccion(direccion):
     # Eliminar puntos
     direccion = re.sub(r'\.', ' ', direccion)
 
+    # Guion bajo como separador, igual que el guion: "calle 24_78_17" → "calle 24 78 17"
+    direccion = direccion.replace('_', ' ')
+
     # Avenidas con nombre propio → equivalente numérico
     nombres_vias = {
         r'\bAV\w*\s+(?:EL\s+)?DORADO\b': 'CL 26',
@@ -55,6 +61,7 @@ def preprocesar_direccion(direccion):
         r'\bAV\w*\s+BOYACA\b': 'CR 72',
         r'\bAV\w*\s+CIUDAD\s+DE\s+CALI\b': 'CR 86',
         r'\bAV\w*\s+CARACAS\b': 'CR 14',
+        r'\bAV\w*\s+(?:DE\s+)?(?:LA\s*)?ESPERANZA\b': 'CR 60',
     }
     for patron, reemplazo in nombres_vias.items():
         direccion = re.sub(patron, reemplazo, direccion, flags=re.IGNORECASE)
