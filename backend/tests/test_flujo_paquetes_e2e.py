@@ -43,20 +43,20 @@ MENSAJEROS = {"E2E1": "Mensajero E2E Uno", "E2E2": "Mensajero E2E Dos"}
 # Base de despacho del día: serial → (dirección, zona esperada). Los seriales BLOQ… y
 # NOEXISTE… hacen que el iMile falso responda como el real con los bloqueos 1121 y 1119.
 BASE = {
-    "TESTE2E-0001": ("CL 63 # 27-12", "60_1"),
-    "TESTE2E-0002": ("CL 64 # 20-11", "60_2"),
-    "TESTE2E-0003": ("CL 64 # 20-31", "60_2"),
-    "TESTE2E-0004": ("CR 20 # 66-15", "60_4"),
-    "TESTE2E-0005": ("CL 64 # 25-12", "60_13"),
+    "TESTE2E-0001": ("CL 63 # 27-12", "60_3"),
+    "TESTE2E-0002": ("CL 64 # 20-11", "60_1"),
+    "TESTE2E-0003": ("CL 64 # 20-31", "60_1"),
+    "TESTE2E-0004": ("CL 70 # 27-11", "60_4"),
+    "TESTE2E-0005": ("CR 45 # 66-50", "60_6"),
     "TESTE2E-0006": ("calle 95 # 49-22", "90_2"),
     "TESTE2E-0007": ("CL 21 33 40", None),             # Puente Aranda: fuera de zona
     "TESTE2E-0008": ("CR 7 # 32-16", None),            # Santa Fe: fuera de zona
     "TESTE2E-0009": ("lote sin numero vereda", None),  # sin sector: se corrige a mano
-    "BLOQ-E2E-0010": ("CL 63 # 27-12", "60_1"),         # iMile: 1121 → repetido
-    "NOEXISTE-E2E-0011": ("CL 64 # 20-11", "60_2"),     # iMile: 1119 → error
+    "BLOQ-E2E-0010": ("CL 63 # 27-12", "60_3"),         # iMile: 1121 → repetido
+    "NOEXISTE-E2E-0011": ("CL 64 # 20-11", "60_1"),     # iMile: 1119 → error
 }
 SIN_SECTOR = "TESTE2E-0009"
-CORRECCION = ("CL 64 # 25-12", "60_13")
+CORRECCION = ("CR 45 # 66-50", "60_6")
 NO_EN_TABLA = "TESTE2E-9999"
 
 # Lo que se va acumulando a lo largo del recorrido (ids de tulas, token del QR…)
@@ -238,7 +238,7 @@ async def test_2_4_a_2_6_leer_los_paquetes_de_la_tula(client):
     assert lecturas["NOEXISTE-E2E-0011"]["imile"]["mensaje"] == "Sin información de pedido()"
     # 2.6: destino (últimos 4, zona, avisos)
     d1 = lecturas["TESTE2E-0001"]["destino"]
-    assert (d1["ultimos_4"], d1["zona"], d1["en_tabla"], d1["aviso"]) == ("0001", "60_1", True, None)
+    assert (d1["ultimos_4"], d1["zona"], d1["en_tabla"], d1["aviso"]) == ("0001", "60_3", True, None)
     assert lecturas[SIN_SECTOR]["destino"]["zona"] == CORRECCION[1]  # ya con la dirección corregida
     nueva = lecturas[NO_EN_TABLA]["destino"]
     assert (nueva["en_tabla"], nueva["aviso"]) == (False, "No está en la tabla")
@@ -279,18 +279,18 @@ async def test_2_7_cada_persona_ve_solo_sus_zonas_con_el_qr(client):
     url = f"/api/escaneo-vista/{token}/paquetes"
 
     zonas = (await client.get(f"/api/escaneo-vista/{token}/zonas")).json()
-    a = (await client.get(url, params={"zonas": "60_1,60_2"})).json()
+    a = (await client.get(url, params={"zonas": "60_3,60_1"})).json()
     b = (await client.get(url, params={"zonas": "90_2"})).json()
 
-    assert {"60_1", "60_2", "90_2"} <= set(zonas)
+    assert {"60_3", "60_1", "90_2"} <= set(zonas)
     fuera = {"9999", "0007"}  # no está en la tabla · fuera de zona: los ven todos
     assert {p["ultimos_4"] for p in a["paquetes"]} == {"0001", "0002", "0003", "0010", "0011", *fuera}
     assert {p["ultimos_4"] for p in b["paquetes"]} == {"0006", *fuera}
     assert {p["aviso"] for p in a["paquetes"] if p["ultimos_4"] in fuera} == {"Fuera de zona"}
-    # 60_4 (0004) y 60_13 (0005, 0009) no los eligió nadie: nadie los ve
+    # 60_4 (0004) y 60_6 (0005, 0009) no los eligió nadie: nadie los ve
     estado["ultimo_id_a"] = a["ultimo_id"]
-    assert (await client.get(url, params={"zonas": "60_1,60_2", "desde": a["ultimo_id"]})).json()["paquetes"] == []
-    assert (await client.get("/api/escaneo-vista/inventado/paquetes", params={"zonas": "60_1"})).status_code == 404
+    assert (await client.get(url, params={"zonas": "60_3,60_1", "desde": a["ultimo_id"]})).json()["paquetes"] == []
+    assert (await client.get("/api/escaneo-vista/inventado/paquetes", params={"zonas": "60_3"})).status_code == 404
 
 
 async def test_2_8_cerrar_la_tula_con_su_resumen(client):
@@ -316,7 +316,7 @@ async def test_2_8_tula_sin_etiqueta_y_confirmar_antes_de_abrir_otra(client):
 
     # La persona B ve el nuevo "Fuera de zona" en su siguiente consulta, y solo ese
     nuevos = (await client.get(f"/api/escaneo-vista/{estado['token']}/paquetes",
-                               params={"zonas": "60_1,60_2", "desde": estado["ultimo_id_a"]})).json()
+                               params={"zonas": "60_3,60_1", "desde": estado["ultimo_id_a"]})).json()
     assert [p["ultimos_4"] for p in nuevos["paquetes"]] == ["0008"]
 
     otra = await client.post("/api/tulas/", json={"codigo": "BAG-E2E-2"})
@@ -345,20 +345,20 @@ async def test_3_1_codigo_del_mensajero_muestra_su_nombre(client):
 async def test_3_2_zonas_choque_y_reasignacion(client):
     qr = f"/api/asignacion-qr/{estado['token']}"
 
-    uno = await client.put(f"{qr}/mensajero/E2E1", json={"zonas": ["60_1", "60_2"]})
-    choque = await client.put(f"{qr}/mensajero/E2E2", json={"zonas": ["60_2", "90_2"]})
-    reasignar = await client.put(f"{qr}/mensajero/E2E2", json={"zonas": ["60_2", "90_2"], "reasignar": True})
+    uno = await client.put(f"{qr}/mensajero/E2E1", json={"zonas": ["60_3", "60_1"]})
+    choque = await client.put(f"{qr}/mensajero/E2E2", json={"zonas": ["60_1", "90_2"]})
+    reasignar = await client.put(f"{qr}/mensajero/E2E2", json={"zonas": ["60_1", "90_2"], "reasignar": True})
 
-    assert uno.json()["zonas"] == ["60_1", "60_2"]
+    assert uno.json()["zonas"] == ["60_3", "60_1"]
     assert choque.status_code == 409
-    assert choque.json()["detail"]["choques"] == [{"zona": "60_2", "codigo": "E2E1", "nombre": "Mensajero E2E Uno"}]
-    assert reasignar.json()["zonas"] == ["60_2", "90_2"]
-    assert (await client.get(f"{qr}/mensajero/E2E1")).json()["zonas"] == ["60_1"]
+    assert choque.json()["detail"]["choques"] == [{"zona": "60_1", "codigo": "E2E1", "nombre": "Mensajero E2E Uno"}]
+    assert reasignar.json()["zonas"] == ["60_1", "90_2"]
+    assert (await client.get(f"{qr}/mensajero/E2E1")).json()["zonas"] == ["60_3"]
 
     tablero = {z["zona"]: z for z in (await client.get(f"{qr}/")).json()}
-    assert len(tablero) == 33
-    assert (tablero["60_1"]["mensajero"]["codigo"], tablero["60_1"]["paquetes_leidos"]) == ("E2E1", 2)
-    assert (tablero["60_2"]["mensajero"]["codigo"], tablero["60_2"]["paquetes_leidos"]) == ("E2E2", 3)
+    assert len(tablero) == 28
+    assert (tablero["60_3"]["mensajero"]["codigo"], tablero["60_3"]["paquetes_leidos"]) == ("E2E1", 2)
+    assert (tablero["60_1"]["mensajero"]["codigo"], tablero["60_1"]["paquetes_leidos"]) == ("E2E2", 3)
     assert (tablero["90_2"]["mensajero"]["codigo"], tablero["90_2"]["paquetes_leidos"]) == ("E2E2", 1)
 
 
@@ -384,10 +384,10 @@ async def test_3_3_lista_final_de_seriales_por_mensajero(client):
         return {(s["serial"], s["origen"]) for s in (await client.get(f"{qr}/mensajero/{codigo}/seriales")).json()}
 
     assert await seriales("E2E1") == {
-        ("TESTE2E-0001", "zona"), ("BLOQ-E2E-0010", "zona"),         # su zona 60_1
+        ("TESTE2E-0001", "zona"), ("BLOQ-E2E-0010", "zona"),         # su zona 60_3
         ("TESTE2E-0004", "serial"), ("TESTE2E-0003", "serial"),      # pistoleados
     }
     assert await seriales("E2E2") == {
-        ("TESTE2E-0002", "zona"), ("NOEXISTE-E2E-0011", "zona"),     # 60_2 sin el 0003
+        ("TESTE2E-0002", "zona"), ("NOEXISTE-E2E-0011", "zona"),     # 60_1 sin el 0003
         ("TESTE2E-0006", "zona"),                                    # 90_2
     }
