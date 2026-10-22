@@ -388,3 +388,36 @@ async def test_base_del_dia_cuenta_lo_subido_hoy(client):
     async with AsyncSessionLocal() as db:
         manana = date.today().replace(year=date.today().year + 1)
         assert await tulas_service.paquetes_cargados_hoy(db, hoy=manana) == 0
+
+
+# ── Totales del día y localidad en la pantalla ────────────────────────────────
+
+async def test_del_dia_cuenta_tulas_de_todos_y_paquetes_sin_repetir(client):
+    antes = (await client.get(f"{URL}/del-dia")).json()  # la base local puede traer tulas de hoy
+
+    t1 = (await _abrir(client, "BAG-080")).json()
+    await _leer(client, t1["id"], f"{PREFIJO}1")
+    await _leer(client, t1["id"], f"{PREFIJO}2")
+    _como("test-otro")
+    t2 = (await _abrir(client, "BAG-081")).json()
+    await _leer(client, t2["id"], f"{PREFIJO}2")  # el mismo serial en otra tula no se cuenta dos veces
+    await _leer(client, t2["id"], f"{PREFIJO}3")
+
+    despues = (await client.get(f"{URL}/del-dia")).json()
+    assert despues["fecha"] == t1["fecha"]
+    assert despues["tulas"] - antes["tulas"] == 2
+    assert despues["paquetes"] - antes["paquetes"] == 3
+    async with AsyncSessionLocal() as db:
+        manana = date.fromisoformat(t1["fecha"]).replace(year=date.today().year + 1)
+        assert await tulas_service.resumen_del_dia(db, manana) == (manana, 0, 0)
+
+
+async def test_detalle_trae_la_localidad_de_cada_serial(client):
+    tula = (await _abrir(client, "BAG-090")).json()
+    fuera = (await _leer(client, tula["id"], f"{PREFIJO}3")).json()["destino"]
+    await _leer(client, tula["id"], f"{PREFIJO}X999")
+
+    seriales = {s["serial"]: s for s in (await client.get(f"{URL}/{tula['id']}")).json()["seriales"]}
+
+    assert seriales[f"{PREFIJO}3"]["localidad"] == fuera["localidad"]
+    assert seriales[f"{PREFIJO}X999"]["localidad"] is None  # no está en la base de despacho

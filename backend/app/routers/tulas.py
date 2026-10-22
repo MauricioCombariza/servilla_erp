@@ -13,6 +13,7 @@ from app.schemas.tulas import (
     FijarTotalRequest,
     EscaneoResult,
     IngresoImile,
+    ResumenDelDia,
     TulaAbierta,
     TulaDetalle,
     TulaRead,
@@ -28,11 +29,13 @@ from app.services.tulas_service import (
     comparar_con_esperados,
     fijar_total,
     listar_tulas,
+    localidades_de,
     obtener_tula,
     paquetes_cargados_hoy,
     registrar_serial,
     reintentar_imile,
     resumen,
+    resumen_del_dia,
     seriales_de,
     tula_abierta,
 )
@@ -50,9 +53,9 @@ def _tula_read(r: ResumenTula) -> TulaRead:
     )
 
 
-def _serial_read(s) -> TulaSerialRead:
+def _serial_read(s, localidad: str | None = None) -> TulaSerialRead:
     return TulaSerialRead(
-        serial=s.serial, en_tabla=s.en_tabla, zona=s.zona, fecha_escaneo=s.fecha_escaneo,
+        serial=s.serial, en_tabla=s.en_tabla, zona=s.zona, localidad=localidad, fecha_escaneo=s.fecha_escaneo,
         imile_estado=s.imile_estado, imile_mensaje=s.imile_mensaje,
     )
 
@@ -60,8 +63,9 @@ def _serial_read(s) -> TulaSerialRead:
 async def _detalle(db: AsyncSession, r: ResumenTula) -> TulaDetalle:
     leidos = await seriales_de(db, r.tula.id)
     faltantes, no_esperados = comparar_con_esperados(r.tula, [s.serial for s in leidos])
+    localidades = await localidades_de(db, [s.serial for s in leidos])
     return TulaDetalle(
-        **_tula_read(r).model_dump(), seriales=[_serial_read(s) for s in leidos],
+        **_tula_read(r).model_dump(), seriales=[_serial_read(s, localidades.get(s.serial)) for s in leidos],
         faltantes=faltantes, no_esperados=no_esperados,
     )
 
@@ -96,6 +100,13 @@ async def abrir(
 async def base_del_dia(db: AsyncSession = Depends(get_db), _=_auth):
     """Para avisar en la pantalla si todavía no se subió la base de despacho de hoy."""
     return BaseDelDia(paquetes_hoy=await paquetes_cargados_hoy(db))
+
+
+@router.get("/del-dia", response_model=ResumenDelDia)
+async def del_dia(db: AsyncSession = Depends(get_db), _=_auth):
+    """Para la pantalla: cuántas tulas y paquetes se han leído hoy entre todos."""
+    fecha, tulas, paquetes = await resumen_del_dia(db)
+    return ResumenDelDia(fecha=fecha, tulas=tulas, paquetes=paquetes)
 
 
 @router.get("/abierta", response_model=TulaRead | None)
