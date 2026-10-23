@@ -31,6 +31,9 @@ BLOQUEO_PROBLEMA = ("1121", "No registrar Motivo Problema")
 # Paso 3.3: mensajeros del selector DA ("Nombre | código"); "Ana Ruiz" está dos veces
 MENSAJEROS_IMILE = [("Juan Porras", "D21043330501"), ("Juan Carlos Rodriguez", "D21038000001"),
                     ("Ana Ruiz", "D21000000001"), ("Ana Ruiz", "D21000000002")]
+# El selector DA muestra los resultados de la búsqueda con demora (más que el 1,5 s fijo
+# que esperaba la primera versión y que no alcanzó en producción el 2026-10-23)
+DEMORA_BUSQUEDA_MS = 2_000
 # Paso 2.3: tulas ya descargadas en la estación y sus paquetes
 DESCARGADOS = {
     "2610154964301": ["FAKE-T1-01", "FAKE-T1-02", "FAKE-T1-03", "FAKE-T1-04"],
@@ -54,7 +57,7 @@ HOME_HTML = """<!doctype html><html><body>
 if (!document.cookie.includes("sesion=1")) location.href = "/login";
 const idioma = document.cookie.includes("LANG=es") ? "Español" : "English";
 </script>
-<header><script>const MENSAJEROS = __MENSAJEROS__;</script><span id="idioma"></span><ul id="menu" style="display:none">
+<header><script>const MENSAJEROS = __MENSAJEROS__; const DEMORA_BUSQUEDA_MS = __DEMORA__;</script><span id="idioma"></span><ul id="menu" style="display:none">
   <li>English</li><li>简体中文</li><li>Español</li><li>German</li></ul></header>
 <main id="contenido">Inicio</main>
 <script>
@@ -92,7 +95,7 @@ function renderAsignar(c) {
   document.querySelector("#daCode .ImileSelect-root").onclick = () => {
     const pop = document.createElement("div");
     pop.className = "MuiTooltip-popper";
-    pop.innerHTML = '<input placeholder="buscar"><ul></ul>';
+    pop.innerHTML = '<input placeholder="buscar"><ul class="ImileSelect-list"></ul>';
     document.body.appendChild(pop);
     const lista = () => {
       const q = pop.querySelector("input").value.toLowerCase();
@@ -103,7 +106,11 @@ function renderAsignar(c) {
         etiqueta.textContent = li.textContent; pop.remove();
       });
     };
-    pop.querySelector("input").oninput = lista;
+    // Como iMile real visto desde el servidor: los resultados de la búsqueda llegan tarde
+    pop.querySelector("input").oninput = () => {
+      pop.querySelector("ul").innerHTML = "";
+      clearTimeout(pop.t); pop.t = setTimeout(lista, DEMORA_BUSQUEDA_MS);
+    };
     document.addEventListener("keydown", e => { if (e.key === "Escape") pop.remove(); }, {once: true});
     lista();
   };
@@ -156,7 +163,7 @@ class _FakeImile(BaseHTTPRequestHandler):
 
     def do_GET(self):  # nombre fijo de http.server
         cuerpo = LOGIN_HTML if self.path.startswith("/login") else HOME_HTML.replace(
-            "__MENSAJEROS__", json.dumps(MENSAJEROS_IMILE))
+            "__MENSAJEROS__", json.dumps(MENSAJEROS_IMILE)).replace("__DEMORA__", str(DEMORA_BUSQUEDA_MS))
         self._responder(cuerpo.encode(), "text/html; charset=utf-8")
 
     def do_POST(self):  # nombre fijo de http.server

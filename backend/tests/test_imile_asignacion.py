@@ -25,7 +25,7 @@ async def asignacion(fake_imile_url, tmp_path, monkeypatch):
     sesion = ImileSesion(base_url=fake_imile_url, state_path=tmp_path / "sesion.json",
                          login_timeout_ms=3_000, espera_carga_ms=200,
                          recorrido_quieto_ms=1_000, recorrido_max_ms=5_000)
-    yield ImileAsignacion(sesion=sesion, espera_respuesta_ms=5_000)
+    yield ImileAsignacion(sesion=sesion, espera_respuesta_ms=5_000, espera_busqueda_ms=4_000)
     await sesion.cerrar()
 
 

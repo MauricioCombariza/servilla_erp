@@ -34,7 +34,8 @@ RUTA_API_ASIGNAR = "/bizAssignDaScan/submit"
 CAMPO_GUIA = "input[name='scanNumber']"
 SELECTOR_DA = "#daCode .ImileSelect-root"
 ETIQUETA_DA = "#daCode .ImileSelect-trigger-label"
-DESPLEGABLE = ".MuiTooltip-popper"
+# El desplegable del selector DA; la página tiene otros .MuiTooltip-popper (tooltips)
+DESPLEGABLE = ".MuiTooltip-popper:has(.ImileSelect-list)"
 OPCION_DA = "li.ImileSelect-item"
 
 # En esta pantalla solo se conoce el 1119; cualquier otro bloqueo queda para revisión
@@ -42,7 +43,11 @@ BLOQUEOS_ASIGNACION = {"1119": EstadoIngreso.ERROR}  # "Sin información de pedi
 
 _CARGA_PAGINA_MS = 30_000
 _ESPERA_RESPUESTA_MS = 20_000
-_ESPERA_BUSQUEDA_MS = 1_500
+# La lista del selector la trae iMile al escribir (POST .../hrms/user/associate/list); desde
+# el servidor puede tardar varios segundos. Se revisa seguido hasta que aparezca el mensajero.
+_ESPERA_BUSQUEDA_MS = 10_000
+_PASO_BUSQUEDA_MS = 250
+_ESPERA_ABRIR_MS = 3_000
 
 
 class MensajeroImileNoEncontradoError(Exception):
@@ -80,9 +85,11 @@ def _buscado(texto: str) -> MensajeroImile:
 
 
 class ImileAsignacion:
-    def __init__(self, sesion: ImileSesion = imile_sesion, espera_respuesta_ms: int = _ESPERA_RESPUESTA_MS):
+    def __init__(self, sesion: ImileSesion = imile_sesion, espera_respuesta_ms: int = _ESPERA_RESPUESTA_MS,
+                 espera_busqueda_ms: int = _ESPERA_BUSQUEDA_MS):
         self._sesion = sesion
         self._espera_respuesta_ms = espera_respuesta_ms
+        self._espera_busqueda_ms = espera_busqueda_ms
 
     async def asignar(self, nombre: str, serial: str) -> ResultadoIngreso:
         """Asigna un serial al mensajero `nombre` de iMile. Lanza
@@ -121,17 +128,33 @@ class ImileAsignacion:
         if actual and _es_el_buscado(actual, buscado):
             return actual
 
-        await page.locator(SELECTOR_DA).first.click()
         desplegable = page.locator(DESPLEGABLE).last
+        await page.locator(SELECTOR_DA).first.click()
+        try:
+            await desplegable.wait_for(state="visible", timeout=_ESPERA_ABRIR_MS)
+        except PlaywrightTimeoutError:
+            # Si ya estaba abierto, ese clic lo cerró: se vuelve a abrir
+            await page.locator(SELECTOR_DA).first.click()
+            await desplegable.wait_for(state="visible", timeout=_CARGA_PAGINA_MS)
         await desplegable.locator("input").first.fill(buscado.nombre)
-        await page.wait_for_timeout(_ESPERA_BUSQUEDA_MS)
 
         opciones = desplegable.locator(OPCION_DA)
-        encontradas = []
-        for i in range(await opciones.count()):
-            m = _opcion(await opciones.nth(i).inner_text())
-            if m and _es_el_buscado(m, buscado):
-                encontradas.append((i, m))
+        encontradas: list[tuple[int, MensajeroImile]] = []
+        for _ in range(max(1, self._espera_busqueda_ms // _PASO_BUSQUEDA_MS)):
+            await page.wait_for_timeout(_PASO_BUSQUEDA_MS)
+            encontradas = []
+            for i in range(await opciones.count()):
+                m = _opcion(await opciones.nth(i).inner_text())
+                if m and _es_el_buscado(m, buscado):
+                    encontradas.append((i, m))
+            if encontradas:
+                # Un momento más por si la lista sigue llegando (nombres repetidos)
+                await page.wait_for_timeout(_PASO_BUSQUEDA_MS)
+                encontradas = [
+                    (i, m) for i in range(await opciones.count())
+                    if (m := _opcion(await opciones.nth(i).inner_text())) and _es_el_buscado(m, buscado)
+                ]
+                break
         if len(encontradas) != 1:
             await page.keyboard.press("Escape")
             motivo = "no está" if not encontradas else f"aparece {len(encontradas)} veces"
