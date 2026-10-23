@@ -31,6 +31,13 @@ export interface SerialDelMensajero {
   origen: "zona" | "serial"; // serial = reasignado uno a uno
 }
 
+/** Cuántos paquetes lleva cada mensajero en el día (sus zonas + reasignados) */
+export interface TotalMensajero extends Mensajero {
+  zonas: string[];
+  paquetes: number;
+  reasignados: number;
+}
+
 /** detail del 409 al pedir zonas que ya tiene otro mensajero */
 export interface ChoqueZonas {
   mensaje: string;
@@ -42,6 +49,8 @@ const m = (codigo: string) => `/asignacion-zonas/mensajero/${encodeURIComponent(
 /** Pasos 3.1 y 3.2 con sesión del ERP: siempre sobre el día de hoy (hora de Bogotá). */
 export const asignacionZonasApi = {
   tablero: () => api.get<ZonaDelDia[]>("/asignacion-zonas/"),
+
+  totales: () => api.get<TotalMensajero[]>("/asignacion-zonas/mensajeros"),
 
   mensajero: (codigo: string) => api.get<ZonasMensajero>(m(codigo)),
 

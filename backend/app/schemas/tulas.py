@@ -52,6 +52,20 @@ class ResumenDelDia(BaseModel):
     paquetes: int  # seriales leídos en esas tulas, cada uno contado una sola vez
 
 
+class SerialSinLeer(BaseModel):
+    serial: str
+    ultimos_4: str
+    zona: str | None
+    localidad: str | None
+    direccion: str | None
+
+
+class SinLeerDelDia(BaseModel):
+    fecha: date
+    total: int  # paquetes de la base del día que no se han leído en ninguna tula
+    seriales: list[SerialSinLeer]
+
+
 class AbrirTulaRequest(BaseModel):
     codigo: str | None = None  # vacío → "Sin etiqueta"
     total_esperado: int | None = Field(default=None, ge=0)  # lo llenará iMile (Paso 2.3)

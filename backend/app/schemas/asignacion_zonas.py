@@ -45,3 +45,11 @@ class SerialDelMensajeroRead(BaseModel):
     ultimos_4: str
     zona: str | None
     origen: str  # "zona" | "serial" (reasignado uno a uno)
+
+
+class TotalMensajeroRead(BaseModel):
+    codigo: str
+    nombre: str
+    zonas: list[str]
+    paquetes: int  # paquetes del día: sus zonas + reasignados a él
+    reasignados: int

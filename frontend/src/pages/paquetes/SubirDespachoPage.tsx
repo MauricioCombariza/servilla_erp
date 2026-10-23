@@ -1,12 +1,14 @@
 import { useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { CheckCircle2, Download, FileSpreadsheet, Upload } from "lucide-react";
+import { Link } from "react-router-dom";
+import { ArrowRight, CheckCircle2, Download, FileSpreadsheet, Upload } from "lucide-react";
 import {
   paquetesDespachoApi,
   type CargaDespachoResult,
   type ColumnasFaltantes,
   type PaqueteSinSector,
 } from "@/api/paquetesDespacho";
+import { FlujoPaquetesNav } from "./FlujoPaquetesNav";
 
 /** Fecha de hoy en Bogotá (YYYY-MM-DD), aunque el celular tenga otra zona horaria. */
 function hoyBogota(): string {
@@ -62,6 +64,7 @@ export function SubirDespachoPage() {
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="mx-auto w-full max-w-md space-y-4">
+        <FlujoPaquetesNav />
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <h1 className="text-2xl font-bold text-gray-900 mb-1">Subir base de despacho</h1>
           <p className="text-sm text-gray-500 mb-5">
@@ -166,10 +169,17 @@ function Resultado({ resultado, onOtraBase }: { resultado: CargaDespachoResult; 
         </div>
       )}
 
+      <Link
+        to="/escaneo-tulas"
+        className="w-full mt-5 inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary-hover text-white font-medium py-2.5 rounded-lg text-sm"
+      >
+        Ir a escanear tulas <ArrowRight size={16} />
+      </Link>
+
       <button
         type="button"
         onClick={onOtraBase}
-        className="w-full mt-5 border border-gray-300 text-gray-700 font-medium py-2.5 rounded-lg text-sm hover:bg-gray-50"
+        className="w-full mt-2 border border-gray-300 text-gray-700 font-medium py-2.5 rounded-lg text-sm hover:bg-gray-50"
       >
         Subir otra base
       </button>

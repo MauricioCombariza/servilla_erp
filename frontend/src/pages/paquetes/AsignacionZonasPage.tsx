@@ -6,8 +6,10 @@ import {
   type AsignacionSerial,
   type ChoqueZonas,
   type SerialDelMensajero,
+  type TotalMensajero,
   type ZonasMensajero,
 } from "@/api/asignacionZonas";
+import { FlujoPaquetesNav } from "./FlujoPaquetesNav";
 
 function leerError(e: unknown): { status?: number; detail?: unknown } {
   const r = (e as { response?: { status?: number; data?: { detail?: unknown } } })?.response;
@@ -39,6 +41,13 @@ export function AsignacionZonasPage() {
   });
   const tablero = useMemo(() => tableroQuery.data ?? [], [tableroQuery.data]);
 
+  const totalesQuery = useQuery({
+    queryKey: ["asignacion-totales"],
+    queryFn: () => asignacionZonasApi.totales().then((r) => r.data),
+    refetchInterval: 15000,
+  });
+  const totales = totalesQuery.data ?? [];
+
   const serialesQuery = useQuery({
     queryKey: ["asignacion-seriales", mensajero?.codigo],
     queryFn: () => asignacionZonasApi.seriales(mensajero!.codigo).then((r) => r.data),
@@ -53,6 +62,7 @@ export function AsignacionZonasPage() {
 
   const asignadas = tablero.filter((z) => z.mensajero).length;
   const paquetes = tablero.reduce((s, z) => s + z.paquetes_leidos, 0);
+  const paquetesAsignados = totales.reduce((s, t) => s + t.paquetes, 0);
   const cambios =
     !!mensajero &&
     (elegidas.size !== mensajero.zonas.length || mensajero.zonas.some((z) => !elegidas.has(z)));
@@ -60,6 +70,7 @@ export function AsignacionZonasPage() {
   function refrescar() {
     void qc.invalidateQueries({ queryKey: ["asignacion-tablero"] });
     void qc.invalidateQueries({ queryKey: ["asignacion-seriales"] });
+    void qc.invalidateQueries({ queryKey: ["asignacion-totales"] });
   }
 
   function tomarMensajero(m: ZonasMensajero) {
@@ -70,7 +81,10 @@ export function AsignacionZonasPage() {
 
   async function buscar(e: React.FormEvent) {
     e.preventDefault();
-    const cod = codigo.trim();
+    await cargarMensajero(codigo.trim());
+  }
+
+  async function cargarMensajero(cod: string) {
     if (!cod) return;
     setBuscando(true);
     setError(null);
@@ -120,6 +134,7 @@ export function AsignacionZonasPage() {
 
   return (
     <div>
+      <FlujoPaquetesNav className="mb-4 max-w-xl" />
       <div className="mb-4">
         <h1 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
           <MapPinned size={20} className="text-primary" />
@@ -131,10 +146,11 @@ export function AsignacionZonasPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-3 gap-3 mb-4 max-w-xl">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4 max-w-2xl">
         <Cifra valor={`${asignadas}/${tablero.length}`} etiqueta="Zonas asignadas" />
         <Cifra valor={tablero.length - asignadas} etiqueta="Sin asignar" />
         <Cifra valor={paquetes} etiqueta="Paquetes leídos hoy" />
+        <Cifra valor={paquetesAsignados} etiqueta="Paquetes asignados" />
       </div>
 
       <form onSubmit={buscar} className="flex flex-wrap items-center gap-2 mb-3">
@@ -256,6 +272,13 @@ export function AsignacionZonasPage() {
         </div>
       )}
 
+      <TotalesPorMensajero
+        totales={totales}
+        cargando={totalesQuery.isLoading}
+        actual={mensajero?.codigo ?? null}
+        onElegir={(cod) => { setCodigo(cod); void cargarMensajero(cod); }}
+      />
+
       {mensajero && (
         <SerialesDelMensajero
           mensajero={mensajero}
@@ -273,6 +296,55 @@ function Cifra({ valor, etiqueta }: { valor: number | string; etiqueta: string }
     <div className="rounded-lg border border-gray-200 bg-white p-3 text-center">
       <p className="text-xl font-bold text-gray-900">{valor}</p>
       <p className="text-xs text-gray-500">{etiqueta}</p>
+    </div>
+  );
+}
+
+/** Cuántos paquetes lleva cada mensajero hoy; tocar una fila lo carga para editarlo. */
+function TotalesPorMensajero({ totales, cargando, actual, onElegir }: {
+  totales: TotalMensajero[];
+  cargando: boolean;
+  actual: string | null;
+  onElegir: (codigo: string) => void;
+}) {
+  return (
+    <div className="mt-6 rounded-xl border border-gray-200 bg-white p-4">
+      <h2 className="font-semibold text-gray-900">Paquetes por mensajero hoy</h2>
+      {cargando ? (
+        <p className="text-sm text-gray-500 mt-2">Cargando…</p>
+      ) : totales.length === 0 ? (
+        <p className="text-sm text-gray-500 mt-2">Todavía no hay mensajeros con zonas o paquetes asignados.</p>
+      ) : (
+        <div className="mt-2 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-gray-500 border-b border-gray-200">
+                <th className="py-1.5 pr-3 font-medium">Mensajero</th>
+                <th className="py-1.5 pr-3 font-medium">Zonas</th>
+                <th className="py-1.5 pr-3 font-medium text-right">Paquetes</th>
+                <th className="py-1.5 font-medium text-right">Reasignados</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {totales.map((t) => (
+                <tr
+                  key={t.codigo}
+                  onClick={() => onElegir(t.codigo)}
+                  className={`cursor-pointer hover:bg-gray-50 ${actual && mismoCodigo(actual, t.codigo) ? "bg-primary/10" : ""}`}
+                >
+                  <td className="py-1.5 pr-3">
+                    <span className="font-medium text-gray-900">{t.nombre}</span>
+                    <span className="text-gray-500 font-mono text-xs"> · {t.codigo}</span>
+                  </td>
+                  <td className="py-1.5 pr-3 font-mono text-xs text-gray-600">{t.zonas.join(", ") || "—"}</td>
+                  <td className="py-1.5 pr-3 text-right font-bold text-gray-900">{t.paquetes}</td>
+                  <td className="py-1.5 text-right text-gray-600">{t.reasignados || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
