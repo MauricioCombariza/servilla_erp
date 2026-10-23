@@ -8,6 +8,7 @@ export interface Mensajero {
 export interface ZonasMensajero extends Mensajero {
   fecha: string;
   zonas: string[];
+  nombre_imile: string | null; // si en iMile aparece con otro nombre (Paso 3.3)
 }
 
 export interface ZonaDelDia {
@@ -29,6 +30,19 @@ export interface SerialDelMensajero {
   ultimos_4: string;
   zona: string | null;
   origen: "zona" | "serial"; // serial = reasignado uno a uno
+  imile_estado: string | null; // Paso 3.3: ok | repetido | bloqueado | error | sin_confirmar; null = sin mandar
+  imile_mensaje: string | null;
+}
+
+/** Avance del envío a iMile ("Asignar repartidor") de los paquetes del mensajero */
+export interface EnvioImile {
+  nombre_imile: string; // con el que se busca en iMile
+  total: number;
+  hechos: number;
+  asignados: number;
+  fallidos: number;
+  en_curso: boolean;
+  error: string | null;
 }
 
 /** Cuántos paquetes lleva cada mensajero en el día (sus zonas + reasignados) */
@@ -64,4 +78,12 @@ export const asignacionZonasApi = {
     api.delete(`${m(codigo)}/seriales/${encodeURIComponent(serial)}`),
 
   seriales: (codigo: string) => api.get<SerialDelMensajero[]>(`${m(codigo)}/seriales`),
+
+  /** Paso 3.3: manda a iMile, en segundo plano, los paquetes que le faltan */
+  asignarEnImile: (codigo: string) => api.post<EnvioImile>(`${m(codigo)}/imile`),
+
+  envioImile: (codigo: string) => api.get<EnvioImile | null>(`${m(codigo)}/imile`),
+
+  fijarNombreImile: (codigo: string, nombreImile: string | null) =>
+    api.put<ZonasMensajero>(`${m(codigo)}/nombre-imile`, { nombre_imile: nombreImile }),
 };

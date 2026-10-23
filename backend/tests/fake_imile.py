@@ -13,6 +13,11 @@ necesita de ds.imile.com, sin tocar el iMile real.
 - POST .../unloading/search (Paso 2.3): lo descargado en la estación, un renglón por paquete
   con su tula (bagNo), paginado con pageNum / pageSize. Como iMile real, ignora cualquier
   filtro. Cualquier POST a .../unloading/submit (descargar de verdad) queda en `descargas`.
+- #/DSOperation/DispatchManagement/assignDA (Paso 3.3): selector DA con buscador y opciones
+  "Nombre | Dxxxx", y Número de Guía. Sin DA elegido no manda nada ("Required"). Al
+  escanear hace POST a .../bizAssignDaScan/submit con daCode / daName / forceOperate; el
+  servidor guarda cada asignación en `asignaciones` y responde bloqueo 1119 a NOEXISTE…
+  Confirmar en la ventana "bloquear" reenvía con forceOperate=true (como iMile real).
 """
 import json
 import threading
@@ -23,6 +28,9 @@ from typing import ClassVar
 USUARIO, CLAVE = "operador", "clave-secreta"
 BLOQUEO_NO_EXISTE = ("1119", "Sin información de pedido()")
 BLOQUEO_PROBLEMA = ("1121", "No registrar Motivo Problema")
+# Paso 3.3: mensajeros del selector DA ("Nombre | código"); "Ana Ruiz" está dos veces
+MENSAJEROS_IMILE = [("Juan Porras", "D21043330501"), ("Juan Carlos Rodriguez", "D21038000001"),
+                    ("Ana Ruiz", "D21000000001"), ("Ana Ruiz", "D21000000002")]
 # Paso 2.3: tulas ya descargadas en la estación y sus paquetes
 DESCARGADOS = {
     "2610154964301": ["FAKE-T1-01", "FAKE-T1-02", "FAKE-T1-03", "FAKE-T1-04"],
@@ -46,7 +54,7 @@ HOME_HTML = """<!doctype html><html><body>
 if (!document.cookie.includes("sesion=1")) location.href = "/login";
 const idioma = document.cookie.includes("LANG=es") ? "Español" : "English";
 </script>
-<header><span id="idioma"></span><ul id="menu" style="display:none">
+<header><script>const MENSAJEROS = __MENSAJEROS__;</script><span id="idioma"></span><ul id="menu" style="display:none">
   <li>English</li><li>简体中文</li><li>Español</li><li>German</li></ul></header>
 <main id="contenido">Inicio</main>
 <script>
@@ -73,8 +81,53 @@ function ventanaBloqueo(info) {
   v.querySelector("#cancelar").onclick = () => v.remove();
   v.querySelector("#confirmar").onclick = () => { localStorage.setItem("confirmado", "1"); v.remove(); };
 }
+function renderAsignar(c) {
+  c.innerHTML = '<h2>Asignar repartidor</h2><div id="daCode"><div>DA*</div>' +
+    '<div class="ImileSelect-root" style="min-width:200px;min-height:30px;border:1px solid"><div class="ImileSelect-trigger-label"></div></div><span id="req"></span></div>' +
+    '<label>Número de Guía</label><input name="scanNumber">' +
+    '<div id="impresion" role="dialog">Excepción de impresión <span>cierre</span></div>';
+  document.querySelector("#impresion span").onclick = () => document.getElementById("impresion").remove();
+  let da = null;
+  const etiqueta = document.querySelector(".ImileSelect-trigger-label");
+  document.querySelector("#daCode .ImileSelect-root").onclick = () => {
+    const pop = document.createElement("div");
+    pop.className = "MuiTooltip-popper";
+    pop.innerHTML = '<input placeholder="buscar"><ul></ul>';
+    document.body.appendChild(pop);
+    const lista = () => {
+      const q = pop.querySelector("input").value.toLowerCase();
+      pop.querySelector("ul").innerHTML = MENSAJEROS.filter(([n]) => n.toLowerCase().includes(q))
+        .map(([n, c]) => '<li class="ImileSelect-item" data-n="' + n + '" data-c="' + c + '">' + n + ' | ' + c + '</li>').join("");
+      pop.querySelectorAll("li").forEach(li => li.onclick = () => {
+        da = {daName: li.dataset.n, daCode: li.dataset.c};
+        etiqueta.textContent = li.textContent; pop.remove();
+      });
+    };
+    pop.querySelector("input").oninput = lista;
+    document.addEventListener("keydown", e => { if (e.key === "Escape") pop.remove(); }, {once: true});
+    lista();
+  };
+  const enviar = async (scanNumber, forceOperate) => {
+    const r = await fetch("/lm/express/ops/v1/biz/bizAssignDaScan/submit", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({...da, scanNumber, forceOperate, ocCode: "S210445301"})});
+    return r.json();
+  };
+  document.querySelector("input[name=scanNumber]").addEventListener("keydown", async e => {
+    if (e.key !== "Enter") return;
+    if (!da) { document.getElementById("req").textContent = "Required"; return; }
+    const scanNumber = e.target.value.trim();
+    const body = await enviar(scanNumber, false);
+    if (body.resultObject.blockInfo) {
+      ventanaBloqueo(body.resultObject.blockInfo);
+      document.querySelector("#confirmar").addEventListener("click", () => enviar(scanNumber, true));
+    }
+    e.target.value = "";
+  });
+}
 function render() {
   const c = document.getElementById("contenido");
+  if (location.hash.includes("assignDA")) { renderAsignar(c); return; }
   if (!location.hash.includes("arrivalScanAWB")) { c.textContent = "Inicio"; return; }
   c.innerHTML = '<h2>Llegada(Waybill No)</h2><label>Número de Guía</label><input name="scanNumber">' +
     '<div id="impresion" role="dialog">Excepción de impresión <span>cierre</span></div>';
@@ -98,10 +151,12 @@ render();
 class _FakeImile(BaseHTTPRequestHandler):
     # Compartido entre peticiones (http.server crea un handler por petición)
     ingresados: ClassVar[set[str]] = set()
+    asignaciones: ClassVar[list[dict]] = []  # Paso 3.3: cada POST a .../bizAssignDaScan/submit
     descargas: ClassVar[list[dict]] = []
 
     def do_GET(self):  # nombre fijo de http.server
-        cuerpo = LOGIN_HTML if self.path.startswith("/login") else HOME_HTML
+        cuerpo = LOGIN_HTML if self.path.startswith("/login") else HOME_HTML.replace(
+            "__MENSAJEROS__", json.dumps(MENSAJEROS_IMILE))
         self._responder(cuerpo.encode(), "text/html; charset=utf-8")
 
     def do_POST(self):  # nombre fijo de http.server
@@ -117,6 +172,8 @@ class _FakeImile(BaseHTTPRequestHandler):
             pagina = filas[(num - 1) * tam:num * tam]
             return self._json({"status": "success", "resultObject": {
                 "results": pagina, "pagination": {"currentPage": num, "pageSize": tam, "totalResult": len(filas)}}})
+        if "/bizAssignDaScan/submit" in self.path:
+            return self._asignar(datos)
         serial = datos.get("scanNumber", "")
         ro = {"scanNumber": serial, "scanTypeDesc": "Llegar", "status": 2, "popup": True,
               "repeat": False, "voiceType": "success"}
@@ -128,6 +185,18 @@ class _FakeImile(BaseHTTPRequestHandler):
             ro.update(repeat=True, warnMsg="Ya escaneado")
         else:
             self.ingresados.add(serial)
+        self._json({"status": "success", "resultCode": "", "message": "Successful operation!", "resultObject": ro})
+
+    def _asignar(self, datos: dict):
+        serial = datos.get("scanNumber", "")
+        ro = {"scanNumber": serial, "scanType": "Asignar DA", "status": 2, "popup": True, "repeat": False,
+              "voiceType": "success", "driverCode": datos.get("daCode"), "driverName": datos.get("daName")}
+        if serial.startswith("NOEXISTE") and not datos.get("forceOperate"):
+            ro.update(blockCode=BLOQUEO_NO_EXISTE[0], blockInfo=BLOQUEO_NO_EXISTE[1], voiceType="fail")
+        else:
+            previas = [a for a in self.asignaciones if a["scanNumber"] == serial and a["daCode"] == datos.get("daCode")]
+            ro["repeat"] = bool(previas)
+            self.asignaciones.append(datos)
         self._json({"status": "success", "resultCode": "", "message": "Successful operation!", "resultObject": ro})
 
     def _json(self, cuerpo: dict):

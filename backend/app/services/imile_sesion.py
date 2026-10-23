@@ -22,11 +22,14 @@ from playwright.async_api import Browser, BrowserContext, Locator, Page, async_p
 from app.config import settings
 
 IMILE_BASE_URL = "https://ds.imile.com"
-IMILE_LOGIN_URL = f"{IMILE_BASE_URL}/login"
+# Desde oct. 2026 el ingreso está en otro dominio: ds.imile.com/login redirige aquí
+IMILE_LOGIN_URL = "https://ds-login.imile.com/"
 IMILE_HOME_URL = f"{IMILE_BASE_URL}/#"
 
 USUARIO_SELECTOR = "input[name='userCode']"
 CLAVE_SELECTOR = "input[name='password']"
+# Botón "Acceso" del formulario nuevo, por si Enter no envía
+BOTON_ACCESO_SELECTOR = "button:has-text('Acceso'), button:has-text('Login'), button[type='submit']"
 # Recorrido de bienvenida ("1 / 6 Switch system") que tapa la página tras entrar
 RECORRIDO_CERRAR_SELECTOR = ".fireWrap .close-icon"
 IDIOMA_OBJETIVO = "Español"
@@ -36,6 +39,7 @@ IDIOMAS_IMILE = ["English", "简体中文", "Português", "Español", "Italian",
 _NAV_TIMEOUT_MS = 30_000
 _LOGIN_TIMEOUT_MS = 30_000
 _ACCION_TIMEOUT_MS = 5_000
+_ESPERA_ENTER_MS = 3_000
 _ESPERA_CARGA_MS = 3_000
 _CAMBIO_IDIOMA_TIMEOUT_MS = 15_000
 _RECORRIDO_QUIETO_MS = 4_000
@@ -72,6 +76,7 @@ class ImileSesion:
     def __init__(
         self,
         base_url: str = IMILE_BASE_URL,
+        login_url: str | None = None,
         state_path: Path | None = None,
         login_timeout_ms: int = _LOGIN_TIMEOUT_MS,
         espera_carga_ms: int = _ESPERA_CARGA_MS,
@@ -79,6 +84,7 @@ class ImileSesion:
         recorrido_max_ms: int = _RECORRIDO_MAX_MS,
     ) -> None:
         self._base_url = base_url
+        self._login_url = login_url or (IMILE_LOGIN_URL if base_url == IMILE_BASE_URL else f"{base_url}/login")
         self._recorrido_quieto_ms = recorrido_quieto_ms
         self._recorrido_max_ms = recorrido_max_ms
         self._login_timeout_ms = login_timeout_ms
@@ -166,19 +172,29 @@ class ImileSesion:
         return page
 
     async def _en_login(self, page: Page) -> bool:
-        return "/login" in page.url or await page.locator(CLAVE_SELECTOR).count() > 0
+        return (
+            page.url.startswith(self._login_url) or "/login" in page.url
+            or await page.locator(CLAVE_SELECTOR).count() > 0
+        )
 
     async def _iniciar_sesion(self, page: Page) -> None:
         usuario, clave = self._credenciales()
-        await page.goto(f"{self._base_url}/login", timeout=_NAV_TIMEOUT_MS)
+        await page.goto(self._login_url, timeout=_NAV_TIMEOUT_MS)
         await page.wait_for_selector(USUARIO_SELECTOR, timeout=_NAV_TIMEOUT_MS)
         await page.fill(USUARIO_SELECTOR, usuario)
         await page.fill(CLAVE_SELECTOR, clave)
         await page.press(CLAVE_SELECTOR, "Enter")
+        # Entró cuando vuelve a la página de iMile (no basta con salir de /login: el
+        # formulario nuevo vive en ds-login.imile.com, cuya URL no dice "/login")
+        entro = "base => location.href.startsWith(base) && !location.href.includes('/login')"
         try:
-            await page.wait_for_function(
-                "() => !location.href.includes('/login')", timeout=self._login_timeout_ms
-            )
+            try:
+                await page.wait_for_function(entro, arg=self._base_url, timeout=_ESPERA_ENTER_MS)
+            except Exception:
+                boton = page.locator(BOTON_ACCESO_SELECTOR)
+                if await boton.count() > 0:
+                    await boton.first.click(timeout=_ACCION_TIMEOUT_MS)
+                await page.wait_for_function(entro, arg=self._base_url, timeout=self._login_timeout_ms)
         except Exception as exc:
             raise ImileLoginError(
                 "No se pudo iniciar sesión en iMile: usuario o contraseña incorrectos, "
