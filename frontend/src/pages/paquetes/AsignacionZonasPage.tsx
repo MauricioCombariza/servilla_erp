@@ -579,13 +579,16 @@ function AsignarEnImile({ mensajero, seriales, onCambio, onMensajero }: {
               id="nombre-imile"
               value={nombre}
               onChange={(e) => setNombre(e.target.value)}
-              placeholder={mensajero.nombre}
+              placeholder="Como sale en iMile, ej. Mariela Pabon | D21026309101"
               className="min-w-0 flex-1 border border-gray-300 rounded-lg px-2 py-1 text-sm bg-white outline-none focus:ring-2 focus:ring-primary"
             />
             <button type="submit" className="bg-gray-800 text-white text-xs font-medium px-3 py-1.5 rounded-lg">
               Guardar
             </button>
           </form>
+          <p className="mt-1 text-xs text-red-900/80">
+            Cópialo del selector DA de iMile: con el código (| D…) se elige exactamente ese mensajero.
+          </p>
         </div>
       )}
     </div>

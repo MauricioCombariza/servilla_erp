@@ -2,7 +2,9 @@
 
 Como lo haría la persona en la página: en el selector DA se busca el nombre del
 mensajero y se elige la opción "Nombre | Dxxxxxxxxxx"; luego cada serial se escribe en
-Número de Guía (scanNumber) y se presiona Enter.
+Número de Guía (scanNumber) y se presiona Enter. El mensajero se puede dar solo con el
+nombre ("Mariela Pabon") o como sale en el selector ("Mariela Pabon | D21026309101");
+con el código se elige exactamente esa opción, aunque el nombre esté repetido.
 
 El resultado se lee de la respuesta que la propia página recibe de iMile
 (POST .../bizAssignDaScan/submit), que tiene la misma forma que la de Llegada. Visto en
@@ -65,6 +67,18 @@ def _mismo_nombre(a: str, b: str) -> bool:
     return " ".join(a.split()).casefold() == " ".join(b.split()).casefold()
 
 
+def _es_el_buscado(m: MensajeroImile, buscado: MensajeroImile) -> bool:
+    if buscado.codigo:
+        return m.codigo.casefold() == buscado.codigo.casefold()
+    return _mismo_nombre(m.nombre, buscado.nombre)
+
+
+def _buscado(texto: str) -> MensajeroImile:
+    """'Mariela Pabon' o 'Mariela Pabon | D21026309101' → nombre (y código si lo trae)."""
+    texto = " ".join(texto.split())
+    return _opcion(texto) or MensajeroImile(texto, "")
+
+
 class ImileAsignacion:
     def __init__(self, sesion: ImileSesion = imile_sesion, espera_respuesta_ms: int = _ESPERA_RESPUESTA_MS):
         self._sesion = sesion
@@ -74,7 +88,6 @@ class ImileAsignacion:
         """Asigna un serial al mensajero `nombre` de iMile. Lanza
         MensajeroImileNoEncontradoError si el nombre no se puede elegir en el selector DA."""
         serial = serial.strip()
-        nombre = " ".join(nombre.split())
         async with self._sesion.usar() as page:
             await self._abrir_asignar(page)
             await cancelar_ventanas(page)
@@ -102,21 +115,22 @@ class ImileAsignacion:
         await self._sesion.cerrar_recorrido(page)
 
     async def _elegir_mensajero(self, page: Page, nombre: str) -> MensajeroImile:
+        buscado = _buscado(nombre)
         # Si ya está elegido (serial anterior del mismo lote) no se toca el selector
         actual = _opcion(await page.locator(ETIQUETA_DA).first.inner_text())
-        if actual and _mismo_nombre(actual.nombre, nombre):
+        if actual and _es_el_buscado(actual, buscado):
             return actual
 
         await page.locator(SELECTOR_DA).first.click()
         desplegable = page.locator(DESPLEGABLE).last
-        await desplegable.locator("input").first.fill(nombre)
+        await desplegable.locator("input").first.fill(buscado.nombre)
         await page.wait_for_timeout(_ESPERA_BUSQUEDA_MS)
 
         opciones = desplegable.locator(OPCION_DA)
         encontradas = []
         for i in range(await opciones.count()):
             m = _opcion(await opciones.nth(i).inner_text())
-            if m and _mismo_nombre(m.nombre, nombre):
+            if m and _es_el_buscado(m, buscado):
                 encontradas.append((i, m))
         if len(encontradas) != 1:
             await page.keyboard.press("Escape")
