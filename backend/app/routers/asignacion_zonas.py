@@ -19,6 +19,7 @@ from app.schemas.asignacion_zonas import (
     AsignarZonasRequest,
     MensajeroRead,
     SerialDelMensajeroRead,
+    TotalMensajeroRead,
     ZonaDelDiaRead,
     ZonasMensajeroRead,
 )
@@ -33,6 +34,7 @@ from app.services.asignacion_zonas_service import (
     quitar_serial,
     seriales_del_mensajero,
     tablero,
+    totales_por_mensajero,
     zonas_de,
 )
 from app.services.vista_zonas_service import EnlaceInvalidoError, validar_enlace
@@ -100,6 +102,11 @@ def _crear_router(prefix: str, auth, tag: str) -> APIRouter:
             )
             for z in await tablero(db, fecha or hoy())
         ]
+
+    @r.get("/mensajeros", response_model=list[TotalMensajeroRead])
+    async def totales(fecha: date | None = None, db: AsyncSession = Depends(get_db), _=auth):
+        """Cuántos paquetes lleva cada mensajero en el día (por sus zonas + reasignados)."""
+        return [asdict(t) for t in await totales_por_mensajero(db, fecha or hoy())]
 
     @r.post("/mensajero/{codigo}/seriales", response_model=AsignacionSerialRead)
     async def asignar_un_serial(codigo: str, body: AsignarSerialRequest,

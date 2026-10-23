@@ -126,9 +126,9 @@ async def test_tablero_del_dia_con_mensajeros_y_paquetes_leidos(client):
 
 # ── Reasignación serial por serial ────────────────────────────────────────────
 
-async def _tula_con(*seriales_y_zonas):
+async def _tula_con(*seriales_y_zonas, estado="abierta"):
     async with AsyncSessionLocal() as db:
-        tula = Tula(codigo="BAG-REASIG", usuario="test-asigna", fecha=FECHA, estado="abierta")
+        tula = Tula(codigo="BAG-REASIG", usuario="test-asigna", fecha=FECHA, estado=estado)
         db.add(tula)
         await db.flush()
         for serial, zona in seriales_y_zonas:
@@ -190,6 +190,27 @@ async def test_se_puede_pistolear_un_serial_que_no_paso_por_ninguna_tula(client)
 
 async def test_pistolear_con_mensajero_inexistente(client):
     assert (await _pistolear(client, "T999", "TEST32-A001")).status_code == 404
+
+
+# ── Total de paquetes por mensajero ───────────────────────────────────────────
+
+async def _totales(client):
+    r = await client.get(f"{URL}/mensajeros", params={"fecha": FECHA.isoformat()})
+    assert r.status_code == 200
+    return {t["codigo"]: (t["zonas"], t["paquetes"], t["reasignados"]) for t in r.json() if t["codigo"] in CODIGOS}
+
+
+async def test_total_por_mensajero_cuenta_sus_zonas_y_los_reasignados(client):
+    await _asignar(client, "T901", ["60_1", "60_2"])
+    await _tula_con(("TEST32-A001", "60_1"), ("TEST32-B002", "60_2"), ("TEST32-C003", "60_3"))
+    await _tula_con(("TEST32-A001", "60_1"), estado="cerrada")  # leído en dos tulas: cuenta una vez
+    assert await _totales(client) == {"T901": (["60_1", "60_2"], 2, 0)}
+
+    await _pistolear(client, "T902", "TEST32-B002")  # T902 sin zonas, solo con un reasignado
+
+    assert await _totales(client) == {"T901": (["60_1", "60_2"], 1, 0), "T902": ([], 1, 1)}
+    for codigo, (_, paquetes, _r) in (await _totales(client)).items():
+        assert len(await _seriales(client, codigo)) == paquetes  # misma regla que la lista del mensajero
 
 
 # ── Con el QR del día, sin iniciar sesión ─────────────────────────────────────

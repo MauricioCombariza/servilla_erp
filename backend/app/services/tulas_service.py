@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select, update
+from sqlalchemy import exists, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -305,3 +305,17 @@ async def seriales_de(db: AsyncSession, tula_id: int) -> list[TulaSerial]:
 async def listar_tulas(db: AsyncSession, fecha: date) -> list[ResumenTula]:
     result = await db.execute(select(Tula).where(Tula.fecha == fecha).order_by(Tula.fecha_apertura))
     return [await resumen(db, t) for t in result.scalars().all()]
+
+
+async def sin_leer(db: AsyncSession, fecha: date | None = None) -> tuple[date, list[PaqueteDespacho]]:
+    """Paquetes de la base de despacho del día (f_emi) que no se han leído en ninguna tula."""
+    fecha = fecha or datetime.now(_ZONA_HORARIA).date()
+    result = await db.execute(
+        select(PaqueteDespacho)
+        .where(
+            PaqueteDespacho.f_emi == fecha,
+            ~exists().where(TulaSerial.serial == PaqueteDespacho.serial),
+        )
+        .order_by(PaqueteDespacho.zona.nulls_last(), PaqueteDespacho.serial)
+    )
+    return fecha, list(result.scalars().all())

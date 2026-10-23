@@ -421,3 +421,21 @@ async def test_detalle_trae_la_localidad_de_cada_serial(client):
 
     assert seriales[f"{PREFIJO}3"]["localidad"] == fuera["localidad"]
     assert seriales[f"{PREFIJO}X999"]["localidad"] is None  # no está en la base de despacho
+
+
+# ── Seriales de la base que no se han leído ──────────────────────────────────
+
+async def _sin_leer(client, fecha):
+    r = await client.get(f"{URL}/sin-leer", params={"fecha": fecha})
+    assert r.status_code == 200
+    return [s["serial"] for s in r.json()["seriales"] if s["serial"].startswith(PREFIJO)]
+
+
+async def test_sin_leer_lista_los_de_la_base_que_no_pasaron_por_ninguna_tula(client):
+    assert sorted(await _sin_leer(client, "2026-10-08")) == [f"{PREFIJO}1", f"{PREFIJO}2", f"{PREFIJO}3"]
+
+    tula = (await _abrir(client, "BAG-SINLEER")).json()
+    await _leer(client, tula["id"], f"{PREFIJO}2")
+
+    assert sorted(await _sin_leer(client, "2026-10-08")) == [f"{PREFIJO}1", f"{PREFIJO}3"]
+    assert await _sin_leer(client, "2026-10-09") == []  # base de otro día no aparece

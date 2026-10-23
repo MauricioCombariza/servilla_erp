@@ -272,3 +272,57 @@ async def seriales_del_mensajero(db: AsyncSession, codigo: str, fecha: date) -> 
                 serial, serial[-4:], await _zona_del_serial(db, serial, fecha), ORIGEN_SERIAL
             )
     return list(resultado.values())
+
+
+@dataclass(frozen=True)
+class TotalMensajero:
+    codigo: str
+    nombre: str
+    zonas: list[str]
+    paquetes: int
+    reasignados: int  # de esos paquetes, cuántos se le pasaron serial por serial
+
+
+async def totales_por_mensajero(db: AsyncSession, fecha: date) -> list[TotalMensajero]:
+    """Cuántos paquetes lleva cada mensajero en el día, con la misma regla que
+    seriales_del_mensajero (sus zonas sin los reasignados a otro + los que se le reasignaron)."""
+    personas: dict[int, Mensajero] = {}
+    zonas_de_mensajero: dict[int, list[str]] = {}
+    dueno_zona: dict[str, int] = {}
+    for a, p in (await db.execute(
+        select(AsignacionZona, Personal)
+        .join(Personal, Personal.id == AsignacionZona.personal_id)
+        .where(AsignacionZona.fecha == fecha)
+    )).all():
+        personas[p.id] = _mensajero(p)
+        zonas_de_mensajero.setdefault(p.id, []).append(a.zona)
+        dueno_zona[a.zona] = p.id
+
+    reasignados: dict[str, int] = {}
+    for s, p in (await db.execute(
+        select(AsignacionSerial.serial, Personal)
+        .join(Personal, Personal.id == AsignacionSerial.personal_id)
+        .where(AsignacionSerial.fecha == fecha)
+    )).all():
+        personas[p.id] = _mensajero(p)
+        reasignados[s] = p.id
+
+    paquetes: dict[int, set[str]] = {pid: set() for pid in personas}
+    for serial, zona in (await db.execute(
+        select(TulaSerial.serial, TulaSerial.zona)
+        .join(Tula, Tula.id == TulaSerial.tula_id)
+        .where(Tula.fecha == fecha, TulaSerial.zona.is_not(None))
+    )).all():
+        if zona in dueno_zona and serial not in reasignados:
+            paquetes[dueno_zona[zona]].add(serial)
+    cuenta_reasignados: dict[int, int] = {}
+    for serial, pid in reasignados.items():
+        paquetes[pid].add(serial)
+        cuenta_reasignados[pid] = cuenta_reasignados.get(pid, 0) + 1
+
+    totales = [
+        TotalMensajero(m.codigo, m.nombre, sorted(zonas_de_mensajero.get(pid, [])),
+                       len(paquetes[pid]), cuenta_reasignados.get(pid, 0))
+        for pid, m in personas.items()
+    ]
+    return sorted(totales, key=lambda t: (-t.paquetes, t.nombre))

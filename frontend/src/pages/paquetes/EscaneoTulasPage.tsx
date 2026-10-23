@@ -2,16 +2,18 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
-import { AlertTriangle, Camera, CameraOff, PackageOpen, QrCode, RotateCw } from "lucide-react";
+import { AlertTriangle, Camera, CameraOff, PackageOpen, QrCode, RotateCw, X } from "lucide-react";
 import {
   tulasApi,
   type DestinoPaquete,
   type ImileEstado,
   type Tula,
   type TulaAbiertaConflicto,
+  type SinLeerDelDia,
   type TulaDetalle,
 } from "@/api/tulas";
 import { CompartirVista } from "./CompartirVista";
+import { FlujoPaquetesNav } from "./FlujoPaquetesNav";
 
 const SCANNER_ELEMENT_ID = "tulas-qr-reader";
 const SCAN_FORMATS = [
@@ -71,6 +73,7 @@ export function EscaneoTulasPage() {
   const [ocupado, setOcupado] = useState(false);
   const [camara, setCamara] = useState(false);
   const [compartir, setCompartir] = useState(false); // Paso 2.7: QR de la vista por zonas
+  const [verSinLeer, setVerSinLeer] = useState(false);
   const campoRef = useRef<HTMLInputElement>(null);
   const ultimaLecturaRef = useRef({ codigo: "", at: 0 });
   const queryClient = useQueryClient();
@@ -98,7 +101,17 @@ export function EscaneoTulasPage() {
     queryFn: () => tulasApi.delDia().then((r) => r.data),
     refetchInterval: 15000,
   });
-  const refrescarDelDia = () => void queryClient.invalidateQueries({ queryKey: ["tulas-del-dia"] });
+  // Paquetes de la base del día que todavía no han pasado por ninguna tula
+  const sinLeerQuery = useQuery({
+    queryKey: ["tulas-sin-leer"],
+    queryFn: () => tulasApi.sinLeer().then((r) => r.data),
+    refetchInterval: 15000,
+  });
+  const refrescarDelDia = () => {
+    void queryClient.invalidateQueries({ queryKey: ["tulas-del-dia"] });
+    void queryClient.invalidateQueries({ queryKey: ["tulas-sin-leer"] });
+  };
+  const sinLeer = sinLeerQuery.data;
 
   useEffect(() => {
     const d = abiertaQuery.data;
@@ -331,7 +344,31 @@ export function EscaneoTulasPage() {
           tula{delDiaQuery.data.tulas === 1 ? "" : "s"} ·{" "}
           <span className="font-semibold text-gray-900">{delDiaQuery.data.paquetes}</span>{" "}
           paquete{delDiaQuery.data.paquetes === 1 ? "" : "s"} leído{delDiaQuery.data.paquetes === 1 ? "" : "s"}
+          {sinLeer && sinLeer.total > 0 && (
+            <>
+              {" · "}
+              <button
+                type="button"
+                onClick={() => setVerSinLeer((v) => !v)}
+                aria-expanded={verSinLeer}
+                className="font-semibold text-amber-700 underline"
+              >
+                {sinLeer.total} serial{sinLeer.total === 1 ? "" : "es"} sin leer
+              </button>
+            </>
+          )}
+          {sinLeer && sinLeer.total === 0 && !sinBase && delDiaQuery.data.paquetes > 0 && (
+            <span className="text-green-700"> · Base completa ✓</span>
+          )}
         </div>
+      )}
+
+      <div className="bg-white border-b border-gray-200 px-4 py-2">
+        <FlujoPaquetesNav className="max-w-md mx-auto" />
+      </div>
+
+      {verSinLeer && sinLeer && sinLeer.total > 0 && (
+        <SinLeer datos={sinLeer} onCerrar={() => { setVerSinLeer(false); enfocar(); }} />
       )}
 
       {compartir && <CompartirVista onCerrar={() => { setCompartir(false); enfocar(); }} />}
@@ -704,6 +741,37 @@ function ResumenCierre({ tula }: { tula: TulaDetalle }) {
       {tula.faltantes && tula.faltantes.length === 0 && (
         <p className="mt-3 text-sm text-green-700">Llegaron todos los paquetes que iMile dice que trae.</p>
       )}
+    </div>
+  );
+}
+
+/** Lo que venía en la base de despacho del día y no se ha leído en ninguna tula. */
+function SinLeer({ datos, onCerrar }: { datos: SinLeerDelDia; onCerrar: () => void }) {
+  return (
+    <div className="bg-amber-50 border-b border-amber-200 px-4 py-3">
+      <div className="max-w-md mx-auto">
+        <div className="flex items-center justify-between gap-2">
+          <p className="font-semibold text-amber-900 text-sm">
+            {datos.total} serial{datos.total === 1 ? "" : "es"} de la base sin leer
+          </p>
+          <button type="button" onClick={onCerrar} aria-label="Cerrar lista" className="text-amber-900 p-1">
+            <X size={18} />
+          </button>
+        </div>
+        <ul className="mt-2 max-h-72 overflow-y-auto bg-white rounded-lg border border-amber-200 divide-y divide-gray-100 text-sm">
+          {datos.seriales.map((s) => (
+            <li key={s.serial} className="px-3 py-1.5 flex items-center justify-between gap-2">
+              <span className="font-mono truncate">
+                <span className="text-gray-400">{s.serial.slice(0, -4)}</span>
+                <span className="font-bold text-gray-900">{s.ultimos_4}</span>
+              </span>
+              <span className={`shrink-0 text-xs font-medium ${s.zona ? "text-gray-700" : "text-amber-700"}`}>
+                {s.zona ?? s.localidad ?? "Sin sector"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }

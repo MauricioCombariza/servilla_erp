@@ -14,6 +14,8 @@ from app.schemas.tulas import (
     EscaneoResult,
     IngresoImile,
     ResumenDelDia,
+    SerialSinLeer,
+    SinLeerDelDia,
     TulaAbierta,
     TulaDetalle,
     TulaRead,
@@ -37,6 +39,7 @@ from app.services.tulas_service import (
     resumen,
     resumen_del_dia,
     seriales_de,
+    sin_leer,
     tula_abierta,
 )
 
@@ -107,6 +110,21 @@ async def del_dia(db: AsyncSession = Depends(get_db), _=_auth):
     """Para la pantalla: cuántas tulas y paquetes se han leído hoy entre todos."""
     fecha, tulas, paquetes = await resumen_del_dia(db)
     return ResumenDelDia(fecha=fecha, tulas=tulas, paquetes=paquetes)
+
+
+@router.get("/sin-leer", response_model=SinLeerDelDia)
+async def seriales_sin_leer(fecha: date | None = None, db: AsyncSession = Depends(get_db), _=_auth):
+    """Los paquetes de la base del día que todavía no se han leído en ninguna tula."""
+    fecha, paquetes = await sin_leer(db, fecha)
+    return SinLeerDelDia(
+        fecha=fecha,
+        total=len(paquetes),
+        seriales=[
+            SerialSinLeer(serial=p.serial, ultimos_4=p.serial[-4:], zona=p.zona,
+                          localidad=p.localidad, direccion=p.direccion_estandarizada or p.direccion)
+            for p in paquetes
+        ],
+    )
 
 
 @router.get("/abierta", response_model=TulaRead | None)

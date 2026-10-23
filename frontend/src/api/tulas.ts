@@ -72,6 +72,21 @@ export interface TulaAbiertaConflicto {
   tula_abierta: Tula;
 }
 
+export interface SerialSinLeer {
+  serial: string;
+  ultimos_4: string;
+  zona: string | null;
+  localidad: string | null;
+  direccion: string | null;
+}
+
+/** Paquetes de la base de despacho del día que no se han leído en ninguna tula */
+export interface SinLeerDelDia {
+  fecha: string;
+  total: number;
+  seriales: SerialSinLeer[];
+}
+
 export const tulasApi = {
   abierta: () => api.get<Tula | null>("/tulas/abierta"),
 
@@ -79,6 +94,8 @@ export const tulasApi = {
   baseDelDia: () => api.get<{ paquetes_hoy: number }>("/tulas/base-del-dia"),
 
   delDia: () => api.get<ResumenDelDia>("/tulas/del-dia"),
+
+  sinLeer: () => api.get<SinLeerDelDia>("/tulas/sin-leer"),
 
   detalle: (id: number) => api.get<TulaDetalle>(`/tulas/${id}`),
 
