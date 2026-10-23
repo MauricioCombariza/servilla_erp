@@ -63,8 +63,15 @@ async def test_bloqueo_se_reporta_y_nunca_se_confirma(asignacion):
     assert (await asignacion.asignar("Juan Porras", "IM200006")).estado == EstadoIngreso.OK  # y se sigue
 
 
-@pytest.mark.parametrize("nombre", ["Pedro Inexistente", "Ana Ruiz"])  # no está · está dos veces
-async def test_mensajero_que_no_se_puede_elegir_no_manda_nada(asignacion, nombre):
+async def test_acepta_el_nombre_como_sale_en_el_selector_con_su_codigo(asignacion):
+    # Con el código se elige esa opción exacta, aunque el nombre esté repetido
+    await asignacion.asignar("Ana Ruiz | D21000000002", "IM200008")
+    await asignacion.asignar(" juan porras |  D21043330501 ", "IM200009")
+    assert [(a[0], a[2]) for a in _enviados()] == [("D21000000002", "IM200008"), ("D21043330501", "IM200009")]
+
+
+@pytest.mark.parametrize("nombre", ["Pedro Inexistente", "Ana Ruiz", "Juan Porras | D99999999999"])
+async def test_mensajero_que_no_se_puede_elegir_no_manda_nada(asignacion, nombre):  # no está · repetido · código errado
     with pytest.raises(MensajeroImileNoEncontradoError):
         await asignacion.asignar(nombre, "IM200007")
     assert _enviados() == []
