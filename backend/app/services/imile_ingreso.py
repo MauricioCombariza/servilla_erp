@@ -59,13 +59,34 @@ class ResultadoIngreso:
     codigo: str | None = None  # blockCode / msgCode de iMile
 
 
-def _abre_ventana_bloqueo(body: dict | None) -> bool:
+async def cancelar_ventanas(page: Page, esperar: bool = False) -> None:
+    """Cierra sin confirmar: el aviso "Excepción de impresión" (botón "cierre") y la
+    ventana "bloquear" (botón "Cancelar"). Nunca presiona "Confirmar"."""
+    if esperar:
+        try:
+            await page.get_by_text("Cancelar", exact=True).first.wait_for(
+                state="visible", timeout=_ESPERA_VENTANA_MS
+            )
+        except PlaywrightTimeoutError:
+            return
+    for texto in ("Cancelar", "cierre"):
+        botones = page.get_by_text(texto, exact=True)
+        for i in range(await botones.count()):
+            if await botones.nth(i).is_visible():
+                await botones.nth(i).click()
+                await page.wait_for_timeout(300)
+
+
+def abre_ventana_bloqueo(body: dict | None) -> bool:
     ro = (body or {}).get("resultObject") or {}
     return bool(ro.get("blockCode") or ro.get("blockInfo"))
 
 
-def clasificar_respuesta(body: dict | None) -> ResultadoIngreso:
-    """Respuesta JSON de .../inbound/submit → resultado del ingreso."""
+def clasificar_respuesta(
+    body: dict | None, bloqueos: dict[str, EstadoIngreso] = _BLOQUEOS_CONOCIDOS
+) -> ResultadoIngreso:
+    """Respuesta JSON de un escaneo de iMile (.../inbound/submit, .../bizAssignDaScan/submit)
+    → resultado. `bloqueos`: qué significa cada blockCode en esa pantalla."""
     if not body:
         return ResultadoIngreso(EstadoIngreso.SIN_CONFIRMAR, "iMile no devolvió respuesta")
     if body.get("status") != "success":
@@ -73,8 +94,8 @@ def clasificar_respuesta(body: dict | None) -> ResultadoIngreso:
 
     ro = body.get("resultObject") or {}
     codigo = ro.get("blockCode") or ro.get("msgCode") or None
-    if _abre_ventana_bloqueo(body):
-        estado = _BLOQUEOS_CONOCIDOS.get(str(ro.get("blockCode")), EstadoIngreso.BLOQUEADO)
+    if abre_ventana_bloqueo(body):
+        estado = bloqueos.get(str(ro.get("blockCode")), EstadoIngreso.BLOQUEADO)
         return ResultadoIngreso(estado, ro.get("blockInfo"), codigo)
     if ro.get("repeat"):
         return ResultadoIngreso(EstadoIngreso.REPETIDO, ro.get("warnMsg") or "Ya ingresado", codigo)
@@ -92,7 +113,7 @@ class ImileIngreso:
         serial = serial.strip()
         async with self._sesion.usar() as page:
             await self._abrir_llegada(page)
-            await self._cancelar_ventanas(page)
+            await cancelar_ventanas(page)
             campo = page.locator(CAMPO_GUIA).first
             await campo.fill(serial)
             try:
@@ -104,8 +125,8 @@ class ImileIngreso:
                 body = await (await info.value).json()
             except (PlaywrightTimeoutError, ValueError):  # sin respuesta a tiempo, o no es JSON
                 body = None
-            if _abre_ventana_bloqueo(body):
-                await self._cancelar_ventanas(page, esperar=True)
+            if abre_ventana_bloqueo(body):
+                await cancelar_ventanas(page, esperar=True)
         return clasificar_respuesta(body)
 
     async def _abrir_llegada(self, page: Page) -> None:
@@ -114,23 +135,6 @@ class ImileIngreso:
         await page.goto(f"{self._sesion.base_url}{RUTA_LLEGADA}")
         await page.locator(CAMPO_GUIA).first.wait_for(state="visible", timeout=_CARGA_PAGINA_MS)
         await self._sesion.cerrar_recorrido(page)
-
-    async def _cancelar_ventanas(self, page: Page, esperar: bool = False) -> None:
-        """Cierra sin confirmar: el aviso "Excepción de impresión" (botón "cierre") y la
-        ventana "bloquear" (botón "Cancelar"). Nunca presiona "Confirmar"."""
-        if esperar:
-            try:
-                await page.get_by_text("Cancelar", exact=True).first.wait_for(
-                    state="visible", timeout=_ESPERA_VENTANA_MS
-                )
-            except PlaywrightTimeoutError:
-                return
-        for texto in ("Cancelar", "cierre"):
-            botones = page.get_by_text(texto, exact=True)
-            for i in range(await botones.count()):
-                if await botones.nth(i).is_visible():
-                    await botones.nth(i).click()
-                    await page.wait_for_timeout(300)
 
 
 imile_ingreso = ImileIngreso()

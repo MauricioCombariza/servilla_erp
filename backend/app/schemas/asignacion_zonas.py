@@ -19,6 +19,7 @@ class ZonasMensajeroRead(BaseModel):
     nombre: str
     fecha: date
     zonas: list[str]
+    nombre_imile: str | None = None  # si en iMile aparece con otro nombre (Paso 3.3)
 
 
 class ZonaDelDiaRead(BaseModel):
@@ -45,6 +46,8 @@ class SerialDelMensajeroRead(BaseModel):
     ultimos_4: str
     zona: str | None
     origen: str  # "zona" | "serial" (reasignado uno a uno)
+    imile_estado: str | None = None  # Paso 3.3: ok | repetido | bloqueado | error | sin_confirmar; None = sin mandar
+    imile_mensaje: str | None = None
 
 
 class TotalMensajeroRead(BaseModel):
@@ -53,3 +56,17 @@ class TotalMensajeroRead(BaseModel):
     zonas: list[str]
     paquetes: int  # paquetes del día: sus zonas + reasignados a él
     reasignados: int
+
+
+class NombreImileRequest(BaseModel):
+    nombre_imile: str | None = None  # vacío: se busca en iMile con el nombre del ERP
+
+
+class EnvioImileRead(BaseModel):
+    nombre_imile: str  # con el que se busca en iMile
+    total: int
+    hechos: int
+    asignados: int
+    fallidos: int
+    en_curso: bool
+    error: str | None

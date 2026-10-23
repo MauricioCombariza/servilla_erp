@@ -15,6 +15,7 @@ class Personal(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     codigo: Mapped[str] = mapped_column(String(4), unique=True, nullable=False)
     nombre_completo: Mapped[str] = mapped_column(String(150), nullable=False)
+    nombre_imile: Mapped[str | None] = mapped_column(String(150))  # si en iMile aparece con otro nombre
     identificacion: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
     telefono: Mapped[str | None] = mapped_column(String(20))
     email: Mapped[str | None] = mapped_column(String(100))

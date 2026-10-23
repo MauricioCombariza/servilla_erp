@@ -51,6 +51,7 @@ class Mensajero:
     id: int
     codigo: str
     nombre: str
+    nombre_imile: str | None = None  # si en iMile aparece con otro nombre (Paso 3.3)
 
 
 @dataclass(frozen=True)
@@ -65,7 +66,7 @@ def hoy() -> date:
 
 
 def _mensajero(p: Personal) -> Mensajero:
-    return Mensajero(id=p.id, codigo=p.codigo.strip(), nombre=p.nombre_completo)
+    return Mensajero(id=p.id, codigo=p.codigo.strip(), nombre=p.nombre_completo, nombre_imile=p.nombre_imile)
 
 
 async def buscar_mensajero(db: AsyncSession, codigo: str) -> Mensajero:

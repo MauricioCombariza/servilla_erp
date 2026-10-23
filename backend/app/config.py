@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     imile_ingreso_activo: bool = False
     # Total de paquetes de la tula consultado en iMile al abrirla (Paso 2.3). Solo lectura.
     imile_consulta_tula_activa: bool = False
+    # Asignación de los paquetes del mensajero en iMile (Paso 3.3, "Asignar repartidor").
+    # Solo corre cuando alguien presiona "Asignar en iMile".
+    imile_asignacion_activa: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, MapPinned, RotateCcw } from "lucide-react";
+import { AlertTriangle, MapPinned, RotateCcw, Send } from "lucide-react";
 import {
   asignacionZonasApi,
   type AsignacionSerial,
   type ChoqueZonas,
+  type EnvioImile,
   type SerialDelMensajero,
   type TotalMensajero,
   type ZonasMensajero,
@@ -285,6 +286,7 @@ export function AsignacionZonasPage() {
           seriales={serialesQuery.data ?? []}
           cargando={serialesQuery.isLoading}
           onCambio={refrescar}
+          onMensajero={setMensajero}
         />
       )}
     </div>
@@ -350,11 +352,12 @@ function TotalesPorMensajero({ totales, cargando, actual, onElegir }: {
 }
 
 /** Reasignación serial por serial y la lista final de paquetes del mensajero (la que usará el 3.3). */
-function SerialesDelMensajero({ mensajero, seriales, cargando, onCambio }: {
+function SerialesDelMensajero({ mensajero, seriales, cargando, onCambio, onMensajero }: {
   mensajero: ZonasMensajero;
   seriales: SerialDelMensajero[];
   cargando: boolean;
   onCambio: () => void;
+  onMensajero: (m: ZonasMensajero) => void;
 }) {
   const [serial, setSerial] = useState("");
   const [ultimo, setUltimo] = useState<AsignacionSerial | null>(null);
@@ -437,6 +440,7 @@ function SerialesDelMensajero({ mensajero, seriales, cargando, onCambio }: {
             ({seriales.length}{reasignados ? ` · ${reasignados} reasignado${reasignados === 1 ? "" : "s"}` : ""})
           </span>
         </h2>
+        <AsignarEnImile mensajero={mensajero} seriales={seriales} onCambio={onCambio} onMensajero={onMensajero} />
         {cargando ? (
           <p className="text-sm text-gray-500 mt-2">Cargando…</p>
         ) : seriales.length === 0 ? (
@@ -451,6 +455,7 @@ function SerialesDelMensajero({ mensajero, seriales, cargando, onCambio }: {
                 </span>
                 <span className="flex items-center gap-3 shrink-0">
                   <span className="text-gray-600">{s.zona ?? "—"}</span>
+                  <EstadoImile serial={s} />
                   {s.origen === "serial" && (
                     <button
                       type="button"
@@ -467,6 +472,122 @@ function SerialesDelMensajero({ mensajero, seriales, cargando, onCambio }: {
           </ul>
         )}
       </div>
+    </div>
+  );
+}
+
+const ASIGNADO_EN_IMILE = new Set(["ok", "repetido"]);
+
+const ETIQUETA_IMILE: Record<string, { texto: string; clase: string }> = {
+  ok: { texto: "iMile ✓", clase: "text-green-700" },
+  repetido: { texto: "iMile ✓", clase: "text-green-700" },
+  bloqueado: { texto: "iMile: bloqueado", clase: "text-red-700" },
+  error: { texto: "iMile: error", clase: "text-red-700" },
+  sin_confirmar: { texto: "iMile: sin confirmar", clase: "text-amber-700" },
+};
+
+function EstadoImile({ serial: s }: { serial: SerialDelMensajero }) {
+  if (!s.imile_estado) {
+    // Sin mandar; si se le pasó de otro mensajero ya mandado, dice con quién quedó en iMile
+    return s.imile_mensaje ? <span className="text-xs text-amber-700" title={s.imile_mensaje}>iMile: con otro</span> : null;
+  }
+  const e = ETIQUETA_IMILE[s.imile_estado] ?? { texto: `iMile: ${s.imile_estado}`, clase: "text-red-700" };
+  return <span className={`text-xs ${e.clase}`} title={s.imile_mensaje ?? undefined}>{e.texto}</span>;
+}
+
+/** Paso 3.3: pasa a iMile ("Asignar repartidor") los paquetes del mensajero, uno por uno. */
+function AsignarEnImile({ mensajero, seriales, onCambio, onMensajero }: {
+  mensajero: ZonasMensajero;
+  seriales: SerialDelMensajero[];
+  onCambio: () => void;
+  onMensajero: (m: ZonasMensajero) => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [nombre, setNombre] = useState(mensajero.nombre_imile ?? "");
+  const pendientes = seriales.filter((s) => !ASIGNADO_EN_IMILE.has(s.imile_estado ?? "")).length;
+
+  const envioQuery = useQuery({
+    queryKey: ["asignacion-envio-imile", mensajero.codigo],
+    queryFn: () => asignacionZonasApi.envioImile(mensajero.codigo).then((r) => r.data),
+    refetchInterval: (q) => (q.state.data?.en_curso ? 2000 : false),
+  });
+  const envio: EnvioImile | null = envioQuery.data ?? null;
+
+  // Mientras avanza, la lista muestra el estado de cada paquete
+  const hechos = envio?.hechos ?? 0;
+  const enCurso = !!envio?.en_curso;
+  useEffect(() => {
+    if (envio) onCambio();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hechos, enCurso]);
+
+  useEffect(() => setNombre(mensajero.nombre_imile ?? ""), [mensajero.codigo, mensajero.nombre_imile]);
+
+  async function enviar() {
+    setError(null);
+    try {
+      await asignacionZonasApi.asignarEnImile(mensajero.codigo);
+      await envioQuery.refetch();
+    } catch (err) {
+      const { detail } = leerError(err);
+      setError(typeof detail === "string" ? detail : "No se pudo mandar a iMile");
+    }
+  }
+
+  async function guardarNombre(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      onMensajero((await asignacionZonasApi.fijarNombreImile(mensajero.codigo, nombre.trim() || null)).data);
+    } catch (err) {
+      const { detail } = leerError(err);
+      setError(typeof detail === "string" ? detail : "No se pudo guardar el nombre");
+    }
+  }
+
+  return (
+    <div className="mt-2 mb-1 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-gray-600">
+          En iMile: <span className="font-medium text-gray-900">{mensajero.nombre_imile || mensajero.nombre}</span>
+        </span>
+        <button
+          type="button"
+          disabled={enCurso || pendientes === 0}
+          onClick={enviar}
+          className="inline-flex items-center gap-1.5 bg-primary hover:bg-primary-hover text-white text-sm font-medium px-3 py-1.5 rounded-lg disabled:opacity-40"
+        >
+          <Send size={14} />
+          {enCurso ? "Asignando en iMile…" : pendientes === 0 ? "Todo asignado en iMile" : `Asignar en iMile (${pendientes})`}
+        </button>
+      </div>
+
+      {envio && envio.total > 0 && (
+        <p className="mt-2 text-gray-700">
+          {envio.hechos} de {envio.total} mandados · <span className="text-green-700">{envio.asignados} asignados</span>
+          {envio.fallidos > 0 && <span className="text-red-700"> · {envio.fallidos} con error</span>}
+        </p>
+      )}
+      {error && <p role="alert" className="mt-2 text-red-700">{error}</p>}
+
+      {envio?.error && (
+        <div role="alert" className="mt-2 rounded-lg border border-red-200 bg-red-50 p-2.5 text-red-800">
+          <p>{envio.error}</p>
+          <form onSubmit={guardarNombre} className="flex flex-wrap items-center gap-2 mt-2">
+            <label htmlFor="nombre-imile" className="text-xs text-red-900">Nombre exacto en iMile:</label>
+            <input
+              id="nombre-imile"
+              value={nombre}
+              onChange={(e) => setNombre(e.target.value)}
+              placeholder={mensajero.nombre}
+              className="min-w-0 flex-1 border border-gray-300 rounded-lg px-2 py-1 text-sm bg-white outline-none focus:ring-2 focus:ring-primary"
+            />
+            <button type="submit" className="bg-gray-800 text-white text-xs font-medium px-3 py-1.5 rounded-lg">
+              Guardar
+            </button>
+          </form>
+        </div>
+      )}
     </div>
   );
 }
