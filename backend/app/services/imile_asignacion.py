@@ -38,8 +38,11 @@ ETIQUETA_DA = "#daCode .ImileSelect-trigger-label"
 DESPLEGABLE = ".MuiTooltip-popper:has(.ImileSelect-list)"
 OPCION_DA = "li.ImileSelect-item"
 
-# En esta pantalla solo se conoce el 1119; cualquier otro bloqueo queda para revisión
-BLOQUEOS_ASIGNACION = {"1119": EstadoIngreso.ERROR}  # "Sin información de pedido()": no existe en iMile
+# Bloqueos vistos en iMile real en esta pantalla; cualquier otro queda "bloqueado" para revisión
+BLOQUEOS_ASIGNACION = {
+    "1119": EstadoIngreso.ERROR,  # "Sin información de pedido()": no existe en iMile
+    "1118": EstadoIngreso.CERRADA,  # "Guía ya cerrada" (2026-10-23): no se puede asignar a nadie
+}
 
 _CARGA_PAGINA_MS = 30_000
 _ESPERA_RESPUESTA_MS = 20_000

@@ -40,6 +40,7 @@ class EstadoIngreso(str, Enum):
     BLOQUEADO = "bloqueado"
     ERROR = "error"
     SIN_CONFIRMAR = "sin_confirmar"
+    CERRADA = "cerrada"  # Asignar repartidor: "Guía ya cerrada", iMile no deja asignarla
 
 
 # Significado operativo de los bloqueos de iMile (confirmado por el usuario 2026-10-08:

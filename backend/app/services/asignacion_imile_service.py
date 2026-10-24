@@ -30,6 +30,8 @@ from app.services.imile_asignacion import MensajeroImileNoEncontradoError, imile
 
 # Estados de iMile con los que el paquete ya quedó con el mensajero: no se vuelven a mandar
 YA_ASIGNADOS = {"ok", "repetido"}
+# Lo que no se vuelve a mandar: lo ya asignado y las guías que iMile tiene cerradas
+SIN_REENVIO = YA_ASIGNADOS | {"cerrada"}
 
 
 class EnvioEnCursoError(Exception):
@@ -115,7 +117,7 @@ async def _nombres(db: AsyncSession, ids: set[int]) -> dict[int, str]:
 
 
 async def pendientes(db: AsyncSession, codigo: str, fecha: date) -> list[str]:
-    return [s.serial for s in await seriales_con_imile(db, codigo, fecha) if s.imile_estado not in YA_ASIGNADOS]
+    return [s.serial for s in await seriales_con_imile(db, codigo, fecha) if s.imile_estado not in SIN_REENVIO]
 
 
 def envio_de(m: Mensajero, fecha: date) -> EnvioImile | None:
