@@ -112,6 +112,16 @@ export default function App() {
             }
           />
           <Route
+            path="/asignacion-zonas"
+            element={
+              <ProtectedRoute>
+                <PageGuard pageKey="asignacion_zonas">
+                  <AsignacionZonasPage />
+                </PageGuard>
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/escaneo-devoluciones"
             element={
               <ProtectedRoute>
@@ -157,7 +167,6 @@ export default function App() {
             <Route path="/devoluciones" element={<PageGuard pageKey="devoluciones"><DevolucionesPage /></PageGuard>} />
             <Route path="/geocercas" element={<PageGuard pageKey="geocercas"><GeocercasPage /></PageGuard>} />
             <Route path="/generar-dat" element={<PageGuard pageKey="generar_dat"><GenerarDatPage /></PageGuard>} />
-            <Route path="/asignacion-zonas" element={<PageGuard pageKey="asignacion_zonas"><AsignacionZonasPage /></PageGuard>} />
             <Route path="/admin/usuarios-roles" element={<AdminOnlyRoute><UsuariosRolesPage /></AdminOnlyRoute>} />
           </Route>
         </Routes>

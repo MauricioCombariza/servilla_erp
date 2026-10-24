@@ -282,6 +282,8 @@ class _ImileFalso:
         self.enviados.append((nombre, serial))
         if serial.endswith("X"):
             return ResultadoIngreso(EstadoIngreso.ERROR, "Sin información de pedido()", "1119")
+        if serial.endswith("C"):
+            return ResultadoIngreso(EstadoIngreso.CERRADA, "Guía ya cerrada", "1118")
         return ResultadoIngreso(EstadoIngreso.OK)
 
 
@@ -354,6 +356,20 @@ async def test_mensajero_que_no_esta_en_imile_detiene_el_envio_y_se_corrige_con_
     assert r.json()["nombre_imile"] == "Juan P. iMile"
     envio = await _enviar_a_imile(client, "T901")
     assert (envio["nombre_imile"], envio["asignados"]) == ("Juan P. iMile", 1)
+
+
+async def test_guia_cerrada_en_imile_muestra_el_motivo_y_no_se_vuelve_a_mandar(client, imile):
+    await _asignar(client, "T901", ["60_1"])
+    await _tula_con(("TEST32-A00C", "60_1"))
+
+    envio = await _enviar_a_imile(client, "T901")
+    assert (envio["asignados"], envio["fallidos"]) == (0, 1)
+    r = await client.get(f"{URL}/mensajero/T901/seriales", params={"fecha": FECHA.isoformat()})
+    assert (r.json()[0]["imile_estado"], r.json()[0]["imile_mensaje"]) == ("cerrada", "Guía ya cerrada")
+
+    imile.enviados.clear()
+    envio = await _enviar_a_imile(client, "T901")
+    assert (envio["total"], imile.enviados) == (0, [])
 
 
 async def test_sin_pendientes_no_manda_nada(client, imile):

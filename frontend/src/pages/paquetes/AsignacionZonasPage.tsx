@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, MapPinned, RotateCcw, Send } from "lucide-react";
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
+import { AlertTriangle, Camera, CameraOff, MapPinned, RotateCcw, Send } from "lucide-react";
 import {
   asignacionZonasApi,
   type AsignacionSerial,
@@ -18,6 +19,17 @@ function leerError(e: unknown): { status?: number; detail?: unknown } {
 }
 
 const mismoCodigo = (a: string, b: string) => a.trim().toUpperCase() === b.trim().toUpperCase();
+
+const SCANNER_ELEMENT_ID = "asignacion-qr-reader";
+const SCAN_FORMATS = [
+  Html5QrcodeSupportedFormats.QR_CODE,
+  Html5QrcodeSupportedFormats.CODE_128,
+  Html5QrcodeSupportedFormats.CODE_39,
+  Html5QrcodeSupportedFormats.CODE_93,
+  Html5QrcodeSupportedFormats.EAN_13,
+  Html5QrcodeSupportedFormats.ITF,
+];
+const ANTIRREBOTE_MS = 2000; // la cámara lee el mismo código varias veces por segundo
 
 /**
  * Pasos 3.1 y 3.2 (con sesión del ERP): se ingresa el código del mensajero, se le eligen
@@ -134,170 +146,181 @@ export function AsignacionZonasPage() {
   }
 
   return (
-    <div>
-      <FlujoPaquetesNav className="mb-4 max-w-xl" />
-      <div className="mb-4">
-        <h1 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
-          <MapPinned size={20} className="text-primary" />
-          Asignación de Zonas
-        </h1>
-        <p className="text-sm text-gray-500 mt-0.5">
-          Ingresa el código del mensajero, marca sus zonas de hoy y guarda. Cada zona va completa a un
-          solo mensajero; los paquetes sueltos se le pasan pistoleando su serial.
-        </p>
-      </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4 max-w-2xl">
-        <Cifra valor={`${asignadas}/${tablero.length}`} etiqueta="Zonas asignadas" />
-        <Cifra valor={tablero.length - asignadas} etiqueta="Sin asignar" />
-        <Cifra valor={paquetes} etiqueta="Paquetes leídos hoy" />
-        <Cifra valor={paquetesAsignados} etiqueta="Paquetes asignados" />
-      </div>
-
-      <form onSubmit={buscar} className="flex flex-wrap items-center gap-2 mb-3">
-        <input
-          value={codigo}
-          onChange={(e) => setCodigo(e.target.value)}
-          placeholder="Código del mensajero"
-          autoComplete="off"
-          className="w-52 border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono outline-none focus:ring-2 focus:ring-primary"
-        />
-        <button
-          type="submit"
-          disabled={!codigo.trim() || buscando}
-          className="bg-gray-800 hover:bg-gray-900 text-white text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-40"
-        >
-          {buscando ? "Buscando…" : "Buscar"}
-        </button>
-        {mensajero && (
-          <span className="text-sm">
-            <span className="font-semibold text-gray-900">{mensajero.nombre}</span>
-            <span className="text-gray-500"> · {mensajero.codigo} · {elegidas.size} zona{elegidas.size === 1 ? "" : "s"} marcada{elegidas.size === 1 ? "" : "s"}</span>
-          </span>
-        )}
-      </form>
-
-      {error && (
-        <div role="alert" className="mb-3 rounded-lg px-4 py-2.5 text-sm bg-red-50 text-red-800 border border-red-200">
-          {error}
-        </div>
-      )}
-      {ok && <div className="mb-3 rounded-lg px-4 py-2.5 text-sm bg-green-50 text-green-800 border border-green-200">{ok}</div>}
-
-      {choques && mensajero && (
-        <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm">
-          <p className="font-medium text-amber-900 flex items-center gap-2">
-            <AlertTriangle size={16} /> Estas zonas ya las tiene otro mensajero:
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <header className="sticky top-0 z-20 bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3">
+        <MapPinned size={24} className="text-primary shrink-0" />
+        <div className="min-w-0 flex-1">
+          <h1 className="font-semibold text-gray-900 truncate">Asignación de Zonas</h1>
+          <p className="text-xs text-gray-500 truncate">
+            {mensajero ? (
+              <>
+                <span className="font-medium text-gray-900">{mensajero.nombre}</span> · {mensajero.codigo} ·{" "}
+                {elegidas.size} zona{elegidas.size === 1 ? "" : "s"} marcada{elegidas.size === 1 ? "" : "s"}
+              </>
+            ) : (
+              "Ingresa el código del mensajero"
+            )}
           </p>
-          <ul className="mt-1 text-amber-900">
-            {choques.choques.map((c) => (
-              <li key={c.zona}>
-                <span className="font-mono font-semibold">{c.zona}</span> — {c.nombre} ({c.codigo})
-              </li>
-            ))}
-          </ul>
-          <p className="mt-2 text-amber-800">¿Se las paso completas a {mensajero.nombre}?</p>
-          <div className="flex gap-2 mt-3">
-            <button
-              type="button"
-              disabled={guardando}
-              onClick={() => guardar(true)}
-              className="bg-primary hover:bg-primary-hover text-white font-medium px-4 py-2 rounded-lg disabled:opacity-40"
-            >
-              Sí, reasignar
-            </button>
-            <button
-              type="button"
-              onClick={() => setChoques(null)}
-              className="border border-gray-300 bg-white text-gray-700 font-medium px-4 py-2 rounded-lg"
-            >
-              Cancelar
-            </button>
-          </div>
         </div>
-      )}
+      </header>
 
-      {tableroQuery.isLoading ? (
-        <p className="text-sm text-gray-500">Cargando zonas…</p>
-      ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-          {tablero.map((z) => {
-            const marcada = elegidas.has(z.zona);
-            const deOtro = !!mensajero && !!z.mensajero && !mismoCodigo(z.mensajero.codigo, mensajero.codigo);
-            const clase = !mensajero
-              ? z.mensajero ? "border-gray-200 bg-white" : "border-dashed border-gray-300 bg-gray-50"
-              : marcada
-                ? deOtro ? "border-amber-400 bg-amber-50 ring-2 ring-amber-300" : "border-primary bg-primary/10 ring-2 ring-primary/40"
-                : deOtro ? "border-gray-200 bg-gray-100 text-gray-500" : "border-gray-200 bg-white hover:border-primary";
-            return (
-              <button
-                key={z.zona}
-                type="button"
-                disabled={!mensajero}
-                onClick={() => alternar(z.zona)}
-                aria-pressed={mensajero ? marcada : undefined}
-                className={`text-left rounded-lg border p-2.5 transition disabled:cursor-default ${clase}`}
-              >
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="font-mono font-semibold text-gray-900">{z.zona}</span>
-                  <span className="text-xs text-gray-500">{z.paquetes_leidos} paq.</span>
+      <div className="bg-white border-b border-gray-200 px-4 py-1.5 text-sm text-gray-600 text-center">
+        <span className="font-semibold text-gray-900">{asignadas}/{tablero.length}</span> zonas ·{" "}
+        <span className="font-semibold text-gray-900">{tablero.length - asignadas}</span> sin asignar ·{" "}
+        <span className="font-semibold text-gray-900">{paquetes}</span> leídos ·{" "}
+        <span className="font-semibold text-gray-900">{paquetesAsignados}</span> asignados
+      </div>
+
+      <div className="bg-white border-b border-gray-200 px-4 py-2">
+        <FlujoPaquetesNav className="max-w-md mx-auto" />
+      </div>
+
+      <div className="p-3 sm:p-4 w-full max-w-md mx-auto lg:max-w-6xl flex-1 grid gap-4 lg:grid-cols-2 lg:items-start">
+        <div className="flex flex-col gap-3 min-w-0">
+          <p className="hidden sm:block text-sm text-gray-500">
+            Ingresa el código del mensajero, marca sus zonas de hoy y guarda. Cada zona va completa a un
+            solo mensajero; los paquetes sueltos se le pasan pistoleando su serial.
+          </p>
+
+          <form onSubmit={buscar} className="flex gap-2">
+            <input
+              value={codigo}
+              onChange={(e) => setCodigo(e.target.value)}
+              placeholder="Código del mensajero"
+              autoComplete="off"
+              autoCapitalize="characters"
+              className="min-w-0 flex-1 border border-gray-300 rounded-lg px-3 py-2.5 text-base font-mono bg-white outline-none focus:ring-2 focus:ring-primary"
+            />
+            <button
+              type="submit"
+              disabled={!codigo.trim() || buscando}
+              className="shrink-0 bg-gray-800 hover:bg-gray-900 text-white font-medium px-5 py-2.5 rounded-lg disabled:opacity-40"
+            >
+              {buscando ? "Buscando…" : "Buscar"}
+            </button>
+          </form>
+
+          {error && (
+            <div role="alert" className="rounded-lg px-4 py-2.5 text-sm bg-red-50 text-red-800 border border-red-200">
+              {error}
+            </div>
+          )}
+          {ok && <div className="rounded-lg px-4 py-2.5 text-sm bg-green-50 text-green-800 border border-green-200">{ok}</div>}
+
+          {tableroQuery.isLoading ? (
+            <p className="text-sm text-gray-500">Cargando zonas…</p>
+          ) : (
+            <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 gap-2">
+              {tablero.map((z) => {
+                const marcada = elegidas.has(z.zona);
+                const deOtro = !!mensajero && !!z.mensajero && !mismoCodigo(z.mensajero.codigo, mensajero.codigo);
+                const clase = !mensajero
+                  ? z.mensajero ? "border-gray-200 bg-white" : "border-dashed border-gray-300 bg-gray-50"
+                  : marcada
+                    ? deOtro ? "border-amber-400 bg-amber-50 ring-2 ring-amber-300" : "border-primary bg-primary/10 ring-2 ring-primary/40"
+                    : deOtro ? "border-gray-200 bg-gray-100 text-gray-500" : "border-gray-200 bg-white hover:border-primary";
+                return (
+                  <button
+                    key={z.zona}
+                    type="button"
+                    disabled={!mensajero}
+                    onClick={() => alternar(z.zona)}
+                    aria-pressed={mensajero ? marcada : undefined}
+                    className={`min-w-0 min-h-[56px] text-left rounded-lg border p-2 transition disabled:cursor-default ${clase}`}
+                  >
+                    <div className="flex items-baseline justify-between gap-1">
+                      <span className="font-mono font-semibold text-base text-gray-900 truncate">{z.zona}</span>
+                      <span className="text-xs text-gray-500 shrink-0">{z.paquetes_leidos} paq.</span>
+                    </div>
+                    <p className={`text-xs truncate mt-0.5 ${z.mensajero ? "text-gray-700" : "text-gray-400"}`}>
+                      {z.mensajero ? z.mensajero.nombre : "Sin asignar"}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {mensajero && (cambios || choques) && (
+            <div className="sticky bottom-0 z-10 -mx-3 sm:mx-0 bg-white border-t sm:border sm:rounded-xl border-gray-200 px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-4px_12px_rgba(0,0,0,0.06)]">
+              {choques && (
+                <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm">
+                  <p className="font-medium text-amber-900 flex items-center gap-2">
+                    <AlertTriangle size={16} className="shrink-0" /> Estas zonas ya las tiene otro mensajero:
+                  </p>
+                  <ul className="mt-1 text-amber-900">
+                    {choques.choques.map((c) => (
+                      <li key={c.zona}>
+                        <span className="font-mono font-semibold">{c.zona}</span> — {c.nombre} ({c.codigo})
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-2 text-amber-800">¿Se las paso completas a {mensajero.nombre}?</p>
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      type="button"
+                      disabled={guardando}
+                      onClick={() => guardar(true)}
+                      className="flex-1 bg-primary hover:bg-primary-hover text-white font-medium px-4 py-2.5 rounded-lg disabled:opacity-40"
+                    >
+                      Sí, reasignar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setChoques(null)}
+                      className="flex-1 border border-gray-300 bg-white text-gray-700 font-medium px-4 py-2.5 rounded-lg"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
                 </div>
-                <p className={`text-xs truncate mt-0.5 ${z.mensajero ? "text-gray-700" : "text-gray-400"}`}>
-                  {z.mensajero ? z.mensajero.nombre : "Sin asignar"}
-                </p>
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {mensajero && (
-        <div className="mt-3 flex items-center gap-3">
-          <button
-            type="button"
-            disabled={!cambios || guardando}
-            onClick={() => guardar(false)}
-            className="bg-primary hover:bg-primary-hover text-white text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-40"
-          >
-            {guardando ? "Guardando…" : `Guardar zonas de ${mensajero.nombre}`}
-          </button>
-          {cambios && (
-            <button
-              type="button"
-              onClick={() => { setElegidas(new Set(mensajero.zonas)); setChoques(null); }}
-              className="text-sm text-gray-500 hover:underline"
-            >
-              Deshacer cambios
-            </button>
+              )}
+              {!choques && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setElegidas(new Set(mensajero.zonas)); setChoques(null); }}
+                    className="shrink-0 border border-gray-300 bg-white text-gray-700 font-medium px-3 py-2.5 rounded-lg text-sm"
+                  >
+                    Deshacer cambios
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!cambios || guardando}
+                    onClick={() => guardar(false)}
+                    className="min-w-0 flex-1 truncate bg-primary hover:bg-primary-hover text-white font-medium px-4 py-2.5 rounded-lg disabled:opacity-40"
+                  >
+                    {guardando ? "Guardando…" : `Guardar zonas de ${mensajero.nombre}`}
+                  </button>
+                </div>
+              )}
+            </div>
           )}
         </div>
-      )}
 
-      <TotalesPorMensajero
-        totales={totales}
-        cargando={totalesQuery.isLoading}
-        actual={mensajero?.codigo ?? null}
-        onElegir={(cod) => { setCodigo(cod); void cargarMensajero(cod); }}
-      />
+        <div className="flex flex-col gap-4 min-w-0">
+          {mensajero && (
+            <SerialesDelMensajero
+              mensajero={mensajero}
+              seriales={serialesQuery.data ?? []}
+              cargando={serialesQuery.isLoading}
+              onCambio={refrescar}
+              onMensajero={setMensajero}
+            />
+          )}
 
-      {mensajero && (
-        <SerialesDelMensajero
-          mensajero={mensajero}
-          seriales={serialesQuery.data ?? []}
-          cargando={serialesQuery.isLoading}
-          onCambio={refrescar}
-          onMensajero={setMensajero}
-        />
-      )}
-    </div>
-  );
-}
-
-function Cifra({ valor, etiqueta }: { valor: number | string; etiqueta: string }) {
-  return (
-    <div className="rounded-lg border border-gray-200 bg-white p-3 text-center">
-      <p className="text-xl font-bold text-gray-900">{valor}</p>
-      <p className="text-xs text-gray-500">{etiqueta}</p>
+          <TotalesPorMensajero
+            totales={totales}
+            cargando={totalesQuery.isLoading}
+            actual={mensajero?.codigo ?? null}
+            onElegir={(cod) => {
+              setCodigo(cod);
+              void cargarMensajero(cod);
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+          />
+        </div>
+      </div>
     </div>
   );
 }
@@ -310,42 +333,36 @@ function TotalesPorMensajero({ totales, cargando, actual, onElegir }: {
   onElegir: (codigo: string) => void;
 }) {
   return (
-    <div className="mt-6 rounded-xl border border-gray-200 bg-white p-4">
+    <div className="rounded-xl border border-gray-200 bg-white p-4">
       <h2 className="font-semibold text-gray-900">Paquetes por mensajero hoy</h2>
       {cargando ? (
         <p className="text-sm text-gray-500 mt-2">Cargando…</p>
       ) : totales.length === 0 ? (
         <p className="text-sm text-gray-500 mt-2">Todavía no hay mensajeros con zonas o paquetes asignados.</p>
       ) : (
-        <div className="mt-2 overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-gray-500 border-b border-gray-200">
-                <th className="py-1.5 pr-3 font-medium">Mensajero</th>
-                <th className="py-1.5 pr-3 font-medium">Zonas</th>
-                <th className="py-1.5 pr-3 font-medium text-right">Paquetes</th>
-                <th className="py-1.5 font-medium text-right">Reasignados</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {totales.map((t) => (
-                <tr
-                  key={t.codigo}
-                  onClick={() => onElegir(t.codigo)}
-                  className={`cursor-pointer hover:bg-gray-50 ${actual && mismoCodigo(actual, t.codigo) ? "bg-primary/10" : ""}`}
-                >
-                  <td className="py-1.5 pr-3">
+        <ul className="mt-2 -mx-2 divide-y divide-gray-100 text-sm">
+          {totales.map((t) => (
+            <li key={t.codigo}>
+              <button
+                type="button"
+                onClick={() => onElegir(t.codigo)}
+                className={`w-full text-left px-2 py-2.5 rounded-lg hover:bg-gray-50 ${actual && mismoCodigo(actual, t.codigo) ? "bg-primary/10" : ""}`}
+              >
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="min-w-0 truncate">
                     <span className="font-medium text-gray-900">{t.nombre}</span>
                     <span className="text-gray-500 font-mono text-xs"> · {t.codigo}</span>
-                  </td>
-                  <td className="py-1.5 pr-3 font-mono text-xs text-gray-600">{t.zonas.join(", ") || "—"}</td>
-                  <td className="py-1.5 pr-3 text-right font-bold text-gray-900">{t.paquetes}</td>
-                  <td className="py-1.5 text-right text-gray-600">{t.reasignados || "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  </span>
+                  <span className="shrink-0 text-lg font-bold text-gray-900">{t.paquetes}</span>
+                </div>
+                <div className="flex justify-between gap-3 text-xs text-gray-500 mt-0.5">
+                  <span className="min-w-0 font-mono break-words">{t.zonas.join(", ") || "Sin zonas"}</span>
+                  {t.reasignados > 0 && <span className="shrink-0">{t.reasignados} reasignado{t.reasignados === 1 ? "" : "s"}</span>}
+                </div>
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );
@@ -362,13 +379,16 @@ function SerialesDelMensajero({ mensajero, seriales, cargando, onCambio, onMensa
   const [serial, setSerial] = useState("");
   const [ultimo, setUltimo] = useState<AsignacionSerial | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [camara, setCamara] = useState(false);
   const campoRef = useRef<HTMLInputElement>(null);
+  const ultimaLecturaRef = useRef<{ codigo: string; at: number }>({ codigo: "", at: 0 });
 
-  async function pistolear(e: React.FormEvent) {
-    e.preventDefault();
-    const s = serial.trim();
-    setSerial("");
+  async function asignar(raw: string) {
+    const s = raw.trim();
     if (!s) return;
+    const ahora = Date.now();
+    if (ultimaLecturaRef.current.codigo === s && ahora - ultimaLecturaRef.current.at < ANTIRREBOTE_MS) return;
+    ultimaLecturaRef.current = { codigo: s, at: ahora };
     setError(null);
     try {
       setUltimo((await asignacionZonasApi.asignarSerial(mensajero.codigo, s)).data);
@@ -378,8 +398,39 @@ function SerialesDelMensajero({ mensajero, seriales, cargando, onCambio, onMensa
       setUltimo(null);
       setError(typeof detail === "string" ? detail : "No se pudo asignar el serial");
     } finally {
-      campoRef.current?.focus();
+      // Con la cámara abierta no se enfoca el campo: en el celular sacaría el teclado
+      if (!camara) campoRef.current?.focus();
     }
+  }
+
+  // La cámara llama siempre a la versión más reciente (con el mensajero actual)
+  const asignarRef = useRef(asignar);
+  asignarRef.current = asignar;
+
+  useEffect(() => {
+    if (!camara) return;
+    const scanner = new Html5Qrcode(SCANNER_ELEMENT_ID, { formatsToSupport: SCAN_FORMATS, verbose: false });
+    scanner
+      .start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: { width: 250, height: 150 } },
+        (texto) => void asignarRef.current(texto),
+        () => {},
+      )
+      .catch(() => {
+        setError("No se pudo abrir la cámara");
+        setCamara(false);
+      });
+    return () => {
+      scanner.stop().then(() => scanner.clear()).catch(() => {});
+    };
+  }, [camara]);
+
+  function pistolear(e: React.FormEvent) {
+    e.preventDefault();
+    const s = serial;
+    setSerial("");
+    void asignar(s);
   }
 
   async function devolver(s: string) {
@@ -396,7 +447,7 @@ function SerialesDelMensajero({ mensajero, seriales, cargando, onCambio, onMensa
   const reasignados = seriales.filter((s) => s.origen === "serial").length;
 
   return (
-    <div className="mt-6 grid gap-4 lg:grid-cols-2">
+    <>
       <div className="rounded-xl border border-gray-200 bg-white p-4">
         <h2 className="font-semibold text-gray-900">Pasar paquetes sueltos a {mensajero.nombre}</h2>
         <p className="text-sm text-gray-500 mt-0.5">
@@ -409,16 +460,27 @@ function SerialesDelMensajero({ mensajero, seriales, cargando, onCambio, onMensa
             onChange={(e) => setSerial(e.target.value)}
             placeholder="Serial del paquete"
             autoComplete="off"
-            className="min-w-0 flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono outline-none focus:ring-2 focus:ring-primary"
+            autoCapitalize="characters"
+            className="min-w-0 flex-1 border border-gray-300 rounded-lg px-3 py-2.5 text-base font-mono outline-none focus:ring-2 focus:ring-primary"
           />
           <button
             type="submit"
             disabled={!serial.trim()}
-            className="bg-gray-800 hover:bg-gray-900 text-white text-sm font-medium px-4 rounded-lg disabled:opacity-40"
+            className="shrink-0 bg-gray-800 hover:bg-gray-900 text-white font-medium px-4 rounded-lg disabled:opacity-40"
           >
             Asignar
           </button>
+          <button
+            type="button"
+            onClick={() => setCamara((c) => !c)}
+            aria-label={camara ? "Cerrar cámara" : "Leer con la cámara"}
+            title={camara ? "Cerrar cámara" : "Leer con la cámara"}
+            className={`shrink-0 rounded-lg border px-3 ${camara ? "border-primary bg-primary text-white" : "border-gray-300 text-gray-700"}`}
+          >
+            {camara ? <CameraOff size={20} /> : <Camera size={20} />}
+          </button>
         </form>
+        {camara && <div id={SCANNER_ELEMENT_ID} className="mt-3 w-full rounded-xl overflow-hidden bg-black" />}
         {error && <p role="alert" className="mt-2 text-sm text-red-700">{error}</p>}
         {ultimo && (
           <p className={`mt-2 text-sm ${ultimo.ya_era_suyo ? "text-amber-800" : "text-green-800"}`}>
@@ -446,37 +508,42 @@ function SerialesDelMensajero({ mensajero, seriales, cargando, onCambio, onMensa
         ) : seriales.length === 0 ? (
           <p className="text-sm text-gray-500 mt-2">Todavía no tiene paquetes leídos en sus zonas.</p>
         ) : (
-          <ul className="mt-2 max-h-80 overflow-y-auto divide-y divide-gray-100 text-sm">
+          <ul className="mt-2 lg:max-h-96 lg:overflow-y-auto divide-y divide-gray-100 text-sm">
             {seriales.map((s) => (
-              <li key={s.serial} className="py-1.5 flex items-center justify-between gap-2">
-                <span className="font-mono">
-                  <span className="text-gray-400">{s.serial.slice(0, -4)}</span>
-                  <span className="font-bold text-gray-900">{s.serial.slice(-4)}</span>
-                </span>
-                <span className="flex items-center gap-3 shrink-0">
-                  <span className="text-gray-600">{s.zona ?? "—"}</span>
+              <li key={s.serial} className="py-2">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="min-w-0 font-mono break-all">
+                    <span className="text-gray-400">{s.serial.slice(0, -4)}</span>
+                    <span className="font-bold text-gray-900">{s.serial.slice(-4)}</span>
+                  </span>
+                  <span className="shrink-0 text-gray-600">{s.zona ?? "—"}</span>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 mt-0.5">
                   <EstadoImile serial={s} />
                   {s.origen === "serial" && (
                     <button
                       type="button"
                       onClick={() => devolver(s.serial)}
-                      className="inline-flex items-center gap-1 text-xs text-primary font-medium"
+                      className="ml-auto inline-flex items-center gap-1 text-xs text-primary font-medium py-1.5"
                       title="Deshacer: vuelve al mensajero de su zona"
                     >
                       <RotateCcw size={12} /> Devolver a su zona
                     </button>
                   )}
-                </span>
+                </div>
+                <MotivoImile serial={s} />
               </li>
             ))}
           </ul>
         )}
       </div>
-    </div>
+    </>
   );
 }
 
 const ASIGNADO_EN_IMILE = new Set(["ok", "repetido"]);
+// No se vuelven a mandar: lo ya asignado y las guías que iMile tiene cerradas
+const SIN_REENVIO = new Set([...ASIGNADO_EN_IMILE, "cerrada"]);
 
 const ETIQUETA_IMILE: Record<string, { texto: string; clase: string }> = {
   ok: { texto: "iMile ✓", clase: "text-green-700" },
@@ -484,6 +551,7 @@ const ETIQUETA_IMILE: Record<string, { texto: string; clase: string }> = {
   bloqueado: { texto: "iMile: bloqueado", clase: "text-red-700" },
   error: { texto: "iMile: error", clase: "text-red-700" },
   sin_confirmar: { texto: "iMile: sin confirmar", clase: "text-amber-700" },
+  cerrada: { texto: "Cerrada en iMile", clase: "text-gray-600" },
 };
 
 function EstadoImile({ serial: s }: { serial: SerialDelMensajero }) {
@@ -492,7 +560,14 @@ function EstadoImile({ serial: s }: { serial: SerialDelMensajero }) {
     return s.imile_mensaje ? <span className="text-xs text-amber-700" title={s.imile_mensaje}>iMile: con otro</span> : null;
   }
   const e = ETIQUETA_IMILE[s.imile_estado] ?? { texto: `iMile: ${s.imile_estado}`, clase: "text-red-700" };
-  return <span className={`text-xs ${e.clase}`} title={s.imile_mensaje ?? undefined}>{e.texto}</span>;
+  return <span className={`text-xs ${e.clase}`}>{e.texto}</span>;
+}
+
+/** Lo que respondió iMile, a la vista, cuando el paquete no quedó asignado. */
+function MotivoImile({ serial: s }: { serial: SerialDelMensajero }) {
+  if (!s.imile_mensaje || ASIGNADO_EN_IMILE.has(s.imile_estado ?? "")) return null;
+  const clase = s.imile_estado === "cerrada" || !s.imile_estado ? "text-gray-500" : "text-red-700";
+  return <p className={`text-xs mt-0.5 break-words ${clase}`}>{s.imile_mensaje}</p>;
 }
 
 /** Paso 3.3: pasa a iMile ("Asignar repartidor") los paquetes del mensajero, uno por uno. */
@@ -504,7 +579,7 @@ function AsignarEnImile({ mensajero, seriales, onCambio, onMensajero }: {
 }) {
   const [error, setError] = useState<string | null>(null);
   const [nombre, setNombre] = useState(mensajero.nombre_imile ?? "");
-  const pendientes = seriales.filter((s) => !ASIGNADO_EN_IMILE.has(s.imile_estado ?? "")).length;
+  const pendientes = seriales.filter((s) => !SIN_REENVIO.has(s.imile_estado ?? "")).length;
 
   const envioQuery = useQuery({
     queryKey: ["asignacion-envio-imile", mensajero.codigo],
@@ -555,7 +630,7 @@ function AsignarEnImile({ mensajero, seriales, onCambio, onMensajero }: {
           type="button"
           disabled={enCurso || pendientes === 0}
           onClick={enviar}
-          className="inline-flex items-center gap-1.5 bg-primary hover:bg-primary-hover text-white text-sm font-medium px-3 py-1.5 rounded-lg disabled:opacity-40"
+          className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 bg-primary hover:bg-primary-hover text-white text-sm font-medium px-3 py-2.5 sm:py-1.5 rounded-lg disabled:opacity-40"
         >
           <Send size={14} />
           {enCurso ? "Asignando en iMile…" : pendientes === 0 ? "Todo asignado en iMile" : `Asignar en iMile (${pendientes})`}
@@ -573,16 +648,16 @@ function AsignarEnImile({ mensajero, seriales, onCambio, onMensajero }: {
       {envio?.error && (
         <div role="alert" className="mt-2 rounded-lg border border-red-200 bg-red-50 p-2.5 text-red-800">
           <p>{envio.error}</p>
-          <form onSubmit={guardarNombre} className="flex flex-wrap items-center gap-2 mt-2">
+          <form onSubmit={guardarNombre} className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 mt-2">
             <label htmlFor="nombre-imile" className="text-xs text-red-900">Nombre exacto en iMile:</label>
             <input
               id="nombre-imile"
               value={nombre}
               onChange={(e) => setNombre(e.target.value)}
               placeholder="Como sale en iMile, ej. Mariela Pabon | D21026309101"
-              className="min-w-0 flex-1 border border-gray-300 rounded-lg px-2 py-1 text-sm bg-white outline-none focus:ring-2 focus:ring-primary"
+              className="min-w-0 flex-1 border border-gray-300 rounded-lg px-2 py-2 sm:py-1 text-base sm:text-sm bg-white outline-none focus:ring-2 focus:ring-primary"
             />
-            <button type="submit" className="bg-gray-800 text-white text-xs font-medium px-3 py-1.5 rounded-lg">
+            <button type="submit" className="bg-gray-800 text-white text-sm sm:text-xs font-medium px-3 py-2.5 sm:py-1.5 rounded-lg">
               Guardar
             </button>
           </form>

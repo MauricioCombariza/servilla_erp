@@ -77,6 +77,12 @@ async def test_mensajero_que_no_se_puede_elegir_no_manda_nada(asignacion, nombre
     assert _enviados() == []
 
 
-def test_en_asignar_solo_el_1119_es_error_conocido():
-    body = {"status": "success", "resultObject": {"blockCode": "1121", "blockInfo": "Otro", "voiceType": "fail"}}
-    assert clasificar_respuesta(body, BLOQUEOS_ASIGNACION).estado == EstadoIngreso.BLOQUEADO
+@pytest.mark.parametrize("codigo,info,estado", [
+    ("1119", "Sin información de pedido()", EstadoIngreso.ERROR),
+    ("1118", "Guía ya cerrada", EstadoIngreso.CERRADA),  # respuesta real del 2026-10-23
+    ("1121", "Otro", EstadoIngreso.BLOQUEADO),  # en esta pantalla no se conoce: para revisión
+])
+def test_bloqueos_conocidos_al_asignar(codigo, info, estado):
+    body = {"status": "success", "resultObject": {"blockCode": codigo, "blockInfo": info, "voiceType": "fail"}}
+    r = clasificar_respuesta(body, BLOQUEOS_ASIGNACION)
+    assert (r.estado, r.mensaje) == (estado, info)
