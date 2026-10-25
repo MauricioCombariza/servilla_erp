@@ -22,6 +22,18 @@ RUN printf 'server {\n\
     location / {\n\
         try_files $uri $uri/ /index.html;\n\
     }\n\
+    # La app y su número de versión nunca se guardan en el navegador: tras un despliegue\n\
+    # se ve la versión nueva sin volver a iniciar sesión (src/components/AlDia.tsx)\n\
+    location = /index.html {\n\
+        add_header Cache-Control "no-cache";\n\
+    }\n\
+    location = /version.json {\n\
+        add_header Cache-Control "no-store";\n\
+    }\n\
+    # Los archivos de /assets llevan hash en el nombre: no cambian nunca\n\
+    location /assets/ {\n\
+        add_header Cache-Control "public, max-age=31536000, immutable";\n\
+    }\n\
     gzip on;\n\
     gzip_types text/plain text/css application/json application/javascript;\n\
 }\n' > /etc/nginx/conf.d/default.conf
