@@ -132,8 +132,19 @@ function renderAsignar(c) {
     e.target.value = "";
   });
 }
+function renderDescarga(c) {
+  c.innerHTML = '<h2>Descarga de escaneo</h2><label>Pallet/ Bag /Waybill NO.</label><input name="scanNumber">';
+  document.querySelector("input[name=scanNumber]").addEventListener("keydown", async e => {
+    if (e.key !== "Enter") return;
+    await fetch("/lm/express/ops/v1/biz/unloading/submit", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({scanNumber: e.target.value.trim()})});
+    e.target.value = "";
+  });
+}
 function render() {
   const c = document.getElementById("contenido");
+  if (location.hash.includes("dsOffloadingScan")) { renderDescarga(c); return; }
   if (location.hash.includes("assignDA")) { renderAsignar(c); return; }
   if (!location.hash.includes("arrivalScanAWB")) { c.textContent = "Inicio"; return; }
   c.innerHTML = '<h2>Llegada(Waybill No)</h2><label>Número de Guía</label><input name="scanNumber">' +

@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.paquetes_despacho import PaqueteDespacho
 from app.models.tulas import ESTADO_ABIERTA, ESTADO_CERRADA, Tula, TulaSerial
+from app.services.imile_descarga_grabacion import grabar_si_toca
 from app.services.imile_ingreso import imile_ingreso
 from app.services.imile_tula import ConsultaTula, imile_tula
 from app.services.paquetes_despacho_service import Destino, buscar_destino
@@ -131,6 +132,11 @@ async def abrir_tula(
         if not cerrar_anterior:
             raise TulaAbiertaError(anterior)
         await _cerrar(db, anterior)
+
+    # Una sola vez (IMILE_GRABAR_DESCARGA): se descarga la tula en iMile y se graba cómo
+    # responde, para automatizar la descarga. Después la consulta ya la encuentra.
+    if codigo is not None:
+        await grabar_si_toca(codigo)
 
     # El total escrito a mano manda; si no hay, se pregunta a iMile
     imile_total = None
