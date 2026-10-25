@@ -40,6 +40,7 @@ import { UsuariosRolesPage } from "@/pages/admin/UsuariosRolesPage";
 import { GeocercasPage } from "@/pages/geocercas/GeocercasPage";
 import { GenerarDatPage } from "@/pages/generar-dat/GenerarDatPage";
 import { Placeholder } from "@/pages/Placeholder";
+import { AlDia } from "@/components/AlDia";
 
 const qc = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -67,6 +68,7 @@ export default function App() {
   return (
     <QueryClientProvider client={qc}>
       <BrowserRouter>
+        <AlDia />
         <Routes>
           <Route path="/login" element={<Login />} />
           {/* Paso 2.7: pública, se abre con el QR del día (sin iniciar sesión) */}
