@@ -13,6 +13,9 @@ Cambios respecto a dirnum (aprobados por el usuario):
   - 2026-10-21: "_" separa como "-" ("calle 24_78_17" → "CL 24 78 17").
   - 2026-10-21: Avenida La Esperanza (cualquier forma: AV/AV./AVENIDA/AVDA, mayúsculas o
     minúsculas, con o sin "LA"/"DE LA") → CR 60. "Barrio La Esperanza" no se toca.
+  - 2026-10-26: Autopista Norte (AUTOPISTA/AUTOP/AUTO/AUT NORTE, AUTONORTE, con o sin AV)
+    según la calle que sigue: CL 80–99 → CR 20, CL 100–270 → CR 45. Fuera de ese rango
+    no se toca.
 """
 
 import re
@@ -20,6 +23,21 @@ import re
 import pandas as pd
 
 # ========== FUNCIONES DE ESTANDARIZACION ==========
+
+# "Autopista Norte # 93-85": el primer número es la calle; la carrera depende del tramo
+_AUTOPISTA_NORTE = re.compile(
+    r'\b(?:AV\w*\s+)?AUT\w*\s*NORTE\b(?=[\s#°]*(?:No?\b)?[\s#°]*(\d+))', re.IGNORECASE
+)
+
+
+def _carrera_autopista_norte(m):
+    calle = int(m.group(1))
+    if 80 <= calle <= 99:
+        return 'CR 20'
+    if 100 <= calle <= 270:
+        return 'CR 45'
+    return m.group(0)
+
 
 def preprocesar_direccion(direccion):
     """
@@ -65,6 +83,7 @@ def preprocesar_direccion(direccion):
     }
     for patron, reemplazo in nombres_vias.items():
         direccion = re.sub(patron, reemplazo, direccion, flags=re.IGNORECASE)
+    direccion = _AUTOPISTA_NORTE.sub(_carrera_autopista_norte, direccion)
 
     # AV + número (sin nombre) → CR (Avenida/Carrera): "AV 9" → "CR 9"
     direccion = re.sub(r'\b(?:AV|AVENIDA)\s+(\d)', r'CR \1', direccion, flags=re.IGNORECASE)
