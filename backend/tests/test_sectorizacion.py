@@ -9,6 +9,7 @@ dirnum (los 3 Excel), salvo los cambios aprobados el 2026-10-08:
   - en las zonas, la paridad de placa solo cuenta en la vía principal
   - "SUR ESTE" (o SUR en el medio + ESTE al final) ubica la dirección al sur-oriente
 Y los del 2026-10-21: "_" separa como "-"; Avenida La Esperanza (cualquier forma) = CR 60.
+Y el del 2026-10-26: Autopista Norte = CR 20 entre CL 80 y 99, CR 45 entre CL 100 y 270.
 """
 import csv
 import importlib.util
@@ -212,6 +213,27 @@ def test_guion_bajo_separa_como_guion(indice, direccion, dir_std):
 ])
 def test_avenida_la_esperanza_es_la_carrera_60(indice, direccion, dir_std):
     assert sectorizar(direccion, indice).direccion_estandarizada == dir_std
+
+
+@pytest.mark.parametrize("direccion,dir_std", [
+    ("autopista norte # 93-85 restaurante", "CR 20 93 85"),  # direcciones reales de despachos
+    ("Autopista norte #87-33 clínica Retornar Clínica Retornar", "CR 20 87 33"),
+    ("AUTOPISTA NORTE 80 10", "CR 20 80 10"),
+    ("Autopista Norte No. 99A-20", "CR 20 99A 20"),
+    ("AUTOPISTA NORTE # 100-15", "CR 45 100 15"),
+    ("Av. Autopista Norte # 127-45 Apto 302", "CR 45 127 45"),
+    ("Autop Norte 147 20", "CR 45 147 20"),
+    ("AUTONORTE #170-50", "CR 45 170 50"),
+    ("aut norte 245 10", "CR 45 245 10"),
+    ("Autopista Norte 270 05", "CR 45 270 05"),
+])
+def test_autopista_norte_es_carrera_20_o_45_segun_la_calle(indice, direccion, dir_std):
+    assert sectorizar(direccion, indice).direccion_estandarizada == dir_std
+
+
+@pytest.mark.parametrize("direccion", ["Autopista Norte # 79-10", "Autopista Norte # 271-10"])
+def test_autopista_norte_fuera_de_los_tramos_no_se_traduce(indice, direccion):
+    assert not (sectorizar(direccion, indice).direccion_estandarizada or "").startswith("CR")
 
 
 def test_barrio_la_esperanza_no_cambia_la_via(indice):
