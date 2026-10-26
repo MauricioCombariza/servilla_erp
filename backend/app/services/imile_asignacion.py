@@ -15,6 +15,7 @@ forceOperate=true (forzar la asignación): la automatización SIEMPRE cancela.
 La sesión se pide serial por serial (y no para todo el lote) para no frenar el ingreso
 de paquetes de quien está escaneando tulas, que usa el mismo navegador.
 """
+import logging
 from dataclasses import dataclass
 
 from playwright.async_api import Page
@@ -28,6 +29,8 @@ from app.services.imile_ingreso import (
     clasificar_respuesta,
 )
 from app.services.imile_sesion import ImileSesion, imile_sesion
+
+log = logging.getLogger(__name__)
 
 RUTA_ASIGNAR = "/#/DSOperation/DispatchManagement/assignDA"
 RUTA_API_ASIGNAR = "/bizAssignDaScan/submit"
@@ -51,6 +54,9 @@ _ESPERA_RESPUESTA_MS = 20_000
 _ESPERA_BUSQUEDA_MS = 10_000
 _PASO_BUSQUEDA_MS = 250
 _ESPERA_ABRIR_MS = 3_000
+# Si algo tapa el selector DA (ventana o recorrido de iMile) el clic no entra nunca: se
+# corta antes de los 30 s por defecto para recargar la pantalla y reintentar
+_CLIC_DA_MS = 8_000
 
 
 class MensajeroImileNoEncontradoError(Exception):
@@ -89,10 +95,11 @@ def _buscado(texto: str) -> MensajeroImile:
 
 class ImileAsignacion:
     def __init__(self, sesion: ImileSesion = imile_sesion, espera_respuesta_ms: int = _ESPERA_RESPUESTA_MS,
-                 espera_busqueda_ms: int = _ESPERA_BUSQUEDA_MS):
+                 espera_busqueda_ms: int = _ESPERA_BUSQUEDA_MS, clic_da_ms: int = _CLIC_DA_MS):
         self._sesion = sesion
         self._espera_respuesta_ms = espera_respuesta_ms
         self._espera_busqueda_ms = espera_busqueda_ms
+        self._clic_da_ms = clic_da_ms
 
     async def asignar(self, nombre: str, serial: str) -> ResultadoIngreso:
         """Asigna un serial al mensajero `nombre` de iMile. Lanza
@@ -101,7 +108,19 @@ class ImileAsignacion:
         async with self._sesion.usar() as page:
             await self._abrir_asignar(page)
             await cancelar_ventanas(page)
-            await self._elegir_mensajero(page, nombre)
+            try:
+                await self._elegir_mensajero(page, nombre)
+            except PlaywrightTimeoutError:
+                # La página quedó trabada (2026-10-26: todos los seriales de un lote fallaban
+                # al hacer clic en el selector DA): se recarga la pantalla y se reintenta una vez
+                try:
+                    await page.keyboard.press("Escape")
+                    await cancelar_ventanas(page)
+                    await self._abrir_asignar(page, recargar=True)
+                    await self._elegir_mensajero(page, nombre)
+                except PlaywrightTimeoutError:
+                    await self._guardar_pantalla(page)
+                    raise
             campo = page.locator(CAMPO_GUIA).first
             await campo.fill(serial)
             try:
@@ -117,12 +136,23 @@ class ImileAsignacion:
                 await cancelar_ventanas(page, esperar=True)
         return clasificar_respuesta(body, BLOQUEOS_ASIGNACION)
 
-    async def _abrir_asignar(self, page: Page) -> None:
-        if "assignDA" in page.url and await page.locator(CAMPO_GUIA).count() > 0:
+    async def _abrir_asignar(self, page: Page, recargar: bool = False) -> None:
+        if not recargar and "assignDA" in page.url and await page.locator(CAMPO_GUIA).count() > 0:
             return
         await page.goto(f"{self._sesion.base_url}{RUTA_ASIGNAR}")
+        if recargar:  # goto a la misma ruta con # no recarga el documento
+            await page.reload()
         await page.locator(CAMPO_GUIA).first.wait_for(state="visible", timeout=_CARGA_PAGINA_MS)
         await self._sesion.cerrar_recorrido(page)
+
+    async def _guardar_pantalla(self, page: Page) -> None:
+        """Para ver después qué tapaba el selector DA."""
+        ruta = self._sesion.state_path.parent / "imile_asignar_error.png"
+        try:
+            await page.screenshot(path=str(ruta), full_page=True)
+            log.warning("Selector DA de iMile tapado; pantalla guardada en %s", ruta)
+        except Exception:  # noqa: BLE001
+            log.exception("No se pudo guardar la pantalla del selector DA tapado")
 
     async def _elegir_mensajero(self, page: Page, nombre: str) -> MensajeroImile:
         buscado = _buscado(nombre)
@@ -132,12 +162,12 @@ class ImileAsignacion:
             return actual
 
         desplegable = page.locator(DESPLEGABLE).last
-        await page.locator(SELECTOR_DA).first.click()
+        await page.locator(SELECTOR_DA).first.click(timeout=self._clic_da_ms)
         try:
             await desplegable.wait_for(state="visible", timeout=_ESPERA_ABRIR_MS)
         except PlaywrightTimeoutError:
             # Si ya estaba abierto, ese clic lo cerró: se vuelve a abrir
-            await page.locator(SELECTOR_DA).first.click()
+            await page.locator(SELECTOR_DA).first.click(timeout=self._clic_da_ms)
             await desplegable.wait_for(state="visible", timeout=_CARGA_PAGINA_MS)
         await desplegable.locator("input").first.fill(buscado.nombre)
 
