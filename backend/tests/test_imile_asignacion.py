@@ -2,6 +2,7 @@
 real contra el iMile FALSO de tests/fake_imile.py, que responde con el mismo JSON que
 iMile real (.../bizAssignDaScan/submit). No tocan iMile."""
 import pytest
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from app.config import settings
 from app.services.imile_asignacion import ImileAsignacion, MensajeroImileNoEncontradoError
@@ -25,7 +26,7 @@ async def asignacion(fake_imile_url, tmp_path, monkeypatch):
     sesion = ImileSesion(base_url=fake_imile_url, state_path=tmp_path / "sesion.json",
                          login_timeout_ms=3_000, espera_carga_ms=200,
                          recorrido_quieto_ms=1_000, recorrido_max_ms=5_000)
-    yield ImileAsignacion(sesion=sesion, espera_respuesta_ms=5_000, espera_busqueda_ms=4_000)
+    yield ImileAsignacion(sesion=sesion, espera_respuesta_ms=5_000, espera_busqueda_ms=4_000, clic_da_ms=1_500)
     await sesion.cerrar()
 
 
@@ -75,6 +76,35 @@ async def test_mensajero_que_no_se_puede_elegir_no_manda_nada(asignacion, nombre
     with pytest.raises(MensajeroImileNoEncontradoError):
         await asignacion.asignar(nombre, "IM200007")
     assert _enviados() == []
+
+
+# Algo transparente encima de toda la página (como quedó iMile el 2026-10-26): el selector DA
+# se ve, pero el clic nunca le llega
+TAPAR = """() => { const d = document.createElement("div"); d.id = "tapa";
+  d.style.cssText = "position:fixed;inset:0;z-index:99999"; document.body.appendChild(d); }"""
+
+
+async def test_selector_tapado_se_recarga_la_pantalla_y_asigna(asignacion):
+    await asignacion.asignar("Juan Porras", "IM200010")
+    async with asignacion._sesion.usar() as page:
+        await page.evaluate(TAPAR)
+
+    r = await asignacion.asignar("Juan Carlos Rodriguez", "IM200011")  # otro mensajero: hay que abrir el selector
+
+    assert r.estado == EstadoIngreso.OK
+    assert [(a[0], a[2]) for a in _enviados()][-1] == ("D21038000001", "IM200011")
+
+
+async def test_selector_que_sigue_tapado_tras_recargar_falla_sin_mandar_nada(asignacion):
+    await asignacion.asignar("Juan Porras", "IM200012")
+    async with asignacion._sesion.usar() as page:
+        await page.add_init_script(f"addEventListener('DOMContentLoaded', {TAPAR})")
+        await page.evaluate(TAPAR)
+
+    with pytest.raises(PlaywrightTimeoutError):
+        await asignacion.asignar("Juan Carlos Rodriguez", "IM200013")
+    assert [a[2] for a in _enviados()] == ["IM200012"]
+    assert (asignacion._sesion.state_path.parent / "imile_asignar_error.png").exists()  # para ver qué lo tapaba
 
 
 @pytest.mark.parametrize("codigo,info,estado", [
