@@ -78,6 +78,38 @@ async def test_mensajero_que_no_se_puede_elegir_no_manda_nada(asignacion, nombre
     assert _enviados() == []
 
 
+@pytest.mark.parametrize("nombre", ["carlos perez", "Rojas Carlos", "Carlos Pérez"])
+async def test_elige_el_unico_cuyo_nombre_trae_todas_las_palabras(asignacion, nombre):
+    # En el ERP sin tildes, sin el segundo apellido o en otro orden que en iMile
+    await asignacion.asignar(nombre, "IM200014")
+    assert [(a[0], a[1]) for a in _enviados()] == [("D21050000001", "Carlos Pérez Rojas")]
+
+
+async def test_si_imile_no_trae_nada_con_el_nombre_completo_busca_por_el_apellido(asignacion):
+    # En iMile quedó "Diana  Mora" (doble espacio): buscar "Diana Mora" no trae nada
+    await asignacion.asignar("Diana Mora", "IM200018")
+    assert [a[0] for a in _enviados()] == ["D21050000002"]
+
+
+async def test_el_nombre_exacto_gana_al_que_lo_contiene(asignacion):
+    await asignacion.asignar("Juan Carlos", "IM200015")  # solo "Juan Carlos Rodriguez" trae ambas
+    await asignacion.asignar("Juan Porras", "IM200016")  # exacto, aunque otro la contuviera
+    assert [a[0] for a in _enviados()] == ["D21038000001", "D21043330501"]
+
+
+@pytest.mark.parametrize("nombre,detalle", [
+    ("Rodriguez Ana", "(iMile mostró: Juan Carlos Rodriguez | D21038000001)"),
+    ("Pedro Inexistente", "(iMile no devolvió resultados al buscarlo)"),
+    ("Ana Ruiz", "aparece 2 veces en la lista de mensajeros de iMile (Ana Ruiz | D21000000001; Ana Ruiz | D21000000002)"),
+])
+async def test_el_error_dice_que_mostro_imile(asignacion, nombre, detalle):
+    # Para que se pueda copiar la opción correcta a "Nombre exacto en iMile"
+    with pytest.raises(MensajeroImileNoEncontradoError) as e:
+        await asignacion.asignar(nombre, "IM200017")
+    assert str(e.value).endswith(detalle)
+    assert _enviados() == []
+
+
 # Algo transparente encima de toda la página (como quedó iMile el 2026-10-26): el selector DA
 # se ve, pero el clic nunca le llega
 TAPAR = """() => { const d = document.createElement("div"); d.id = "tapa";

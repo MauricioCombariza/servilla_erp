@@ -30,7 +30,8 @@ BLOQUEO_NO_EXISTE = ("1119", "Sin información de pedido()")
 BLOQUEO_PROBLEMA = ("1121", "No registrar Motivo Problema")
 # Paso 3.3: mensajeros del selector DA ("Nombre | código"); "Ana Ruiz" está dos veces
 MENSAJEROS_IMILE = [("Juan Porras", "D21043330501"), ("Juan Carlos Rodriguez", "D21038000001"),
-                    ("Ana Ruiz", "D21000000001"), ("Ana Ruiz", "D21000000002")]
+                    ("Ana Ruiz", "D21000000001"), ("Ana Ruiz", "D21000000002"),
+                    ("Carlos Pérez Rojas", "D21050000001"), ("Diana  Mora", "D21050000002")]
 # El selector DA muestra los resultados de la búsqueda con demora (más que el 1,5 s fijo
 # que esperaba la primera versión y que no alcanzó en producción el 2026-10-23)
 DEMORA_BUSQUEDA_MS = 2_000

@@ -16,6 +16,7 @@ La sesión se pide serial por serial (y no para todo el lote) para no frenar el 
 de paquetes de quien está escaneando tulas, que usa el mismo navegador.
 """
 import logging
+import unicodedata
 from dataclasses import dataclass
 
 from playwright.async_api import Page
@@ -77,14 +78,39 @@ def _opcion(texto: str) -> MensajeroImile | None:
     return MensajeroImile(nombre.strip(), codigo.strip())
 
 
+def _palabras(texto: str) -> list[str]:
+    """'  Juan  Porrás ' → ['juan', 'porras']: sin importar mayúsculas, espacios ni tildes."""
+    sin_tildes = "".join(c for c in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(c))
+    return sin_tildes.casefold().split()
+
+
 def _mismo_nombre(a: str, b: str) -> bool:
-    return " ".join(a.split()).casefold() == " ".join(b.split()).casefold()
+    return _palabras(a) == _palabras(b)
 
 
 def _es_el_buscado(m: MensajeroImile, buscado: MensajeroImile) -> bool:
     if buscado.codigo:
         return m.codigo.casefold() == buscado.codigo.casefold()
     return _mismo_nombre(m.nombre, buscado.nombre)
+
+
+def _coincidencias(textos: list[str], buscado: MensajeroImile) -> list[int]:
+    """Posiciones de las opciones del selector DA que son el mensajero buscado. Sin código,
+    si ninguna tiene el nombre exacto valen las que traen todas sus palabras en cualquier
+    orden ("Juan Porras" → "Juan Porras Díaz", "Porras Juan"); quien llama exige que sea una."""
+    opciones = [(i, m) for i, t in enumerate(textos) if (m := _opcion(t))]
+    exactas = [i for i, m in opciones if _es_el_buscado(m, buscado)]
+    if exactas or buscado.codigo:
+        return exactas
+    palabras = set(_palabras(buscado.nombre))
+    return [i for i, m in opciones if palabras <= set(_palabras(m.nombre))]
+
+
+def _otra_busqueda(nombre: str) -> str | None:
+    """Si iMile no trae nada con el nombre completo (otro orden, segundo nombre en medio),
+    se busca por la palabra más larga, normalmente el apellido."""
+    palabras = nombre.split()
+    return max(palabras, key=len) if len(palabras) > 1 else None
 
 
 def _buscado(texto: str) -> MensajeroImile:
@@ -169,32 +195,42 @@ class ImileAsignacion:
             # Si ya estaba abierto, ese clic lo cerró: se vuelve a abrir
             await page.locator(SELECTOR_DA).first.click(timeout=self._clic_da_ms)
             await desplegable.wait_for(state="visible", timeout=_CARGA_PAGINA_MS)
-        await desplegable.locator("input").first.fill(buscado.nombre)
-
-        opciones = desplegable.locator(OPCION_DA)
-        encontradas: list[tuple[int, MensajeroImile]] = []
-        for _ in range(max(1, self._espera_busqueda_ms // _PASO_BUSQUEDA_MS)):
-            await page.wait_for_timeout(_PASO_BUSQUEDA_MS)
-            encontradas = []
-            for i in range(await opciones.count()):
-                m = _opcion(await opciones.nth(i).inner_text())
-                if m and _es_el_buscado(m, buscado):
-                    encontradas.append((i, m))
-            if encontradas:
-                # Un momento más por si la lista sigue llegando (nombres repetidos)
-                await page.wait_for_timeout(_PASO_BUSQUEDA_MS)
-                encontradas = [
-                    (i, m) for i in range(await opciones.count())
-                    if (m := _opcion(await opciones.nth(i).inner_text())) and _es_el_buscado(m, buscado)
-                ]
-                break
+        encontradas, vistas = await self._buscar(page, desplegable, buscado.nombre, buscado)
+        if not encontradas and (otra := _otra_busqueda(buscado.nombre)):
+            encontradas, vistas = await self._buscar(page, desplegable, otra, buscado)
         if len(encontradas) != 1:
             await page.keyboard.press("Escape")
-            motivo = "no está" if not encontradas else f"aparece {len(encontradas)} veces"
-            raise MensajeroImileNoEncontradoError(f'"{nombre}" {motivo} en la lista de mensajeros de iMile')
-        i, mensajero = encontradas[0]
+            if encontradas:
+                motivo = f"aparece {len(encontradas)} veces"
+                detalle = "; ".join(vistas[i].strip() for i in encontradas)
+            else:
+                motivo = "no está"
+                detalle = ("iMile mostró: " + "; ".join(t.strip() for t in vistas[:5])) if vistas \
+                    else "iMile no devolvió resultados al buscarlo"
+            raise MensajeroImileNoEncontradoError(
+                f'"{nombre}" {motivo} en la lista de mensajeros de iMile ({detalle})')
+        opciones = desplegable.locator(OPCION_DA)
+        i = encontradas[0]
+        mensajero = _opcion(vistas[i])
         await opciones.nth(i).click()
         return mensajero
+
+    async def _buscar(self, page: Page, desplegable, texto: str,
+                      buscado: MensajeroImile) -> tuple[list[int], list[str]]:
+        """Escribe `texto` en el buscador del selector DA y espera a que iMile traiga la lista.
+        Devuelve las posiciones del buscado y los textos de todas las opciones vistas."""
+        await desplegable.locator("input").first.fill(texto)
+        opciones = desplegable.locator(OPCION_DA)
+        vistas: list[str] = []
+        for _ in range(max(1, self._espera_busqueda_ms // _PASO_BUSQUEDA_MS)):
+            await page.wait_for_timeout(_PASO_BUSQUEDA_MS)
+            vistas = await opciones.all_inner_texts()
+            if _coincidencias(vistas, buscado):
+                # Un momento más por si la lista sigue llegando (nombres repetidos)
+                await page.wait_for_timeout(_PASO_BUSQUEDA_MS)
+                vistas = await opciones.all_inner_texts()
+                break
+        return _coincidencias(vistas, buscado), vistas
 
 
 imile_asignacion = ImileAsignacion()
