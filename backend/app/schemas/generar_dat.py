@@ -39,6 +39,25 @@ class FormatoServillaResult(BaseModel):
     por_revisar: list[SerialPorRevisar]
 
 
+class DatOrdenCompleta(BaseModel):
+    tipo: str
+    informe: str
+    nombre: str
+    registros: int
+    base64: str
+
+
+class OrdenCompletaResult(BaseModel):
+    orden: str
+    fecha_ini: str
+    seriales: int
+    dats: list[DatOrdenCompleta]
+    por_revisar: list[SerialPorRevisar]
+    nombre_por_revisar: str | None = None
+    por_revisar_base64: str | None = None
+    duplicados: list[str]
+
+
 class OperadorInforme(BaseModel):
     operador: str
     enviada: int

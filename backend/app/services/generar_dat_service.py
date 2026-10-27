@@ -126,6 +126,28 @@ def construir_linea(reg: dict, fecha_ini: str, tipo: str = TIPO_CENTRALIZADO) ->
     return linea
 
 
+def nombre_dat(informe: str, fecha_ini: str) -> str:
+    return f"BCS_{informe}_EXT_02_{fecha_ini}.dat"
+
+
+def armar_dat(
+    df_gestion: pd.DataFrame,
+    df_histo: pd.DataFrame,
+    fecha_ini: str,
+    tipo: str = TIPO_CENTRALIZADO,
+    informe: str = INFORME_DEFAULT,
+) -> tuple[bytes, int]:
+    """Cruza la gestión (columnas de COLUMNAS_EXCEL) con los datos del destinatario por
+    serial y devuelve el contenido del .dat y la cantidad de registros."""
+    df = df_gestion.merge(df_histo, on="serial", how="inner").sort_values(
+        "oficina", key=lambda s: pd.to_numeric(s, errors="coerce"), kind="stable"
+    )
+    lineas = [campo(f"*BCSEXT{informe}02{fecha_ini}", ANCHO_ENCABEZADO)]
+    lineas += [construir_linea(reg, fecha_ini, tipo) for reg in df.to_dict("records")]
+    lineas.append(campo(f"*{str(len(df)).zfill(8)}", ANCHO_ENCABEZADO) + "NOC")
+    return ("\n".join(lineas) + "\n").encode("latin-1", errors="replace"), len(df)
+
+
 def generar_dat(
     orden: str,
     fecha_ini: str,
@@ -147,14 +169,7 @@ def generar_dat(
     df_histo["serial"] = normalizar_serial(df_histo["serial"])
     df_histo = df_histo.drop_duplicates(subset=["serial"], keep="last")
 
-    df = df_excel.merge(df_histo, on="serial", how="inner").sort_values(
-        "oficina", key=lambda s: pd.to_numeric(s, errors="coerce"), kind="stable"
-    )
-
-    lineas = [campo(f"*BCSEXT{informe}02{fecha_ini}", ANCHO_ENCABEZADO)]
-    lineas += [construir_linea(reg, fecha_ini, tipo) for reg in df.to_dict("records")]
-    lineas.append(campo(f"*{str(len(df)).zfill(8)}", ANCHO_ENCABEZADO) + "NOC")
-    contenido = ("\n".join(lineas) + "\n").encode("latin-1", errors="replace")
+    contenido, registros = armar_dat(df_excel, df_histo, fecha_ini, tipo, informe)
 
     seriales_excel = set(df_excel["serial"])
     faltantes = df_histo[~df_histo["serial"].isin(seriales_excel)].sort_values(["courrier", "serial"])
@@ -164,9 +179,9 @@ def generar_dat(
     ]
 
     return ResultadoDat(
-        nombre_dat=f"BCS_{informe}_EXT_02_{fecha_ini}.dat",
+        nombre_dat=nombre_dat(informe, fecha_ini),
         contenido_dat=contenido,
-        registros=len(df),
+        registros=registros,
         seriales_excel=len(df_excel),
         seriales_orden=len(df_histo),
         errores=errores,

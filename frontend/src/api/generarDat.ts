@@ -66,6 +66,38 @@ export const formatoServillaApi = {
   },
 };
 
+export interface DatOrdenCompleta {
+  tipo: TipoInforme;
+  informe: string;
+  nombre: string;
+  registros: number;
+  base64: string;
+}
+
+export interface OrdenCompletaResult {
+  orden: string;
+  fecha_ini: string;
+  seriales: number;
+  dats: DatOrdenCompleta[];
+  por_revisar: SerialPorRevisar[];
+  nombre_por_revisar: string | null;
+  por_revisar_base64: string | null;
+  duplicados: string[];
+}
+
+export const ordenCompletaApi = {
+  generar: (fechaIni: string, informeCentralizado: string, informeTerceros: string, file: File) => {
+    const form = new FormData();
+    form.append("fecha_ini", fechaIni);
+    form.append("informe_centralizado", informeCentralizado);
+    form.append("informe_terceros", informeTerceros);
+    form.append("file", file);
+    return api.post<OrdenCompletaResult>("/generar-dat/orden-completa", form, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+  },
+};
+
 export type TipoInformeGlobal = "centralizado" | "entregas";
 
 export interface ItemInformeGlobalInput {
