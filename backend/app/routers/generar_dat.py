@@ -8,10 +8,12 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, Upl
 
 from app.auth.dependencies import require_page
 from app.schemas.generar_dat import (
+    DatOrdenCompleta,
     FormatoServillaResult,
     GenerarDatResult,
     InformeGlobalResult,
     ItemInformeGlobal,
+    OrdenCompletaResult,
     SerialError,
     SerialPorRevisar,
 )
@@ -20,6 +22,8 @@ from app.services.excel_utils import XLSX_MEDIA_TYPE
 from app.services.formato_servilla_service import generar_formato_servilla
 from app.services.generar_dat_service import (
     INFORME_DEFAULT,
+    TIPO_CENTRALIZADO,
+    TIPO_TERCEROS,
     TIPOS_INFORME,
     construir_excel_errores,
     construir_formato_excel,
@@ -27,6 +31,7 @@ from app.services.generar_dat_service import (
 )
 from app.services.informe_global_service import TIPOS as TIPOS_INFORME_GLOBAL
 from app.services.informe_global_service import ItemInforme, generar_informe_global
+from app.services.orden_completa_service import construir_excel_por_revisar, generar_dats_orden_completa
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +67,26 @@ def _normalizar_fecha(fecha: str) -> str:
         except ValueError:
             continue
     raise HTTPException(status_code=400, detail="Fecha inicial inválida (use AAAA-MM-DD)")
+
+
+def _validar_informe(informe: str) -> str:
+    informe = informe.strip().upper()
+    if not re.fullmatch(r"[A-Z]{3}", informe):
+        raise HTTPException(status_code=400, detail="El nombre del informe debe tener 3 letras (p. ej. CON, CLP)")
+    return informe
+
+
+async def _leer_xlsx(f: UploadFile) -> tuple[str, bytes]:
+    nombre = f.filename or "archivo"
+    if not nombre.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail=f"{nombre}: solo se aceptan archivos .xlsx")
+    contenido = await f.read()
+    if len(contenido) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"{nombre}: demasiado grande (máximo {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)",
+        )
+    return nombre, contenido
 
 
 @router.get("/formato")
@@ -109,27 +134,14 @@ async def generar(
     tipo = tipo.strip().lower()
     if tipo not in TIPOS_INFORME:
         raise HTTPException(status_code=400, detail="Tipo de informe inválido (centralizado o terceros)")
-    informe = informe.strip().upper()
-    if not re.fullmatch(r"[A-Z]{3}", informe):
-        raise HTTPException(status_code=400, detail="El nombre del informe debe tener 3 letras (p. ej. CON, CLP)")
+    informe = _validar_informe(informe)
 
     if not files:
         raise HTTPException(status_code=400, detail="Sube al menos un archivo Excel")
     if len(files) > MAX_ARCHIVOS:
         raise HTTPException(status_code=400, detail=f"Máximo {MAX_ARCHIVOS} archivos")
 
-    archivos: list[tuple[str, bytes]] = []
-    for f in files:
-        nombre = f.filename or "archivo"
-        if not nombre.lower().endswith(".xlsx"):
-            raise HTTPException(status_code=400, detail=f"{nombre}: solo se aceptan archivos .xlsx")
-        contenido = await f.read()
-        if len(contenido) > MAX_UPLOAD_BYTES:
-            raise HTTPException(
-                status_code=413,
-                detail=f"{nombre}: demasiado grande (máximo {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)",
-            )
-        archivos.append((nombre, contenido))
+    archivos = [await _leer_xlsx(f) for f in files]
 
     filas_histo = await _consultar_orden(orden)
 
@@ -159,6 +171,49 @@ async def generar(
         errores_base64=errores_b64,
         no_encontrados_en_orden=resultado.no_encontrados_en_orden,
         duplicados_en_excel=resultado.duplicados_en_excel,
+    )
+
+
+@router.post("/orden-completa", response_model=OrdenCompletaResult)
+async def orden_completa(
+    fecha_ini: str = Form(...),
+    informe_centralizado: str = Form("CON"),
+    informe_terceros: str = Form("CON"),
+    file: UploadFile = File(...),
+    _=_auth,
+):
+    """Los .dat centralizado y terceros desde el Excel de la orden completa (sin bases_web)."""
+    fecha = _normalizar_fecha(fecha_ini)
+    informes = {
+        TIPO_CENTRALIZADO: _validar_informe(informe_centralizado),
+        TIPO_TERCEROS: _validar_informe(informe_terceros),
+    }
+    nombre, contenido = await _leer_xlsx(file)
+    try:
+        resultado = generar_dats_orden_completa(nombre, contenido, fecha, informes)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    revisar_b64 = None
+    nombre_revisar = None
+    if resultado.por_revisar:
+        nombre_revisar = f"por_revisar_dat_{resultado.orden}_{fecha}.xlsx"
+        revisar_b64 = base64.b64encode(
+            construir_excel_por_revisar(resultado.orden, resultado.por_revisar)).decode()
+
+    return OrdenCompletaResult(
+        orden=resultado.orden,
+        fecha_ini=fecha,
+        seriales=resultado.seriales,
+        dats=[
+            DatOrdenCompleta(tipo=d.tipo, informe=d.informe, nombre=d.nombre, registros=d.registros,
+                             base64=base64.b64encode(d.contenido).decode())
+            for d in resultado.dats
+        ],
+        por_revisar=[SerialPorRevisar(**s) for s in resultado.por_revisar],
+        nombre_por_revisar=nombre_revisar,
+        por_revisar_base64=revisar_b64,
+        duplicados=resultado.duplicados,
     )
 
 

@@ -5,6 +5,7 @@ import { generarDatApi, type GenerarDatResult, type TipoInforme } from "@/api/ge
 import { descargarBase64, XLSX_MIME } from "./descargas";
 import { FormatoServillaCard } from "./FormatoServillaCard";
 import { InformeGlobalTab } from "./InformeGlobalTab";
+import { OrdenCompletaCard } from "./OrdenCompletaCard";
 
 const MAX_ARCHIVOS = 5;
 const TIPOS: { value: TipoInforme; label: string; descripcion: string }[] = [
@@ -196,6 +197,7 @@ export function GenerarDatPage() {
 
       {tab === "dat" && (
         <>
+          <OrdenCompletaCard />
           <FormatoServillaCard />
 
           <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
