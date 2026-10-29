@@ -19,6 +19,7 @@ Cambios respecto a dirnum (aprobados por el usuario):
   - 2026-10-29: más errores de digitación de carrera (carrara, carrrra, krr, kcarrera);
     "N°"/"Nº" como "#"; BIS pegado al número en cualquier forma (abis, bisa, abisa, "a bis a")
     antes de extraer el cardinal, para que "CL 48 T Bis Sur # 1C-21" saque el SUR.
+  - 2026-10-29: guiones tipográficos Unicode (‐ ‑ ‒ – — ― −) se leen como "-".
 """
 
 import re
@@ -61,6 +62,9 @@ def preprocesar_direccion(direccion):
               'Á': 'A', 'Í': 'I', 'Ó': 'O', 'Ú': 'U'}
     for t, s in tildes.items():
         direccion = direccion.replace(t, s)
+
+    # Guiones tipográficos (Word, iPhone, copiar/pegar) → guion normal: "28#71‐73" → "28#71-73"
+    direccion = re.sub(r'[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]', '-', direccion)
 
     # Cortar en ~~~ (toma primera parte)
     if '~~~' in direccion:

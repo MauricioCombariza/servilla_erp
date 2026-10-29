@@ -276,6 +276,18 @@ def test_bis_queda_en_la_direccion(indice, direccion, dir_std):
     assert sectorizar(direccion, indice).direccion_estandarizada == dir_std
 
 
+@pytest.mark.parametrize("direccion", [
+    "carrera 28#71\u201073",  # ‐ HYPHEN
+    "carrera 28#71\u201173",  # ‑ NON-BREAKING HYPHEN
+    "carrera 28#71\u201373",  # – EN DASH
+    "carrera 28#71\u201473",  # — EM DASH
+    "carrera 28#71\u221273",  # − MINUS SIGN
+    "carrera 28 # 71 \u2013 73",
+])
+def test_guiones_unicode_separan_como_guion(indice, direccion):
+    assert sectorizar(direccion, indice).direccion_estandarizada == "CR 28 71 73"
+
+
 def test_barrio_la_esperanza_no_cambia_la_via(indice):
     r = sectorizar("Carrera 15 # 63- 32 Apto 202 Barrio La Esperanza Edificio Modulor", indice)
     assert (r.direccion_estandarizada, r.zona) == ("CR 15 63 32", "60_1")
