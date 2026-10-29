@@ -288,6 +288,18 @@ def test_guiones_unicode_separan_como_guion(indice, direccion):
     assert sectorizar(direccion, indice).direccion_estandarizada == "CR 28 71 73"
 
 
+@pytest.mark.parametrize("direccion,dir_std", [
+    ("Autopista  Norte  95-01", "CR 20 95 01"),
+    ("Autopista\u00a0Norte\u00a095\u201001", "CR 20 95 01"),  # espacio no separable + guion Unicode
+    ("CR 22 98 10", "CR 22 98 10"),
+    ("CR 21 85 15", "CR 21 85 15"),  # tramo que ya era 80_1
+])
+def test_zona_80_1_llega_hasta_la_calle_100(indice, direccion, dir_std):
+    r = sectorizar(direccion, indice)
+    assert r.direccion_estandarizada == dir_std
+    assert r.zona == "80_1"
+
+
 def test_barrio_la_esperanza_no_cambia_la_via(indice):
     r = sectorizar("Carrera 15 # 63- 32 Apto 202 Barrio La Esperanza Edificio Modulor", indice)
     assert (r.direccion_estandarizada, r.zona) == ("CR 15 63 32", "60_1")
