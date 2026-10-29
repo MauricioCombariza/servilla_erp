@@ -236,6 +236,40 @@ def test_autopista_norte_fuera_de_los_tramos_no_se_traduce(indice, direccion):
     assert not (sectorizar(direccion, indice).direccion_estandarizada or "").startswith("CR")
 
 
+@pytest.mark.parametrize("direccion,dir_std", [
+    ("carrara 52#78-12", "CR 52 78 12"),
+    ("Carrera69#47-50 Torre 1 apto 1104", "CR 69 47 50"),
+    ("Calle 48 T Bis Sur # 1 C - 21 Casa Roja 3 Pisos", "CL 48TBIS 1C 21 SUR"),
+    ("Carrera 62 N° 96-75 Apto 702,Bogota, D.C.~~~Barrios Unidos~~~~~~Carrera 62 N° 96-75 Apto 702",
+     "CR 62 96 75"),
+    ("Carrera 62 Nº 96-75", "CR 62 96 75"),
+    ("Carrrra 64#74-00 Loca cigarreria", "CR 64 74 00"),
+    ("krr 14 a #69 - 35 universidad Areandina, sede 104, laboratorio 4to piso", "CR 14A 69 35"),
+    ("Kcarrera 13b____### 161---70.......casa 42 /// quintas---de-- iguAZU,Bogota, D.C.~~~Bogota~~~~~~"
+     "Kcarrera 13b____### 161---70.......casa 42 /// quintas---de-- iguAZU", "CR 13B 161 70"),
+])
+def test_errores_de_digitacion_subir_despacho(indice, direccion, dir_std):
+    assert sectorizar(direccion, indice).direccion_estandarizada == dir_std
+
+
+@pytest.mark.parametrize("direccion,dir_std", [
+    ("Calle 48 bis 12 30", "CL 48BIS 12 30"),
+    ("Carrera 7 bis 12-30", "CR 7BIS 12 30"),
+    ("Calle 48 abis 12 30", "CL 48ABIS 12 30"),
+    ("Calle 48 bisa 12 30", "CL 48BISA 12 30"),
+    ("Calle 48 abisa 12 30", "CL 48ABISA 12 30"),
+    ("Calle 48 a bis a 12 30", "CL 48ABISA 12 30"),
+    ("Calle 48 b bis 12 30", "CL 48BBIS 12 30"),
+    ("Calle 48 A Bis Sur 12 30", "CL 48ABIS 12 30 SUR"),
+    ("Calle 48 Bis A Sur 12 30", "CL 48BISA 12 30 SUR"),
+    ("Calle 12 # 48 abis - 30", "CL 12 48ABIS 30"),
+    ("Carrera 5 Bis Este # 10-20", "CR 5BIS 10 20 ESTE"),
+    ("Calle 12 # 30-15 conjunto bisonte", "CL 12 30 15"),
+])
+def test_bis_queda_en_la_direccion(indice, direccion, dir_std):
+    assert sectorizar(direccion, indice).direccion_estandarizada == dir_std
+
+
 def test_barrio_la_esperanza_no_cambia_la_via(indice):
     r = sectorizar("Carrera 15 # 63- 32 Apto 202 Barrio La Esperanza Edificio Modulor", indice)
     assert (r.direccion_estandarizada, r.zona) == ("CR 15 63 32", "60_1")

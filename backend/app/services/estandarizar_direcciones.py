@@ -16,6 +16,9 @@ Cambios respecto a dirnum (aprobados por el usuario):
   - 2026-10-26: Autopista Norte (AUTOPISTA/AUTOP/AUTO/AUT NORTE, AUTONORTE, con o sin AV)
     según la calle que sigue: CL 80–99 → CR 20, CL 100–270 → CR 45. Fuera de ese rango
     no se toca.
+  - 2026-10-29: más errores de digitación de carrera (carrara, carrrra, krr, kcarrera);
+    "N°"/"Nº" como "#"; BIS pegado al número en cualquier forma (abis, bisa, abisa, "a bis a")
+    antes de extraer el cardinal, para que "CL 48 T Bis Sur # 1C-21" saque el SUR.
 """
 
 import re
@@ -99,19 +102,22 @@ def preprocesar_direccion(direccion):
     direccion = re.sub(r'\b(No|Nu|Nom)\b', ' ', direccion, flags=re.IGNORECASE)
     direccion = re.sub(r'\bn(?=\d)', ' ', direccion, flags=re.IGNORECASE)
     direccion = re.sub(r'\bn\b(?=\s*\d)', ' ', direccion, flags=re.IGNORECASE)
+    # N° / Nº (equivalen a #): "Carrera 62 N° 96-75" → "Carrera 62 96-75"
+    direccion = re.sub(r'\bN\s*[°º]', ' ', direccion, flags=re.IGNORECASE)
+    direccion = re.sub(r'[°º]', ' ', direccion)
 
     # Normalizar espacios
     direccion = re.sub(r'\s+', ' ', direccion).strip()
 
     # Separar tipo pegado a numero antes de buscar: "call100" → "call 100"
     direccion = re.sub(
-        r'\b(calle|call|cl|cll|clll|clle|carrera|carretera|carera|carre|crra|crr|cr|kr|kra|cra|car|diagonal|dig|dg|transversal|trasversal|transv|trv|tv|tr|avenida|av)(\d)',
+        r'\b(calle|call|cl|cll|clll|clle|carrera|carretera|carera|k?c?arr+[ae]?r*a|carre|crra|crr|krr|cr|kr|kra|cra|car|diagonal|dig|dg|transversal|trasversal|transv|trv|tv|tr|avenida|av)(\d)',
         r'\1 \2', direccion, flags=re.IGNORECASE
     )
 
     # Buscar primer tipo de via reconocido
     tipo_pattern = (
-        r'\b(calle|call|cl|cll|clll|clle|carrera|carretera|carera|carre|crra|crr|cr|kr|kra|cra|car|'
+        r'\b(calle|call|cl|cll|clll|clle|carrera|carretera|carera|k?c?arr+[ae]?r*a|carre|crra|crr|krr|cr|kr|kra|cra|car|'
         r'diagonal|dig|dg|transversal|trasversal|transv|trv|tv|tr|avenida|av)\b'
     )
     match = re.search(tipo_pattern, direccion, flags=re.IGNORECASE)
@@ -148,7 +154,7 @@ def preprocesar_direccion(direccion):
 def normalizar_tipo_via(direccion):
     tipos_via = {
         r'\b(calle|call|cl|cll|clll|clle)\b': 'CL',
-        r'\b(carrera|carretera|carera|carre|crra|crr|cr|kr|kra|cra|car)\b': 'CR',
+        r'\b(carrera|carretera|carera|k?c?arr+[ae]?r*a|carre|crra|crr|krr|cr|kr|kra|cra|car)\b': 'CR',
         r'\b(diagonal|dig|dg)\b': 'DG',
         r'\b(transversal|trasversal|transv|trv|tv|tr)\b': 'TR',
         r'\b(avenida|av)\b': 'AV'
@@ -161,7 +167,7 @@ def normalizar_tipo_via(direccion):
 def separar_componentes_pegados(direccion):
     # Separar tipo pegado a numero: "calle75" → "calle 75", "call100" → "call 100"
     direccion = re.sub(
-        r'\b(calle|call|cl|cll|clll|clle|carrera|carretera|carera|carre|crra|crr|cr|kr|kra|cra|car|diagonal|dig|dg|transversal|trasversal|transv|trv|tv|tr|avenida|av)(\d)',
+        r'\b(calle|call|cl|cll|clll|clle|carrera|carretera|carera|k?c?arr+[ae]?r*a|carre|crra|crr|krr|cr|kr|kra|cra|car|diagonal|dig|dg|transversal|trasversal|transv|trv|tv|tr|avenida|av)(\d)',
         r'\1 \2', direccion, flags=re.IGNORECASE
     )
     # Separar # pegado: "#67" → "# 67"
@@ -327,7 +333,8 @@ def pegar_letras_a_numeros(direccion):
     # Re-pegar bis despues de letra: "63D bis" → "63Dbis" (para "63 D bis" → "63D" → "63Dbis")
     direccion = re.sub(r'(\d+[A-Za-z])\s+(bis)\b', r'\1\2', direccion, flags=re.IGNORECASE)
     # Simplificar letras repetidas: "102AA" → "102A"
-    direccion = re.sub(r'(\d+)([A-Za-z])\2+', r'\1\2', direccion)
+    # (sin tocar la letra que precede a BIS: "48BBIS" no es "48BIS")
+    direccion = re.sub(r'(\d+)([A-Za-z])\2+(?![Ii][Ss])', r'\1\2', direccion)
     return direccion
 
 
@@ -364,6 +371,14 @@ def estandarizar_direccion(direccion_original):
 
     # Paso 2: Limpiar caracteres especiales
     direccion = limpiar_caracteres_especiales(direccion)
+
+    # Paso 2.5: Pegar BIS con sus letras al número antes de buscar el cardinal:
+    # "48 a bis a" / "48 abisa" → "48aBISa", "48 T Bis Sur" → "48TBIS Sur", "48 bisa" → "48BISa".
+    # El lookahead final evita tragarse la primera letra de "bis sur" o palabras como "bisonte".
+    direccion = re.sub(
+        r'(\d+)\s*([A-Za-z])?\s*bis(?:\s*([A-Za-z]))?(?![A-Za-z])',
+        r'\1\2BIS\3', direccion, flags=re.IGNORECASE
+    )
 
     # Paso 3: Simplificar letras repetidas sueltas
     direccion = re.sub(r'\b([A-Z])\1+\b', r'\1', direccion, flags=re.IGNORECASE)
