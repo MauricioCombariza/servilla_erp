@@ -114,6 +114,9 @@ def test_todo_codigo_postal_tiene_localidad(limites):
     ("CR 79Fbis 36A 16 BL8 INT 2 AP 403 SUR", "CR 79FBIS 36A 16 SUR", "Kennedy", None),
     ("CL 39A 73A 26 PS 2 SUR", "CL 39A 73A 26 SUR", "Kennedy", None),
     ("CR 73Bbis 26 81B 9 AP 313 SUPERMANZANA 2 SU", "CR 73BBIS 26 81B", "Fontibon", None),
+    # dirnum no daba localidad: Fontibón llegaba solo hasta CR 125/130 (cambio 2026-10-27)
+    ("carrera 135 17 84 torre 1 1209", "CR 135 17 84", "Fontibon", None),
+    ("CR 140 30 10", "CR 140 30 10", "Fontibon", None),
     # dirnum daba Engativa porque ignoraba el SUR de "SUR ESTE" (cambio 2026-10-08)
     ("CL 36B 73F 15 SUR ESTE", "CL 36B 73F 15 SUR ESTE", "Kennedy", None),
     ("CR 78J 3539 BL 29 INT 04 AP 404 SUPER MANZ", "CR 78J 35 39", "Engativa", None),
