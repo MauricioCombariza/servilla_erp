@@ -87,6 +87,9 @@ export interface SinLeerDelDia {
   seriales: SerialSinLeer[];
 }
 
+// Más que el tope del backend para cada ingreso en iMile (IMILE_INGRESO_TIMEOUT_S = 45 s)
+const ESPERA_IMILE_MS = 60_000;
+
 export const tulasApi = {
   abierta: () => api.get<Tula | null>("/tulas/abierta"),
 
@@ -105,10 +108,15 @@ export const tulasApi = {
   fijarTotal: (id: number, totalEsperado: number | null) =>
     api.patch<Tula>(`/tulas/${id}/total`, { total_esperado: totalEsperado }),
 
-  escanear: (id: number, serial: string) => api.post<EscaneoResult>(`/tulas/${id}/seriales`, { serial }),
+  // Con tope: si la respuesta no llega (red del celular, iMile en cola) la fila pasa a "Reenviar"
+  // en vez de quedar "enviando" y bloquear el cierre de la tula
+  escanear: (id: number, serial: string) =>
+    api.post<EscaneoResult>(`/tulas/${id}/seriales`, { serial }, { timeout: ESPERA_IMILE_MS }),
 
   reintentarImile: (id: number, serial: string) =>
-    api.post<TulaSerial>(`/tulas/${id}/seriales/${encodeURIComponent(serial)}/reintentar-imile`),
+    api.post<TulaSerial>(`/tulas/${id}/seriales/${encodeURIComponent(serial)}/reintentar-imile`, undefined, {
+      timeout: ESPERA_IMILE_MS,
+    }),
 
   cerrar: (id: number) => api.post<TulaDetalle>(`/tulas/${id}/cerrar`),
 };
