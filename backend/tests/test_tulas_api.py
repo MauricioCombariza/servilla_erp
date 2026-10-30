@@ -1,6 +1,7 @@
 """Tests de integración de /api/tulas (Pasos 2.4 y 2.8): abrir, leer paquetes, contador,
 cerrar y la confirmación al abrir una tula nueva con otra abierta. Necesitan la BD con
 las migraciones 031–035. El permiso de página se reemplaza por usuarios fijos."""
+import asyncio
 from datetime import date
 
 import pytest
@@ -225,6 +226,25 @@ async def test_si_imile_falla_el_paquete_igual_cuenta_y_se_puede_reintentar(clie
     assert reintento["imile_estado"] == "ok"
     detalle = (await client.get(f"{URL}/{tula['id']}")).json()
     assert detalle["seriales"][0]["imile_estado"] == "ok"
+
+
+class _ImileColgado:
+    async def ingresar(self, serial):
+        await asyncio.sleep(30)
+
+
+async def test_si_imile_se_cuelga_responde_a_tiempo_y_la_tula_se_puede_cerrar(client, monkeypatch):
+    monkeypatch.setattr(settings, "imile_ingreso_activo", True)
+    monkeypatch.setattr(settings, "imile_ingreso_timeout_s", 0.2)
+    monkeypatch.setattr(tulas_service, "imile_ingreso", _ImileColgado())
+    tula = (await _abrir(client, "BAG-083", total=5)).json()
+
+    r = (await _leer(client, tula["id"], f"{PREFIJO}1")).json()
+    assert r["tula"]["leidos"] == 1
+    assert r["imile"]["estado"] == "error"
+    assert "TimeoutError" in r["imile"]["mensaje"]
+    cerrada = (await client.post(f"{URL}/{tula['id']}/cerrar")).json()
+    assert cerrada["estado"] == "cerrada" and cerrada["leidos"] == 1
 
 
 async def test_tula_inexistente(client):

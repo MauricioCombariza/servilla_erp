@@ -7,6 +7,7 @@
 - Una sola tula abierta por usuario. Si hay una abierta y se abre otra, se pide
   confirmación (cerrar_anterior=True) antes de cerrarla.
 """
+import asyncio
 from dataclasses import dataclass
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -211,9 +212,9 @@ async def _ingresar_en_imile(db: AsyncSession, tula_serial_id: int, serial: str)
         estado, mensaje = "omitido", "Ingreso en iMile apagado (IMILE_INGRESO_ACTIVO)"
     else:
         try:
-            r = await imile_ingreso.ingresar(serial)
+            r = await asyncio.wait_for(imile_ingreso.ingresar(serial), timeout=settings.imile_ingreso_timeout_s)
             estado, mensaje = r.estado.value, r.mensaje
-        # Cualquier falla de iMile (sesión caída, no responde, la página cambió…) se guarda
+        # Cualquier falla de iMile (sesión caída, no responde, se colgó, la página cambió…) se guarda
         # como error: nunca debe hacer perder la lectura del paquete en la tula
         except Exception as exc:  # noqa: BLE001
             estado, mensaje = "error", f"{type(exc).__name__}: {exc}"[:500]

@@ -228,8 +228,9 @@ export function EscaneoTulasPage() {
     });
     try {
       const r = (await tulasApi.escanear(tulaId, serial)).data;
-      // Las respuestas pueden llegar en desorden (iMile atiende de a uno): manda la de más leídos
-      setTula((t) => (t && t.id === r.tula.id && t.leidos > r.tula.leidos ? t : r.tula));
+      // Las respuestas pueden llegar en desorden (iMile atiende de a uno): manda la de más leídos.
+      // Si la tula ya se cerró ("Cerrar sin esperar") o se abrió otra, la respuesta no la revive
+      setTula((t) => (t && t.id === r.tula.id && t.leidos <= r.tula.leidos ? r.tula : t));
       setUltimo({ destino: r.destino, ya: r.ya_escaneado });
       actualizarLectura(serial, {
         envio: "listo",
@@ -555,6 +556,17 @@ export function EscaneoTulasPage() {
                   No
                 </button>
               </div>
+              {/* Las lecturas ya están guardadas: lo que falte de iMile se termina aunque se cierre */}
+              {enviando > 0 && (
+                <button
+                  type="button"
+                  disabled={ocupado}
+                  onClick={cerrarTula}
+                  className="w-full mt-2 text-sm text-primary font-medium py-2 hover:underline disabled:opacity-40"
+                >
+                  Cerrar sin esperar
+                </button>
+              )}
             </div>
           ) : (
             <button
@@ -662,8 +674,12 @@ const ETIQUETA_IMILE: Record<string, { texto: string; clase: string }> = {
 function FilaLectura({ lectura: l, onReenviar, onReintentarImile }: {
   lectura: Lectura; onReenviar: () => void; onReintentarImile: () => void;
 }) {
-  const etiqueta = l.imile ? ETIQUETA_IMILE[l.imile] ?? { texto: `iMile: ${l.imile}`, clase: "text-red-700" } : null;
-  const reintentable = l.imile === "error" || l.imile === "bloqueado" || l.imile === "sin_confirmar";
+  // Sin estado ni mensaje: la lectura quedó guardada pero iMile nunca contestó (p. ej. se recargó la página)
+  const sinRespuesta = l.envio === "listo" && l.imile == null && !l.imileMensaje;
+  const etiqueta = l.imile
+    ? ETIQUETA_IMILE[l.imile] ?? { texto: `iMile: ${l.imile}`, clase: "text-red-700" }
+    : sinRespuesta ? { texto: "iMile: sin respuesta", clase: "text-amber-700" } : null;
+  const reintentable = sinRespuesta || l.imile === "error" || l.imile === "bloqueado" || l.imile === "sin_confirmar";
   return (
     <li className="px-4 py-2.5 text-sm">
       <div className="flex items-center justify-between gap-2">

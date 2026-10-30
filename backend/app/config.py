@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     imile_sesion_state_path: str = ""  # vacío → backend/.secrets/imile_sesion.json
     # Ingreso real de paquetes en iMile (Paso 2.5). Apagado hasta validarlo contra iMile real.
     imile_ingreso_activo: bool = False
+    # Tope de cada ingreso en iMile: si se cuelga, se guarda como error y suelta el navegador
+    # (un solo navegador atiende a todos: si no, la pantalla queda "Esperando a iMile…")
+    imile_ingreso_timeout_s: float = 45
     # Total de paquetes de la tula consultado en iMile al abrirla (Paso 2.3). Solo lectura.
     imile_consulta_tula_activa: bool = False
     # Asignación de los paquetes del mensajero en iMile (Paso 3.3, "Asignar repartidor").
