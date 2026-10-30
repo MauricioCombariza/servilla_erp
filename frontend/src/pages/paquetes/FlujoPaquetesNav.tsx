@@ -1,18 +1,23 @@
 import { NavLink } from "react-router-dom";
-import { MapPinned, PackageOpen, Upload } from "lucide-react";
+import { MapPinned, PackageOpen, ScanSearch, Upload } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 
 const PASOS = [
-  { to: "/subir-despacho", label: "Subir base", icon: Upload, pageKey: "paquetes_despacho" },
-  { to: "/escaneo-tulas", label: "Escaneo de tulas", icon: PackageOpen, pageKey: "escaneo_tulas" },
-  { to: "/asignacion-zonas", label: "Asignación de zonas", icon: MapPinned, pageKey: "asignacion_zonas" },
+  { to: "/subir-despacho", label: "Subir base", icon: Upload, pageKeys: ["paquetes_despacho"] },
+  { to: "/escaneo-tulas", label: "Escaneo de tulas", icon: PackageOpen, pageKeys: ["escaneo_tulas"] },
+  { to: "/asignacion-zonas", label: "Asignación de zonas", icon: MapPinned, pageKeys: ["asignacion_zonas"] },
+  // Solo consulta el destino de un paquete: la ve quien tenga cualquiera de los tres pasos
+  {
+    to: "/consultar-paquete", label: "Consultar paquete", icon: ScanSearch,
+    pageKeys: ["paquetes_despacho", "escaneo_tulas", "asignacion_zonas"],
+  },
 ];
 
-/** Los tres pasos del día con los paquetes, para pasar de una pantalla a otra. */
+/** Los tres pasos del día con los paquetes (y la consulta), para pasar de una pantalla a otra. */
 export function FlujoPaquetesNav({ className = "" }: { className?: string }) {
   const { role, pageKeys } = useAuthStore();
   // Misma regla que el menú lateral: solo las pantallas a las que tiene acceso
-  const pasos = PASOS.filter((p) => role === "administrador" || pageKeys.includes(p.pageKey));
+  const pasos = PASOS.filter((p) => role === "administrador" || p.pageKeys.some((k) => pageKeys.includes(k)));
   if (pasos.length < 2) return null;
 
   return (

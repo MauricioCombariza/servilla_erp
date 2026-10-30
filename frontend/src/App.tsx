@@ -36,6 +36,7 @@ import { EscaneoTulasPage } from "@/pages/paquetes/EscaneoTulasPage";
 import { SubirDespachoPage } from "@/pages/paquetes/SubirDespachoPage";
 import { VerZonasPage } from "@/pages/paquetes/VerZonasPage";
 import { AsignacionZonasPage } from "@/pages/paquetes/AsignacionZonasPage";
+import { ConsultarPaquetePage } from "@/pages/paquetes/ConsultarPaquetePage";
 import { UsuariosRolesPage } from "@/pages/admin/UsuariosRolesPage";
 import { GeocercasPage } from "@/pages/geocercas/GeocercasPage";
 import { GenerarDatPage } from "@/pages/generar-dat/GenerarDatPage";
@@ -119,6 +120,16 @@ export default function App() {
               <ProtectedRoute>
                 <PageGuard pageKey="asignacion_zonas">
                   <AsignacionZonasPage />
+                </PageGuard>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/consultar-paquete"
+            element={
+              <ProtectedRoute>
+                <PageGuard pageKey={["paquetes_despacho", "escaneo_tulas", "asignacion_zonas"]}>
+                  <ConsultarPaquetePage />
                 </PageGuard>
               </ProtectedRoute>
             }
