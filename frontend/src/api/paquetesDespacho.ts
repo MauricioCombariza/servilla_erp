@@ -1,4 +1,5 @@
 import api from "./client";
+import type { DestinoPaquete } from "./tulas";
 
 export interface PaqueteSinSector {
   serial: string;
@@ -52,6 +53,10 @@ export const paquetesDespachoApi = {
   /** Excel de devoluciones del día (fuera de zona): serial, nombre, telefono, direccion, localidad */
   devolucionesExcel: (fEmi: string) =>
     api.get("/paquetes-despacho/devoluciones", { params: { f_emi: fEmi }, responseType: "blob" }),
+
+  /** Sector (zona), dirección y localidad de un serial escaneado */
+  destino: (serial: string) =>
+    api.get<DestinoPaquete>(`/paquetes-despacho/destino/${encodeURIComponent(serial)}`),
 
   corregirDireccion: (serial: string, direccion: string) =>
     api.patch<PaqueteDespacho>(`/paquetes-despacho/${encodeURIComponent(serial)}/direccion`, { direccion }),

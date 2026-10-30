@@ -33,6 +33,12 @@ from app.services.estandarizar_direcciones import (
 TIPO_CODIGO_POSTAL = "codigo_postal"
 TIPO_ZONA = "zona"
 
+# Zonas en las que, con una carrera como vía principal, la cuadra que empieza en la calle
+# límite norte (`CR 65 # 100-15`, cuadra CL 100–101) también entra si la placa tiene la
+# paridad de ese límite ("CL 100, impar" → # 100-15 entra, # 100-14 no). Decisión del
+# usuario el 2026-10-30 para "Carrera 65#100-15 ... Conjunto Torres de la 100".
+ZONAS_CALLE_NORTE_POR_PARIDAD = {"90_6"}
+
 
 # ========== HELPERS DE LÍMITES (copia de dirnum) ==========
 
@@ -419,6 +425,9 @@ def buscar_zona(dir_estandarizada: str | None, indice: IndiceSectorizacion) -> s
                                    z["calle_norte"], z["calle_norte_par"], placa_par)
         else:
             cl_ok = _cumple_limite_cruce(cl_pos, z["calle_sur"], z["calle_norte"])
+            if (not cl_ok and z["nombre"] in ZONAS_CALLE_NORTE_POR_PARIDAD
+                    and cl_pos is not None and cl_pos == z["calle_norte"]):
+                cl_ok = placa_par is not None and placa_par == z["calle_norte_par"]
         if not cl_ok:
             continue
         if via_principal_es_calle:

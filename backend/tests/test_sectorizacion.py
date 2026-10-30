@@ -300,6 +300,18 @@ def test_zona_80_1_llega_hasta_la_calle_100(indice, direccion, dir_std):
     assert r.zona == "80_1"
 
 
+@pytest.mark.parametrize("direccion,dir_std,zona", [
+    ("Carrera 65#100-15 Torre 5 apto 604 - Conjunto Torres de la 100", "CR 65 100 15", "90_6"),
+    ("CR 65 # 100-14", "CR 65 100 14", None),  # placa par: la CL 100 de 90_6 es impar
+    ("CR 65 # 99-14", "CR 65 99 14", "90_6"),  # tramo que ya era 90_6
+    ("CR 65 # 100A-15", "CR 65 100A 15", None),  # la calle siguiente no entra
+    ("CR 60 # 100-15", "CR 60 100 15", None),  # las demás zonas siguen por cuadras
+])
+def test_zona_90_6_llega_hasta_la_calle_100_impar(indice, direccion, dir_std, zona):
+    r = sectorizar(direccion, indice)
+    assert (r.direccion_estandarizada, r.zona) == (dir_std, zona)
+
+
 def test_barrio_la_esperanza_no_cambia_la_via(indice):
     r = sectorizar("Carrera 15 # 63- 32 Apto 202 Barrio La Esperanza Edificio Modulor", indice)
     assert (r.direccion_estandarizada, r.zona) == ("CR 15 63 32", "60_1")

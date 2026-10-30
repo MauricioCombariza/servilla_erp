@@ -30,8 +30,9 @@ from app.services.paquetes_despacho_service import (
 
 router = APIRouter(prefix="/api/paquetes-despacho", tags=["paquetes-despacho"])
 _auth = Depends(require_page("paquetes_despacho"))
-# Quien escanea tulas (rol mensajero) también necesita ver el destino de cada paquete
-_auth_destino = Depends(require_page("paquetes_despacho", "escaneo_tulas"))
+# Quien escanea tulas (rol mensajero) o asigna zonas también necesita ver el destino de
+# cada paquete; la pantalla /consultar-paquete la ve quien tenga cualquiera de los 3 pasos
+_auth_destino = Depends(require_page("paquetes_despacho", "escaneo_tulas", "asignacion_zonas"))
 
 # Una base de despacho diaria pesa unos cientos de KB; el límite solo evita abusos
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
