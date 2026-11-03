@@ -32,6 +32,8 @@ export function ConsultarPaquetePage() {
   camaraRef.current = camara;
   const campoRef = useRef<HTMLInputElement>(null);
   const ultimaLecturaRef = useRef({ codigo: "", at: 0 });
+  const [leido, setLeido] = useState<string | null>(null);
+  const resultadoRef = useRef<HTMLDivElement>(null);
 
   async function consultar(raw: string) {
     const cod = raw.trim();
@@ -42,6 +44,7 @@ export function ConsultarPaquetePage() {
 
     setOcupado(true);
     setError(null);
+    setLeido(cod);
     try {
       const r = (await paquetesDespachoApi.destino(cod)).data;
       setDestino(r);
@@ -56,6 +59,11 @@ export function ConsultarPaquetePage() {
       if (!camaraRef.current) campoRef.current?.focus();
     }
   }
+
+  // Cada lectura nueva lleva la pantalla al resultado
+  useEffect(() => {
+    if (leido) resultadoRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [leido, destino, error]);
 
   // La cámara llama siempre a la versión más reciente
   const consultarRef = useRef(consultar);
@@ -121,17 +129,27 @@ export function ConsultarPaquetePage() {
               {camara ? <CameraOff size={20} /> : <Camera size={20} />}
             </button>
           </form>
-
-          {camara && <div id={SCANNER_ELEMENT_ID} className="w-full rounded-xl overflow-hidden bg-black" />}
         </div>
 
-        {error && (
-          <div role="alert" className="rounded-lg px-4 py-3 bg-red-100 text-red-800 text-sm">
-            {error}
-          </div>
-        )}
+        {/* El resultado va arriba del video: debajo quedaba fuera de la pantalla del celular */}
+        <div ref={resultadoRef} className="space-y-4 scroll-mt-4">
+          {leido && (
+            <p className="text-sm text-gray-600">
+              Leído: <span className="font-mono font-semibold text-gray-900 break-all">{leido}</span>
+              {ocupado && " — consultando…"}
+            </p>
+          )}
 
-        {destino && <Resultado destino={destino} />}
+          {error && (
+            <div role="alert" className="rounded-lg px-4 py-3 bg-red-100 text-red-800 text-sm">
+              {error}
+            </div>
+          )}
+
+          {destino && <Resultado destino={destino} />}
+        </div>
+
+        {camara && <div id={SCANNER_ELEMENT_ID} className="w-full rounded-xl overflow-hidden bg-black" />}
       </div>
     </div>
   );
