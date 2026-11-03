@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
+import { Html5QrcodeSupportedFormats } from "html5-qrcode";
+import { CAMARA_TRASERA, CONFIG_ESCANER, crearEscaner } from "@/utils/escanerCamara";
 import { Camera, CameraOff } from "lucide-react";
 import { paquetesDespachoApi } from "@/api/paquetesDespacho";
 import type { DestinoPaquete } from "@/api/tulas";
@@ -27,6 +28,8 @@ export function ConsultarPaquetePage() {
   const [error, setError] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [camara, setCamara] = useState(false);
+  const camaraRef = useRef(false);
+  camaraRef.current = camara;
   const campoRef = useRef<HTMLInputElement>(null);
   const ultimaLecturaRef = useRef({ codigo: "", at: 0 });
 
@@ -49,7 +52,8 @@ export function ConsultarPaquetePage() {
     } finally {
       setOcupado(false);
       setCodigo("");
-      campoRef.current?.focus();
+      // Con la cámara encendida no se enfoca el campo: abriría el teclado encima del video
+      if (!camaraRef.current) campoRef.current?.focus();
     }
   }
 
@@ -59,11 +63,11 @@ export function ConsultarPaquetePage() {
 
   useEffect(() => {
     if (!camara) return;
-    const scanner = new Html5Qrcode(SCANNER_ELEMENT_ID, { formatsToSupport: SCAN_FORMATS, verbose: false });
+    const scanner = crearEscaner(SCANNER_ELEMENT_ID, SCAN_FORMATS);
     scanner
       .start(
-        { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 250, height: 150 } },
+        CAMARA_TRASERA,
+        CONFIG_ESCANER,
         (texto) => void consultarRef.current(texto),
         () => {},
       )
