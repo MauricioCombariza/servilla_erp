@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
+import { Html5QrcodeSupportedFormats } from "html5-qrcode";
+import { CAMARA_TRASERA, CONFIG_ESCANER, crearEscaner } from "@/utils/escanerCamara";
 import { Download, X } from "lucide-react";
 import { escaneosCarrytApi, type EscaneoCarryt } from "@/api/escaneosCarryt";
 import { personalApi } from "@/api/personal";
@@ -96,15 +97,12 @@ export function EscaneoCarrytPage() {
   useEffect(() => {
     if (!mensajero) return;
 
-    const scanner = new Html5Qrcode(SCANNER_ELEMENT_ID, {
-      formatsToSupport: SCAN_FORMATS,
-      verbose: false,
-    });
+    const scanner = crearEscaner(SCANNER_ELEMENT_ID, SCAN_FORMATS);
 
     scanner
       .start(
-        { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 250, height: 150 } },
+        CAMARA_TRASERA,
+        CONFIG_ESCANER,
         (decodedText) => handleSerial(decodedText),
         () => {}
       )

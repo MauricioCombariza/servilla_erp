@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
+import { Html5QrcodeSupportedFormats } from "html5-qrcode";
+import { CAMARA_TRASERA, CONFIG_ESCANER, crearEscaner } from "@/utils/escanerCamara";
 import { AlertTriangle, Camera, CameraOff, MapPinned, RotateCcw, Send } from "lucide-react";
 import {
   asignacionZonasApi,
@@ -409,11 +410,11 @@ function SerialesDelMensajero({ mensajero, seriales, cargando, onCambio, onMensa
 
   useEffect(() => {
     if (!camara) return;
-    const scanner = new Html5Qrcode(SCANNER_ELEMENT_ID, { formatsToSupport: SCAN_FORMATS, verbose: false });
+    const scanner = crearEscaner(SCANNER_ELEMENT_ID, SCAN_FORMATS);
     scanner
       .start(
-        { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 250, height: 150 } },
+        CAMARA_TRASERA,
+        CONFIG_ESCANER,
         (texto) => void asignarRef.current(texto),
         () => {},
       )

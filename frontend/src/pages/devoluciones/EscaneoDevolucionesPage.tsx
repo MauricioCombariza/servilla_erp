@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
+import { Html5QrcodeSupportedFormats } from "html5-qrcode";
+import { CAMARA_TRASERA, CONFIG_ESCANER, crearEscaner } from "@/utils/escanerCamara";
 import { FileDown, RefreshCw } from "lucide-react";
 import { devolucionesApi, type Devolucion } from "@/api/devoluciones";
 import { extraerErrorBlob } from "@/utils/blobError";
@@ -95,15 +96,12 @@ export function EscaneoDevolucionesPage() {
   }, [feedback]);
 
   useEffect(() => {
-    const scanner = new Html5Qrcode(SCANNER_ELEMENT_ID, {
-      formatsToSupport: SCAN_FORMATS,
-      verbose: false,
-    });
+    const scanner = crearEscaner(SCANNER_ELEMENT_ID, SCAN_FORMATS);
 
     scanner
       .start(
-        { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 250, height: 150 } },
+        CAMARA_TRASERA,
+        CONFIG_ESCANER,
         (decodedText) => handleSerial(decodedText),
         () => {}
       )
