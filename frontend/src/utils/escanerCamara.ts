@@ -1,15 +1,27 @@
 import { Html5Qrcode, type Html5QrcodeCameraScanConfig, type Html5QrcodeSupportedFormats } from "html5-qrcode";
+// iPhone (Safari) y otros navegadores no traen BarcodeDetector: este polyfill lo agrega con
+// zxing-cpp en WebAssembly. Si el navegador ya lo trae (Chrome Android) no lo reemplaza.
+import { prepareZXingModule } from "barcode-detector/polyfill";
+import zxingWasmUrl from "zxing-wasm/reader/zxing_reader.wasm?url";
+
+// El .wasm se sirve desde nuestro dominio (por defecto lo bajaría de jsDelivr).
+const ZXING_OVERRIDES = {
+  locateFile: (ruta: string, prefijo: string) => (ruta.endsWith(".wasm") ? zxingWasmUrl : prefijo + ruta),
+};
+prepareZXingModule({ overrides: ZXING_OVERRIDES });
 
 /**
  * Configuración común de la cámara para leer QR y códigos de barras de los paquetes.
  *
- * - Usa el BarcodeDetector nativo del navegador cuando existe (Chrome Android): es mucho más
- *   rápido y confiable que el decodificador en JavaScript (ZXing), que casi no leía las etiquetas.
+ * - Decodifica con BarcodeDetector: el nativo en Chrome Android y el polyfill (zxing-cpp/WASM)
+ *   en iPhone. El decodificador en JavaScript de html5-qrcode casi no leía las etiquetas.
  * - El recuadro es cuadrado y proporcional al video: un QR completo cabe adentro
  *   (el de 250×150 de antes lo cortaba).
  * - Pide resolución HD y enfoque continuo; por defecto la cámara abría en baja resolución.
  */
 export function crearEscaner(elementId: string, formatos: Html5QrcodeSupportedFormats[]): Html5Qrcode {
+  // Se empieza a bajar el WASM ya, mientras la cámara arranca
+  void prepareZXingModule({ overrides: ZXING_OVERRIDES, fireImmediately: true }).catch(() => {});
   return new Html5Qrcode(elementId, {
     formatsToSupport: formatos,
     verbose: false,
