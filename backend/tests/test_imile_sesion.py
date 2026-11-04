@@ -89,3 +89,57 @@ async def test_usar_no_deja_que_dos_pasos_escriban_a_la_vez(sesion, credenciales
 
     await asyncio.gather(paso(), paso(), paso())
     assert maximo == 1
+
+
+async def _tumbar_pagina(page):
+    """Hace que Chromium tumbe la página, como cuando el kernel mata a Chrome por OOM."""
+    try:
+        await page.goto("chrome://crash", timeout=5_000)
+    except Exception:
+        pass
+
+
+async def test_pagina_caida_se_reemplaza_sola(sesion, credenciales):
+    await sesion.conectar()
+    async with sesion.usar() as page:
+        muerta = page
+        await _tumbar_pagina(page)
+
+    async with sesion.usar() as page:
+        assert page is not muerta
+        assert await page.locator("#idioma").inner_text() == "Español"
+
+
+async def test_error_de_navegador_muerto_dentro_de_usar_descarta_la_sesion(sesion, credenciales):
+    await sesion.conectar()
+    with pytest.raises(Exception):
+        async with sesion.usar() as page:
+            muerta = page
+            await _tumbar_pagina(page)
+            await page.locator("body").count()  # "Target crashed", como en producción
+
+    assert (await sesion.estado()).navegador_abierto is False
+    async with sesion.usar() as page:
+        assert page is not muerta
+        assert "/login" not in page.url
+
+
+async def test_navegador_desconectado_se_vuelve_a_abrir(sesion, credenciales):
+    await sesion.conectar()
+    async with sesion.usar() as page:
+        muerta = page
+        await page.context.browser.close()
+
+    async with sesion.usar() as page:
+        assert page is not muerta
+        assert await page.locator("#idioma").inner_text() == "Español"
+
+
+async def test_conectar_forzado_abre_un_navegador_nuevo(sesion, credenciales):
+    await sesion.conectar()
+    async with sesion.usar() as page:
+        anterior = page
+    estado = await sesion.conectar(forzar=True)
+    assert estado.conectado
+    async with sesion.usar() as page:
+        assert page is not anterior
