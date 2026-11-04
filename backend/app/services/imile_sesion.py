@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from playwright.async_api import Browser, BrowserContext, Locator, Page, async_playwright
+from playwright.async_api import Error as PlaywrightError
 
 from app.config import settings
 
@@ -46,6 +47,11 @@ _RECORRIDO_QUIETO_MS = 4_000
 _RECORRIDO_MAX_MS = 20_000
 _PASO_RECORRIDO_MS = 250
 
+# Chrome headless consume menos memoria (el VPS tiene ~4 GB y el kernel ya lo mató por OOM)
+_ARGS_CHROMIUM = ["--disable-dev-shm-usage", "--disable-gpu", "--no-zygote"]
+# Errores de Playwright que indican que el navegador o la página murieron (no de iMile)
+_MARCAS_NAVEGADOR_MUERTO = ("target crashed", "target closed", "has been closed", "browser closed")
+
 _STATE_PATH_DEFECTO = Path(__file__).resolve().parents[2] / ".secrets" / "imile_sesion.json"
 
 
@@ -59,6 +65,12 @@ class ImileLoginError(Exception):
 
 class ImileIdiomaError(Exception):
     pass
+
+
+def es_navegador_muerto(exc: BaseException) -> bool:
+    return isinstance(exc, PlaywrightError) and any(
+        m in str(exc).lower() for m in _MARCAS_NAVEGADOR_MUERTO
+    )
 
 
 @dataclass(frozen=True)
@@ -94,6 +106,7 @@ class ImileSesion:
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self._page: Page | None = None
+        self._roto = False  # Chrome se cayó (OOM, crash): hay que abrir uno nuevo
         self._lock = asyncio.Lock()
         self.ultimo_ingreso: datetime | None = None
 
@@ -103,11 +116,28 @@ class ImileSesion:
     async def usar(self) -> AsyncIterator[Page]:
         """Página de iMile con sesión iniciada y en español, de uso exclusivo mientras dure el bloque."""
         async with self._lock:
-            yield await self._preparar()
+            try:
+                page = await self._preparar()
+            except PlaywrightError as exc:
+                # Chrome murió entre un paso y otro (aún no llegó el aviso de "crash"):
+                # se abre uno nuevo y el paso sigue sin fallar.
+                if not es_navegador_muerto(exc):
+                    raise
+                await self._descartar()
+                page = await self._preparar()
+            try:
+                yield page
+            except BaseException as exc:
+                # Si Chrome murió a mitad de un paso, ese paso falla, pero el siguiente
+                # debe encontrar un navegador nuevo en vez de la página muerta.
+                if es_navegador_muerto(exc):
+                    await self._descartar()
+                raise
 
     async def conectar(self, forzar: bool = False) -> EstadoSesionImile:
         async with self._lock:
             if forzar:
+                await self._descartar()
                 await self._abrir_navegador()
                 await self._iniciar_sesion(self._page)
             await self._preparar()
@@ -116,10 +146,6 @@ class ImileSesion:
     @property
     def base_url(self) -> str:
         return self._base_url
-
-    @property
-    def state_path(self) -> Path:
-        return self._state_path
 
     @property
     def state_path(self) -> Path:
@@ -134,13 +160,7 @@ class ImileSesion:
             return await self._estado_sin_lock()
 
     async def cerrar(self) -> None:
-        if self._context is not None:
-            await self._context.close()
-        if self._browser is not None:
-            await self._browser.close()
-        if self._playwright is not None:
-            await self._playwright.stop()
-        self._page = self._context = self._browser = self._playwright = None
+        await self._descartar()
 
     # ── Internos ──────────────────────────────────────────────────────────────
 
@@ -151,16 +171,46 @@ class ImileSesion:
             )
         return settings.imile_user, settings.imile_pass
 
+    def _navegador_vivo(self) -> bool:
+        return (
+            self._page is not None and not self._roto and not self._page.is_closed()
+            and self._browser is not None and self._browser.is_connected()
+        )
+
+    def _marcar_roto(self, *_args) -> None:
+        self._roto = True
+
+    async def _descartar(self) -> None:
+        """Cierra lo que quede del navegador. Si Chrome ya murió, cerrar puede fallar: da igual."""
+        for cerrar in (
+            self._context.close if self._context is not None else None,
+            self._browser.close if self._browser is not None else None,
+            self._playwright.stop if self._playwright is not None else None,
+        ):
+            if cerrar is None:
+                continue
+            try:
+                await cerrar()
+            except Exception:
+                pass
+        self._page = self._context = self._browser = self._playwright = None
+        self._roto = False
+
     async def _abrir_navegador(self) -> None:
-        if self._page is not None:
+        if self._navegador_vivo():
             return
+        if self._page is not None or self._browser is not None or self._playwright is not None:
+            await self._descartar()  # la página quedó muerta (p. ej. el kernel mató a Chrome)
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(headless=True)
+        self._browser = await self._playwright.chromium.launch(headless=True, args=_ARGS_CHROMIUM)
+        self._browser.on("disconnected", self._marcar_roto)
         state = str(self._state_path) if self._state_path.exists() else None
         self._context = await self._browser.new_context(
             storage_state=state, viewport={"width": 1400, "height": 900}
         )
         self._page = await self._context.new_page()
+        self._page.on("crash", self._marcar_roto)
+        self._page.on("close", self._marcar_roto)
 
     async def _preparar(self) -> Page:
         self._credenciales()
@@ -269,7 +319,7 @@ class ImileSesion:
 
     async def _estado_sin_lock(self) -> EstadoSesionImile:
         configuradas = bool(settings.imile_user and settings.imile_pass)
-        if self._page is None:
+        if not self._navegador_vivo():
             return EstadoSesionImile(configuradas, False, False, None, self.ultimo_ingreso)
         conectado = not await self._en_login(self._page)
         idioma = await self._idioma_actual(self._page) if conectado else None
