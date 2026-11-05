@@ -9,6 +9,7 @@ import {
   type PaqueteSinSector,
 } from "@/api/paquetesDespacho";
 import { FlujoPaquetesNav } from "./FlujoPaquetesNav";
+import { CerrarSesionBoton } from "./CerrarSesionBoton";
 
 /** Fecha de hoy en Bogotá (YYYY-MM-DD), aunque el celular tenga otra zona horaria. */
 function hoyBogota(): string {
@@ -66,7 +67,10 @@ export function SubirDespachoPage() {
       <div className="mx-auto w-full max-w-md space-y-4">
         <FlujoPaquetesNav />
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h1 className="text-2xl font-bold text-gray-900 mb-1">Subir base de despacho</h1>
+          <div className="flex items-start gap-3 mb-1">
+            <h1 className="min-w-0 flex-1 text-2xl font-bold text-gray-900">Subir base de despacho</h1>
+            <CerrarSesionBoton />
+          </div>
           <p className="text-sm text-gray-500 mb-5">
             Elige el Excel que llegó por WhatsApp. Se guarda y se sectoriza para los cruces del escaneo.
           </p>
