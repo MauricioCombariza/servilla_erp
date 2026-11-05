@@ -93,8 +93,8 @@ zona,60_10,,CL 64,par,CL 68,impar,CR 30,impar,CR 60,par,10
 zona,60_11,,CL 63,par,CL 64,impar,CR 30,impar,CR 60,par,11
 zona,60_12,,CL 63,par,CL 68,impar,CR 60,impar,CR 68,par,12
 zona,60_13,,CL 63F,impar,CL 66,impar,CR 24,impar,CR 30,par,13
-zona,70_1,,CL 76,par,CL 80,impar,CR 20,impar,CR 24,par,14
-zona,70_2,,CL 72,par,CL 76,impar,CR 20,impar,CR 24,par,15
+zona,70_1,,CL 76,par,CL 80,impar,CR 1,,CR 24,par,14
+zona,70_2,,CL 72,par,CL 76,impar,CR 1,,CR 24,par,15
 zona,70_3,,CL 72,par,CL 76,impar,CR 24,impar,CR 30,par,16
 zona,70_4,,CL 76,par,CL 80,impar,CR 24,impar,CR 30,par,17
 zona,70_5,,CL 72,par,CL 80,impar,CR 30,impar,CR 56A,par,18
@@ -102,7 +102,7 @@ zona,70_6,,CL 78,par,CL 80,impar,CR 56A,impar,CR 58,par,19
 zona,70_7,,CL 72,par,CL 80,impar,CR 56A,impar,CR 60,par,20
 zona,70_8,,CL 72,par,CL 80,impar,CR 60,impar,CR 64,par,21
 zona,70_9,,CL 72,par,CL 80,impar,CR 64,impar,CR 68,par,22
-zona,80_1,,CL 80,par,CL 100,impar,CR 20,impar,CR 24,par,23
+zona,80_1,,CL 80,par,CL 100,impar,CR 1,,CR 24,par,23
 zona,80_2,,CL 80,par,CL 92,impar,CR 24,impar,CR 30,par,24
 zona,80_3,,CL 80,par,CL 90,impar,CR 30,impar,CR 50,par,25
 zona,80_4,,CL 80,par,CL 90,impar,CR 58,cualquiera,CR 68,par,26
