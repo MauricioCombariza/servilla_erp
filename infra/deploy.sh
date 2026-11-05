@@ -12,7 +12,9 @@ set -euo pipefail
 
 REPO=/opt/servilla_erp
 BACKUPS=/opt/backups
-MIN_LIBRE_GB=3          # sin esto libre no se descarga (la imagen del backend pesa ~2,7 GB)
+# Sin esto libre no se descarga. Las imágenes se bajan de a una y casi siempre solo cambian las
+# últimas capas (el código); bajar el backend desde cero pide ~2,7 GB.
+MIN_LIBRE_GB=2
 REGISTRO=ghcr.io
 ESPERA_IMAGENES_MIN=15  # si master avanzó, las imágenes del commit nuevo pueden estar construyéndose
 RESPALDOS_A_GUARDAR=3
@@ -119,7 +121,13 @@ for SERVICIO in "${SERVICIOS[@]}"; do
     echo "Aún no está (¿se está construyendo?); reintento en 30 s"
     sleep 30
   done
-  docker compose up -d --no-build --no-deps "$SERVICIO"
+  if [ "$SERVICIO" = nginx ]; then
+    # nginx.conf es un archivo montado: git pull lo reemplaza y el contenedor sigue leyendo el
+    # viejo hasta recrearse (`up -d` lo deja como está porque la imagen no cambió)
+    docker compose up -d --no-build --no-deps --force-recreate nginx
+  else
+    docker compose up -d --no-build --no-deps "$SERVICIO"
+  fi
   limpiar_imagenes_erp
 done
 
