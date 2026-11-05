@@ -15,6 +15,7 @@ import {
 } from "@/api/tulas";
 import { CompartirVista } from "./CompartirVista";
 import { FlujoPaquetesNav } from "./FlujoPaquetesNav";
+import { CerrarSesionBoton } from "./CerrarSesionBoton";
 
 const SCANNER_ELEMENT_ID = "tulas-qr-reader";
 const SCAN_FORMATS = [
@@ -338,6 +339,7 @@ export function EscaneoTulasPage() {
         >
           <QrCode size={24} />
         </button>
+        <CerrarSesionBoton />
       </header>
 
       {delDiaQuery.data && (
