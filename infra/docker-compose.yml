@@ -1,3 +1,6 @@
+# Las imágenes de backend, flujo y frontend las construye GitHub Actions y las sube a GHCR
+# (.github/workflows/deploy.yml); infra/deploy.sh las descarga con IMAGEN_TAG = commit.
+# `build:` queda solo para compilar a mano (docker compose build <servicio>) si GHCR falla.
 services:
 
   postgres:
@@ -19,6 +22,7 @@ services:
     restart: unless-stopped
 
   backend:
+    image: ghcr.io/mauriciocombariza/servilla-backend:${IMAGEN_TAG:-latest}
     build:
       context: ../backend
       dockerfile: Dockerfile
@@ -51,6 +55,7 @@ services:
   # nginx le manda solo esas rutas; el resto sigue en FastAPI. Usa la misma base y el
   # mismo JWT_SECRET. Espera a que el backend aplique la migración 049 antes de atender.
   flujo:
+    image: ghcr.io/mauriciocombariza/servilla-flujo:${IMAGEN_TAG:-latest}
     build:
       context: ../flujo
       dockerfile: Dockerfile
@@ -85,6 +90,7 @@ services:
     restart: unless-stopped
 
   frontend:
+    image: ghcr.io/mauriciocombariza/servilla-frontend:${IMAGEN_TAG:-latest}
     build:
       context: ../frontend
       dockerfile: Dockerfile
