@@ -5,10 +5,12 @@
 #   1. Levanta un PostgreSQL 16 desechable (contenedor servilla_e2e_pg, puerto 5441)
 #   2. Copia ahí la base local de desarrollo (contenedor servilla_pg) y aplica las migraciones
 #   3. Levanta el backend (puerto 8010) y el frontend con Vite (puerto 5180) contra esa base
+#      y el servicio Go (puerto 8011): Vite le manda las mismas rutas que nginx en
+#      producción (escaneo de tulas, asignación, /flujo/sync). --sin-go lo deja fuera.
 #   4. Corre las pruebas marcadas e2e (API + pantalla /subir-despacho en tamaño celular)
 #   5. Apaga todo y borra el contenedor
 #
-# Uso (desde servilla_erp/backend):  bash scripts/e2e_flujo_paquetes.sh [--sin-pantalla] [-- args de pytest]
+# Uso (desde servilla_erp/backend):  bash scripts/e2e_flujo_paquetes.sh [--sin-pantalla] [--sin-go] [-- args de pytest]
 set -euo pipefail
 
 BACKEND_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -17,12 +19,15 @@ PG_CONTENEDOR=servilla_e2e_pg
 PG_PUERTO=5441
 BACKEND_PUERTO=8010
 FRONTEND_PUERTO=5180
+FLUJO_PUERTO=8011
 CON_PANTALLA=1
+CON_GO=1
 PYTEST_ARGS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --sin-pantalla) CON_PANTALLA=0; shift ;;
+    --sin-go) CON_GO=0; shift ;;
     --) shift; PYTEST_ARGS=("$@"); break ;;
     *) echo "Opción desconocida: $1"; exit 2 ;;
   esac
@@ -78,10 +83,23 @@ if [[ $CON_PANTALLA -eq 1 ]]; then
   echo "▶ Backend (puerto $BACKEND_PUERTO) y frontend (puerto $FRONTEND_PUERTO)"
   uv run uvicorn app.main:app --port "$BACKEND_PUERTO" >"$LOG_DIR/backend.log" 2>&1 &
   PIDS+=($!)
-  (cd "$FRONTEND_DIR" && VITE_API_PROXY="http://localhost:$BACKEND_PUERTO" \
+  FLUJO_PROXY=""
+  if [[ $CON_GO -eq 1 ]]; then
+    echo "▶ Servicio Go (puerto $FLUJO_PUERTO)"
+    (cd "$BACKEND_DIR/../flujo" && GOTOOLCHAIN=local go build -o "$LOG_DIR/flujo" ./cmd/flujo)
+    PORT="$FLUJO_PUERTO" DATABASE_URL="postgresql://e2e:e2e@localhost:$PG_PUERTO/servilla_e2e" \
+      "$LOG_DIR/flujo" >"$LOG_DIR/flujo.log" 2>&1 &
+    PIDS+=($!)
+    FLUJO_PROXY="http://localhost:$FLUJO_PUERTO"
+    export E2E_CON_GO=1
+  fi
+  (cd "$FRONTEND_DIR" && VITE_API_PROXY="http://localhost:$BACKEND_PUERTO" VITE_FLUJO_PROXY="$FLUJO_PROXY" \
     npx vite --port "$FRONTEND_PUERTO" --strictPort >"$LOG_DIR/frontend.log" 2>&1) &
   PIDS+=($!)
   esperar_http "http://localhost:$BACKEND_PUERTO/docs" backend
+  if [[ $CON_GO -eq 1 ]]; then
+    esperar_http "http://localhost:$FLUJO_PUERTO/healthz" "servicio Go"
+  fi
   esperar_http "http://localhost:$FRONTEND_PUERTO/" frontend
   export E2E_FRONTEND_URL="http://localhost:$FRONTEND_PUERTO"
 fi

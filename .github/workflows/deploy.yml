@@ -1,27 +1,79 @@
 name: Desplegar en producción
 
-# Al unir algo a master se despliega en erp.servilla.com.co (infra/deploy.sh en el servidor).
-# Desde la pestaña Actions también se puede lanzar a mano; con "todo" reconstruye todo.
+# Al unir algo a master se despliega en erp.servilla.com.co.
+# 1. Las imágenes (backend, flujo, frontend) se construyen AQUÍ, en el runner de GitHub, y se
+#    suben a GHCR con la etiqueta del commit. El VPS (4 GB) ya no compila: compilar allá lo
+#    dejaba sin memoria (sitio caído ~20 min, Chrome de iMile muerto por OOM).
+# 2. infra/deploy.sh en el servidor descarga las imágenes de ese commit y reinicia solo lo que cambió.
+# Desde la pestaña Actions también se puede lanzar a mano; con "todo" reinicia todo.
 on:
   push:
     branches: [master]
   workflow_dispatch:
     inputs:
       todo:
-        description: "Reconstruir backend, frontend y nginx aunque no hayan cambiado"
+        description: "Reiniciar backend, flujo, frontend y nginx aunque no hayan cambiado"
         type: boolean
         default: false
 
-# Un despliegue a la vez; si llega otro mientras corre, espera (no se cancela a mitad)
-concurrency:
-  group: produccion
-  cancel-in-progress: false
+env:
+  REGISTRO: ghcr.io/mauriciocombariza
 
 jobs:
+  construir:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        servicio: [backend, flujo, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # La caché de capas vive en GitHub: si el servicio no cambió, esto toma segundos
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.servicio }}
+          push: true
+          tags: |
+            ${{ env.REGISTRO }}/servilla-${{ matrix.servicio }}:${{ github.sha }}
+            ${{ env.REGISTRO }}/servilla-${{ matrix.servicio }}:latest
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=${{ matrix.servicio }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.servicio }}
+
+      # Se guardan las últimas 15 versiones (sirven para volver atrás); las demás se borran
+      - uses: actions/delete-package-versions@v5
+        continue-on-error: true
+        with:
+          package-name: servilla-${{ matrix.servicio }}
+          package-type: container
+          min-versions-to-keep: 15
+
   desplegar:
+    needs: construir
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: produccion
+    permissions:
+      contents: read
+      packages: read
+    # Un despliegue a la vez; si llega otro mientras corre, espera (no se cancela a mitad).
+    # Solo este job: las construcciones de commits seguidos sí van en paralelo.
+    concurrency:
+      group: produccion
+      cancel-in-progress: false
     steps:
       - name: Revisar configuración
         id: config
@@ -51,6 +103,10 @@ jobs:
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           TODO: ${{ inputs.todo && '--todo' || '' }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # La llave solo puede correr infra/deploy.sh en el servidor (command= en authorized_keys);
-        # lo que se manda aquí llega como argumento en SSH_ORIGINAL_COMMAND
-        run: ssh -i ~/.ssh/deploy -o BatchMode=yes -o ServerAliveInterval=30 "root@$DEPLOY_HOST" "$TODO"
+        # lo que se manda aquí llega como argumento en SSH_ORIGINAL_COMMAND. El token de GHCR
+        # (solo lectura, vence al terminar este job) va por stdin para no quedar en el servidor
+        # ni en la lista de procesos.
+        run: |
+          printf '%s\n' "$GHCR_TOKEN" | ssh -i ~/.ssh/deploy -o BatchMode=yes -o ServerAliveInterval=30 "root@$DEPLOY_HOST" "$TODO"

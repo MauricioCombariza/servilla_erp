@@ -24,8 +24,11 @@ api.interceptors.response.use(
           setUser(res.data.role ?? role, res.data.nombre_completo ?? nombreCompleto, res.data.page_keys ?? []);
           error.config.headers.Authorization = `Bearer ${res.data.access_token}`;
           return api(error.config);
-        } catch {
-          logout();
+        } catch (e) {
+          // Solo si el servidor rechaza el refresh: un corte de red no debe cerrar la sesión
+          // (lo que se escaneó sin señal sigue en la cola del celular)
+          const estado = (e as { response?: { status?: number } })?.response?.status;
+          if (estado === 401 || estado === 403) logout();
         }
       } else {
         useAuthStore.getState().logout();

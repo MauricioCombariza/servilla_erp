@@ -1,18 +1,24 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { CAMARA_TRASERA, CONFIG_ESCANER, crearEscaner } from "@/utils/escanerCamara";
-import { AlertTriangle, Camera, CameraOff, PackageOpen, QrCode, RotateCw, X } from "lucide-react";
+import { AlertTriangle, Camera, CameraOff, CloudOff, PackageOpen, QrCode, RotateCw, X } from "lucide-react";
 import {
   tulasApi,
   type DestinoPaquete,
+  type EscaneoResult,
   type ImileEstado,
   type Tula,
+  type TulaAbierta,
   type TulaAbiertaConflicto,
   type SinLeerDelDia,
   type TulaDetalle,
 } from "@/api/tulas";
+import { actualizarBase, destinoLocal } from "@/offline/base";
+import { useCambiosImile } from "@/offline/cambios";
+import { alResultado, encolar, nuevoId, pendientesEnCola, resolverConflicto, useCola, type Op } from "@/offline/cola";
+import { kvGuardar, kvLeer } from "@/offline/idb";
 import { CompartirVista } from "./CompartirVista";
 import { FlujoPaquetesNav } from "./FlujoPaquetesNav";
 import { CerrarSesionBoton } from "./CerrarSesionBoton";
@@ -27,13 +33,19 @@ const SCAN_FORMATS = [
   Html5QrcodeSupportedFormats.ITF,
 ];
 const ANTIRREBOTE_MS = 2000; // la cámara lee el mismo código varias veces por segundo
+const BASE_CADA_MS = 5 * 60_000; // la base del celular se revisa cada 5 min (304 si no cambió)
+const CLAVE_PANTALLA = "pantalla_tulas";
 
 /** Lo que se está leyendo: el código de una tula, o los paquetes de la tula abierta. */
 type Modo = "tula" | "paquetes";
 
+/** La tula en el celular: sin id mientras el servidor no confirme que la abrió. */
+type TulaLocal = Omit<Tula, "id"> & { id: number | null; local_id: string };
+
 type Lectura = {
   serial: string;
-  envio: "enviando" | "listo" | "falla";
+  // en_cola: guardada en el celular, falta que llegue al servidor
+  envio: "en_cola" | "listo" | "falla";
   zona: string | null;
   localidad: string | null;
   aviso: string | null;
@@ -42,14 +54,38 @@ type Lectura = {
   error?: string;
 };
 
-type Conflicto = { codigo: string | null; abierta: Tula };
+type Conflicto = { codigo: string | null; abierta: TulaLocal };
+
+type PantallaGuardada = { tula: TulaLocal | null; lecturas: Lectura[]; imileTotal: string | null };
 
 function leerDetalle(e: unknown): unknown {
   return (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
 }
 
+function detalleDe(body: unknown): unknown {
+  return (body as { detail?: unknown })?.detail;
+}
+
 function vibrar(patron: number | number[]) {
   if (navigator.vibrate) navigator.vibrate(patron);
+}
+
+function conContador<T extends Pick<Tula, "total_esperado" | "leidos">>(t: T): T & Pick<Tula, "contador" | "diferencia"> {
+  const diferencia = t.total_esperado == null ? null : t.total_esperado - t.leidos;
+  return { ...t, contador: diferencia ?? t.leidos, diferencia };
+}
+
+function desdeServidor(t: Tula, localId?: string): TulaLocal {
+  return { ...t, local_id: localId ?? nuevoId() };
+}
+
+/** A qué tula va una operación: su id si el servidor ya la confirmó, si no la del celular. */
+function refTula(t: TulaLocal): Pick<Op, "tula_id" | "tula_local_id"> {
+  return t.id != null ? { tula_id: t.id } : { tula_local_id: t.local_id };
+}
+
+function esDeLaTula(op: Op, t: TulaLocal | null): boolean {
+  return !!t && (op.tula_local_id === t.local_id || (t.id != null && op.tula_id === t.id));
 }
 
 /**
@@ -57,9 +93,13 @@ function vibrar(patron: number | number[]) {
  * mismo sus paquetes. Cada paquete se cuenta, se muestra su destino y se ingresa en iMile.
  * Sirve con el lector Bluetooth (escribe en el campo y manda Enter) o con la cámara.
  * El botón del QR comparte la vista por zonas (2.7) con los demás celulares.
+ *
+ * Funciona sin señal: el destino sale de la base guardada en el celular y cada lectura
+ * queda en la cola del celular (offline/cola.ts), que la manda sola al volver la señal.
+ * El ingreso en iMile lo hace el servidor después; su resultado llega por /flujo/cambios.
  */
 export function EscaneoTulasPage() {
-  const [tula, setTula] = useState<Tula | null>(null);
+  const [tula, setTula] = useState<TulaLocal | null>(null);
   const [modo, setModo] = useState<Modo>("tula");
   const [codigo, setCodigo] = useState("");
   const [totalEsperado, setTotalEsperado] = useState("");
@@ -71,22 +111,57 @@ export function EscaneoTulasPage() {
   const [aviso, setAviso] = useState<string | null>(null);
   // Paso 2.3: lo que dijo iMile del total al abrir la tula (queda visible mientras esté abierta)
   const [imileTotal, setImileTotal] = useState<string | null>(null);
-  const [abriendo, setAbriendo] = useState(false);
-  const [ocupado, setOcupado] = useState(false);
   const [camara, setCamara] = useState(false);
   const [compartir, setCompartir] = useState(false); // Paso 2.7: QR de la vista por zonas
   const [verSinLeer, setVerSinLeer] = useState(false);
+  // Se recargó con lecturas sin mandar: manda lo guardado en el celular, no el servidor
+  const [fuenteLocal, setFuenteLocal] = useState<boolean | null>(null);
   const campoRef = useRef<HTMLInputElement>(null);
   const ultimaLecturaRef = useRef({ codigo: "", at: 0 });
+  const tulaRef = useRef(tula);
+  tulaRef.current = tula;
+  // La tula cuyo cierre se está esperando (su resumen solo se muestra si sigue en pantalla)
+  const cierreRef = useRef<TulaLocal | null>(null);
   const queryClient = useQueryClient();
+  const cola = useCola();
 
-  // Al entrar (o recargar) se retoma la tula abierta con lo que ya se había leído
+  // La base del día en el celular: al entrar y cada 5 min
+  useEffect(() => {
+    void actualizarBase();
+    const t = setInterval(() => void actualizarBase(), BASE_CADA_MS);
+    return () => clearInterval(t);
+  }, []);
+
+  // Lo guardado en el celular (si quedó algo sin mandar, o no hay señal, manda eso)
+  useEffect(() => {
+    void (async () => {
+      const guardada = await kvLeer<PantallaGuardada>(CLAVE_PANTALLA);
+      const pendientes = await pendientesEnCola();
+      if (guardada?.tula && (pendientes.length > 0 || !navigator.onLine)) {
+        setTula(guardada.tula);
+        setLecturas(guardada.lecturas);
+        setImileTotal(guardada.imileTotal);
+        setModo("paquetes");
+        setFuenteLocal(true);
+      } else {
+        setFuenteLocal(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (fuenteLocal === null) return;
+    void kvGuardar(CLAVE_PANTALLA, { tula, lecturas, imileTotal } satisfies PantallaGuardada);
+  }, [tula, lecturas, imileTotal, fuenteLocal]);
+
+  // Con todo enviado, al entrar (o recargar) se retoma la tula abierta del servidor
   const abiertaQuery = useQuery({
     queryKey: ["tula-abierta"],
     queryFn: async () => {
       const abierta = (await tulasApi.abierta()).data;
       return abierta ? (await tulasApi.detalle(abierta.id)).data : null;
     },
+    enabled: fuenteLocal === false,
     refetchOnWindowFocus: false,
   });
 
@@ -109,16 +184,21 @@ export function EscaneoTulasPage() {
     queryFn: () => tulasApi.sinLeer().then((r) => r.data),
     refetchInterval: 15000,
   });
-  const refrescarDelDia = () => {
+  const refrescarDelDia = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ["tulas-del-dia"] });
     void queryClient.invalidateQueries({ queryKey: ["tulas-sin-leer"] });
-  };
+  }, [queryClient]);
   const sinLeer = sinLeerQuery.data;
 
   useEffect(() => {
+    if (!abiertaQuery.isSuccess) return;
     const d = abiertaQuery.data;
-    if (!d) return;
-    setTula(d);
+    if (!d) {
+      setTula(null);
+      setLecturas([]);
+      return;
+    }
+    setTula((t) => desdeServidor(d, t?.id === d.id ? t.local_id : undefined));
     setModo("paquetes");
     setLecturas(
       [...d.seriales].reverse().map((s) => ({
@@ -131,7 +211,7 @@ export function EscaneoTulasPage() {
         imileMensaje: s.imile_mensaje,
       })),
     );
-  }, [abiertaQuery.data]);
+  }, [abiertaQuery.isSuccess, abiertaQuery.data]);
 
   useEffect(() => {
     if (!aviso) return;
@@ -143,137 +223,192 @@ export function EscaneoTulasPage() {
     setTimeout(() => campoRef.current?.focus(), 0);
   }
 
-  // ---------- Tula ----------
-
-  async function abrirTula(cod: string | null, cerrarAnterior = false) {
-    setOcupado(true);
-    setAbriendo(true);
-    try {
-      const total = totalEsperado.trim() === "" ? null : Number(totalEsperado);
-      const nueva = (
-        await tulasApi.abrir({ codigo: cod, total_esperado: total, cerrar_anterior: cerrarAnterior })
-      ).data;
-      setTula(nueva);
-      setImileTotal(nueva.imile_total);
-      setModo("paquetes");
-      setLecturas([]);
-      setUltimo(null);
-      setConflicto(null);
-      setCerrada(null);
-      setTotalEsperado("");
-      refrescarDelDia();
-      vibrar(80);
-    } catch (e) {
-      const detalle = leerDetalle(e);
-      if (detalle && typeof detalle === "object" && "tula_abierta" in detalle) {
-        setConflicto({ codigo: cod, abierta: (detalle as TulaAbiertaConflicto).tula_abierta });
-      } else {
-        setAviso(typeof detalle === "string" ? detalle : "No se pudo abrir la tula");
-        vibrar([50, 50, 50]);
-      }
-    } finally {
-      setOcupado(false);
-      setAbriendo(false);
-      enfocar();
-    }
-  }
-
-  async function guardarTotal(total: number) {
-    if (!tula) return;
-    try {
-      setTula((await tulasApi.fijarTotal(tula.id, total)).data);
-      setImileTotal(null);
-    } catch {
-      setAviso("No se pudo guardar el total");
-    } finally {
-      enfocar();
-    }
-  }
-
-  async function cerrarTula() {
-    if (!tula) return;
-    setOcupado(true);
-    try {
-      const detalle = (await tulasApi.cerrar(tula.id)).data;
-      setCerrada(detalle);
-      setTula(null);
-      setImileTotal(null);
-      setModo("tula");
-      setLecturas([]);
-      setUltimo(null);
-      refrescarDelDia();
-    } catch {
-      setAviso("No se pudo cerrar la tula");
-    } finally {
-      setOcupado(false);
-      setConfirmarCierre(false);
-      enfocar();
-    }
-  }
-
-  // ---------- Paquetes ----------
-
   function actualizarLectura(serial: string, cambios: Partial<Lectura>) {
     setLecturas((ls) => ls.map((l) => (l.serial === serial ? { ...l, ...cambios } : l)));
   }
 
-  async function leerPaquete(serial: string) {
-    if (!tula) return;
-    const tulaId = tula.id;
-    // Si ya estaba en la lista sube arriba; si no, entra como "enviando"
-    setLecturas((ls) => {
-      const previa = ls.find((l) => l.serial === serial);
-      const fila: Lectura = previa
-        ? { ...previa, envio: "enviando", error: undefined }
-        : { serial, envio: "enviando", zona: null, localidad: null, aviso: null, imile: null, imileMensaje: null };
-      return [fila, ...ls.filter((l) => l.serial !== serial)];
-    });
-    try {
-      const r = (await tulasApi.escanear(tulaId, serial)).data;
-      // Las respuestas pueden llegar en desorden (iMile atiende de a uno): manda la de más leídos.
-      // Si la tula ya se cerró ("Cerrar sin esperar") o se abrió otra, la respuesta no la revive
-      setTula((t) => (t && t.id === r.tula.id && t.leidos <= r.tula.leidos ? r.tula : t));
-      setUltimo({ destino: r.destino, ya: r.ya_escaneado });
-      actualizarLectura(serial, {
-        envio: "listo",
-        zona: r.destino.zona,
-        localidad: r.destino.localidad,
-        aviso: r.destino.aviso,
-        imile: r.imile.estado,
-        imileMensaje: r.imile.mensaje,
-      });
-      if (!r.ya_escaneado) refrescarDelDia();
-      vibrar(r.ya_escaneado ? [40, 60, 40] : 80);
-    } catch (e) {
-      const detalle = leerDetalle(e);
-      const mensaje = typeof detalle === "string" ? detalle : "No se pudo registrar";
-      actualizarLectura(serial, { envio: "falla", error: mensaje });
-      vibrar([50, 50, 50]);
+  // ---------- Respuestas del servidor (llegan cuando hay señal) ----------
+
+  useEffect(() => alResultado((op, r) => {
+    const actual = tulaRef.current;
+    const ok = r.status >= 200 && r.status < 300;
+    switch (op.tipo) {
+      case "abrir_tula": {
+        if (!ok) {
+          if (r.status !== 409) setAviso(String(detalleDe(r.body) ?? "No se pudo abrir la tula"));
+          return;
+        }
+        const t = r.body as TulaAbierta;
+        if (op.tula_local_id !== actual?.local_id) return;
+        setTula((x) => x && conContador({ ...x, ...t, id: t.id, local_id: x.local_id, leidos: Math.max(x.leidos, t.leidos) }));
+        setImileTotal(t.imile_total);
+        refrescarDelDia();
+        return;
+      }
+      case "serial": {
+        if (!esDeLaTula(op, actual)) return;
+        const serial = String(op.datos?.serial ?? "");
+        if (!ok) {
+          actualizarLectura(serial, { envio: "falla", error: String(detalleDe(r.body) ?? "No se pudo registrar") });
+          vibrar([50, 50, 50]);
+          return;
+        }
+        const e = r.body as EscaneoResult;
+        actualizarLectura(serial, {
+          envio: "listo", zona: e.destino.zona, localidad: e.destino.localidad, aviso: e.destino.aviso,
+          imile: e.imile.estado, imileMensaje: e.imile.mensaje,
+        });
+        // El servidor confirma el destino (p. ej. un paquete de días atrás que no estaba en el celular)
+        setUltimo((u) => (u && u.destino.serial === e.destino.serial ? { ...u, destino: e.destino } : u));
+        setTula((x) => x && conContador({ ...x, id: e.tula.id, total_esperado: e.tula.total_esperado, leidos: Math.max(x.leidos, e.tula.leidos) }));
+        if (!e.ya_escaneado) refrescarDelDia();
+        return;
+      }
+      case "total":
+        if (!ok) setAviso("No se pudo guardar el total");
+        return;
+      case "cerrar_tula":
+        if (!esDeLaTula(op, cierreRef.current)) return;
+        if (ok) {
+          setCerrada(r.body as TulaDetalle);
+          refrescarDelDia();
+        } else {
+          setAviso(String(detalleDe(r.body) ?? "No se pudo cerrar la tula"));
+        }
+        return;
     }
+  }), [refrescarDelDia]);
+
+  // Estado de iMile de cada paquete (lo hace el servidor en segundo plano)
+  useCambiosImile(tula?.id != null, (cambios) => {
+    const id = tulaRef.current?.id;
+    for (const c of cambios) {
+      if (c.tula_id === id) actualizarLectura(c.serial, { imile: c.imile_estado, imileMensaje: c.imile_mensaje });
+    }
+  });
+
+  // ---------- Tula ----------
+
+  function abrirTula(cod: string | null, cerrarAnterior = false) {
+    // Ya hay una abierta en el celular: se pregunta aquí mismo, sin ir al servidor
+    if (tula && !cerrarAnterior) {
+      if (cod !== null && cod === tula.codigo) {
+        setModo("paquetes");
+        enfocar();
+        return;
+      }
+      setConflicto({ codigo: cod, abierta: tula });
+      return;
+    }
+    const total = totalEsperado.trim() === "" ? null : Number(totalEsperado);
+    const nueva: TulaLocal = conContador({
+      id: null, local_id: nuevoId(), codigo: cod, sin_etiqueta: cod === null, total_esperado: total,
+      estado: "abierta", usuario: "", fecha: new Date().toISOString().slice(0, 10),
+      fecha_apertura: new Date().toISOString(), fecha_cierre: null, leidos: 0, contador: 0, diferencia: null,
+    });
+    void encolar({
+      tipo: "abrir_tula", tula_local_id: nueva.local_id,
+      datos: { codigo: cod, total_esperado: total, cerrar_anterior: cerrarAnterior },
+    });
+    setTula(nueva);
+    setImileTotal(cod !== null && total === null ? "Consultando en iMile cuántos paquetes trae…" : null);
+    setModo("paquetes");
+    setLecturas([]);
+    setUltimo(null);
+    setConflicto(null);
+    setCerrada(null);
+    cierreRef.current = null;
+    setTotalEsperado("");
+    vibrar(80);
+    enfocar();
+  }
+
+  function guardarTotal(total: number) {
+    if (!tula) return;
+    void encolar({ tipo: "total", ...refTula(tula), datos: { total_esperado: total } });
+    setTula(conContador({ ...tula, total_esperado: total }));
+    setImileTotal(null);
+    enfocar();
+  }
+
+  function cerrarTula() {
+    if (!tula) return;
+    void encolar({ tipo: "cerrar_tula", ...refTula(tula) });
+    cierreRef.current = tula;
+    // Mientras llega la respuesta del servidor (con faltantes según iMile) se muestra lo del celular
+    setCerrada({ ...tula, id: tula.id ?? 0, estado: "cerrada", seriales: [], faltantes: null, no_esperados: null });
+    setTula(null);
+    setImileTotal(null);
+    setModo("tula");
+    setLecturas([]);
+    setUltimo(null);
+    setConfirmarCierre(false);
+    enfocar();
+  }
+
+  // ---------- Paquetes ----------
+
+  function leerPaquete(serial: string, reenviar = false) {
+    if (!tula) return;
+    const previa = lecturas.find((l) => l.serial === serial);
+    const destino = destinoLocal(serial) ?? {
+      serial, ultimos_4: serial.slice(-4), en_tabla: false, direccion: null, direccion_estandarizada: null,
+      localidad: null, zona: null, fuera_de_zona: false, aviso: "Sin la base en el celular: se confirma al enviar",
+    };
+    setUltimo({ destino, ya: !!previa && !reenviar });
+    if (previa && !reenviar && previa.envio !== "falla") {
+      // Ya leído en esta tula: no se cuenta ni se manda otra vez
+      setLecturas((ls) => [previa, ...ls.filter((l) => l.serial !== serial)]);
+      vibrar([40, 60, 40]);
+      return;
+    }
+    const fila: Lectura = {
+      serial, envio: "en_cola", zona: destino.zona, localidad: destino.localidad, aviso: destino.aviso,
+      imile: null, imileMensaje: null,
+    };
+    setLecturas((ls) => [fila, ...ls.filter((l) => l.serial !== serial)]);
+    if (!previa) setTula(conContador({ ...tula, leidos: tula.leidos + 1 }));
+    void encolar({ tipo: "serial", ...refTula(tula), datos: { serial } });
+    vibrar(80);
   }
 
   async function reintentarImile(serial: string) {
-    if (!tula) return;
-    actualizarLectura(serial, { imile: null, imileMensaje: "Reintentando…" });
+    if (tula?.id == null) return;
+    actualizarLectura(serial, { imile: "pendiente", imileMensaje: "Reintentando…" });
     try {
       const r = (await tulasApi.reintentarImile(tula.id, serial)).data;
       actualizarLectura(serial, { imile: r.imile_estado, imileMensaje: r.imile_mensaje });
-    } catch {
-      actualizarLectura(serial, { imile: "error", imileMensaje: "No se pudo reintentar" });
+    } catch (e) {
+      const sinRespuesta = !(e as { response?: unknown })?.response;
+      actualizarLectura(serial, { imile: "error", imileMensaje: sinRespuesta ? "Sin señal: inténtalo otra vez" : String(leerDetalle(e) ?? "No se pudo reintentar") });
     }
+  }
+
+  // Al abrir una tula sin señal había otra abierta en el servidor (p. ej. desde otro celular)
+  const choque = cola.bloqueo?.op.tipo === "abrir_tula" ? (cola.bloqueo.detalle as TulaAbiertaConflicto | undefined) : undefined;
+
+  function resolverChoque(decision: "cerrar" | "seguir") {
+    if (!choque) return;
+    if (decision === "seguir") {
+      // Lo leído pasa a la tula que ya estaba abierta
+      setTula((x) => conContador({ ...desdeServidor(choque.tula_abierta), leidos: choque.tula_abierta.leidos + (x?.leidos ?? 0) }));
+      setImileTotal(null);
+    }
+    void resolverConflicto(decision, choque.tula_abierta.id);
+    enfocar();
   }
 
   // ---------- Entrada: lector Bluetooth, teclado o cámara ----------
 
   function recibirCodigo(raw: string) {
     const cod = raw.trim();
-    if (!cod || ocupado || conflicto) return;
+    if (!cod || conflicto) return;
     const ahora = Date.now();
     if (ultimaLecturaRef.current.codigo === cod && ahora - ultimaLecturaRef.current.at < ANTIRREBOTE_MS) return;
     ultimaLecturaRef.current = { codigo: cod, at: ahora };
 
-    if (modo === "tula") void abrirTula(cod);
-    else void leerPaquete(cod);
+    if (modo === "tula") abrirTula(cod);
+    else leerPaquete(cod);
   }
 
   // La cámara llama siempre a la versión más reciente (con el modo y la tula actuales)
@@ -305,7 +440,7 @@ export function EscaneoTulasPage() {
     setCodigo("");
   }
 
-  const enviando = lecturas.filter((l) => l.envio === "enviando").length;
+  const enCola = lecturas.filter((l) => l.envio === "en_cola").length;
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -317,7 +452,7 @@ export function EscaneoTulasPage() {
           </p>
           <p className="text-xs text-gray-500">
             {tula
-              ? `${tula.leidos} leído${tula.leidos === 1 ? "" : "s"}${tula.total_esperado != null ? ` de ${tula.total_esperado}` : ""}${enviando ? ` · ${enviando} enviando a iMile` : ""}`
+              ? `${tula.leidos} leído${tula.leidos === 1 ? "" : "s"}${tula.total_esperado != null ? ` de ${tula.total_esperado}` : ""}${enCola ? ` · ${enCola} por enviar` : ""}`
               : "Lee el código de la tula para empezar"}
           </p>
         </div>
@@ -419,7 +554,6 @@ export function EscaneoTulasPage() {
             />
             <button
               type="button"
-              disabled={ocupado}
               onClick={() => abrirTula(null)}
               className="w-full border border-gray-300 text-gray-700 font-medium py-2.5 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-40"
             >
@@ -449,7 +583,7 @@ export function EscaneoTulasPage() {
           />
           <button
             type="submit"
-            disabled={!codigo.trim() || ocupado}
+            disabled={!codigo.trim()}
             className="shrink-0 bg-gray-800 hover:bg-gray-900 text-white font-medium px-4 rounded-lg text-sm disabled:opacity-40"
           >
             {modo === "tula" ? "Abrir" : "Leer"}
@@ -466,12 +600,6 @@ export function EscaneoTulasPage() {
 
         {camara && <div id={SCANNER_ELEMENT_ID} className="w-full rounded-xl overflow-hidden bg-black" />}
 
-        {abriendo && (
-          <div className="rounded-lg px-4 py-2.5 text-sm text-center bg-gray-100 text-gray-700">
-            Abriendo la tula y consultando en iMile cuántos paquetes trae…
-          </div>
-        )}
-
         {tula && modo === "paquetes" && imileTotal && (
           <div
             className={`rounded-lg px-4 py-2.5 text-sm ${
@@ -484,6 +612,35 @@ export function EscaneoTulasPage() {
 
         {tula && modo === "paquetes" && !tula.sin_etiqueta && tula.total_esperado == null && (
           <TotalAMano onGuardar={guardarTotal} />
+        )}
+
+        <EstadoConexion pendientes={cola.pendientes} sinSenal={cola.sinSenal} enviando={cola.enviando} />
+
+        {choque && (
+          <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm">
+            <p className="font-medium text-amber-900">
+              En el servidor ya estaba abierta la{" "}
+              {choque.tula_abierta.sin_etiqueta ? "tula sin etiqueta" : `tula ${choque.tula_abierta.codigo}`} con{" "}
+              {choque.tula_abierta.leidos} paquete{choque.tula_abierta.leidos === 1 ? "" : "s"} (quizá desde otro celular).
+            </p>
+            <p className="text-amber-800 mt-1">Lo que leíste sigue guardado. ¿Qué hago?</p>
+            <div className="flex flex-col gap-2 mt-3">
+              <button
+                type="button"
+                onClick={() => resolverChoque("cerrar")}
+                className="bg-primary hover:bg-primary-hover text-white font-medium py-2.5 rounded-lg"
+              >
+                Cerrar esa y seguir en la nueva
+              </button>
+              <button
+                type="button"
+                onClick={() => resolverChoque("seguir")}
+                className="border border-gray-300 text-gray-700 font-medium py-2.5 rounded-lg bg-white"
+              >
+                Pasar lo leído a la que estaba abierta
+              </button>
+            </div>
+          </div>
         )}
 
         {aviso && (
@@ -502,7 +659,6 @@ export function EscaneoTulasPage() {
             <div className="flex gap-2 mt-3">
               <button
                 type="button"
-                disabled={ocupado}
                 onClick={() => abrirTula(conflicto.codigo, true)}
                 className="flex-1 bg-primary hover:bg-primary-hover text-white font-medium py-2.5 rounded-lg disabled:opacity-40"
               >
@@ -529,7 +685,7 @@ export function EscaneoTulasPage() {
               <FilaLectura
                 key={l.serial}
                 lectura={l}
-                onReenviar={() => leerPaquete(l.serial)}
+                onReenviar={() => leerPaquete(l.serial, true)}
                 onReintentarImile={() => reintentarImile(l.serial)}
               />
             ))}
@@ -545,11 +701,10 @@ export function EscaneoTulasPage() {
               <div className="flex gap-2 mt-3">
                 <button
                   type="button"
-                  disabled={ocupado || enviando > 0}
                   onClick={cerrarTula}
-                  className="flex-1 bg-gray-800 hover:bg-gray-900 text-white font-medium py-2.5 rounded-lg disabled:opacity-40"
+                  className="flex-1 bg-gray-800 hover:bg-gray-900 text-white font-medium py-2.5 rounded-lg"
                 >
-                  {enviando > 0 ? "Esperando a iMile…" : "Sí, cerrar"}
+                  Sí, cerrar
                 </button>
                 <button
                   type="button"
@@ -559,17 +714,6 @@ export function EscaneoTulasPage() {
                   No
                 </button>
               </div>
-              {/* Las lecturas ya están guardadas: lo que falte de iMile se termina aunque se cierre */}
-              {enviando > 0 && (
-                <button
-                  type="button"
-                  disabled={ocupado}
-                  onClick={cerrarTula}
-                  className="w-full mt-2 text-sm text-primary font-medium py-2 hover:underline disabled:opacity-40"
-                >
-                  Cerrar sin esperar
-                </button>
-              )}
             </div>
           ) : (
             <button
@@ -582,6 +726,27 @@ export function EscaneoTulasPage() {
           )
         )}
       </div>
+    </div>
+  );
+}
+
+/** Sin señal o con lecturas por enviar: que se sepa que nada se perdió. */
+function EstadoConexion({ pendientes, sinSenal, enviando }: { pendientes: number; sinSenal: boolean; enviando: boolean }) {
+  if (pendientes === 0 && !sinSenal) return null;
+  if (sinSenal) {
+    return (
+      <div role="status" className="rounded-lg px-4 py-2.5 text-sm bg-gray-800 text-white flex items-center gap-2">
+        <CloudOff size={18} className="shrink-0" />
+        <span>
+          Sin señal: puedes seguir leyendo.
+          {pendientes > 0 && ` ${pendientes} lectura${pendientes === 1 ? "" : "s"} guardada${pendientes === 1 ? "" : "s"} en el celular, se envían solas al volver la señal.`}
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div role="status" className="rounded-lg px-4 py-2 text-xs text-center bg-gray-100 text-gray-600">
+      {enviando ? "Enviando" : "Por enviar"}: {pendientes}
     </div>
   );
 }
@@ -621,7 +786,7 @@ function TotalAMano({ onGuardar }: { onGuardar: (total: number) => void }) {
 }
 
 /** Paso 2.4: arriba a la izquierda. Con total esperado baja (faltan / sobran); sin él sube. */
-function Contador({ tula }: { tula: Tula | null }) {
+function Contador({ tula }: { tula: Pick<Tula, "total_esperado" | "contador"> | null }) {
   if (!tula) {
     return (
       <div className="shrink-0 w-16 h-16 rounded-xl bg-gray-100 flex items-center justify-center text-gray-400">
@@ -672,6 +837,7 @@ const ETIQUETA_IMILE: Record<string, { texto: string; clase: string }> = {
   error: { texto: "iMile: error", clase: "text-red-700" },
   sin_confirmar: { texto: "iMile: sin confirmar", clase: "text-amber-700" },
   omitido: { texto: "iMile apagado", clase: "text-gray-400" },
+  pendiente: { texto: "iMile: en cola…", clase: "text-gray-500" },
 };
 
 function FilaLectura({ lectura: l, onReenviar, onReintentarImile }: {
@@ -699,7 +865,7 @@ function FilaLectura({ lectura: l, onReenviar, onReintentarImile }: {
         <span className={l.aviso ? "text-amber-700" : "text-gray-400"}>
           {l.envio === "falla" ? <span className="text-red-700">{l.error}</span> : l.aviso ?? ""}
         </span>
-        {l.envio === "enviando" && <span className="text-gray-500">Enviando a iMile…</span>}
+        {l.envio === "en_cola" && <span className="text-gray-500">Guardado · por enviar</span>}
         {l.envio === "falla" && (
           <button type="button" onClick={onReenviar} className="inline-flex items-center gap-1 text-primary font-medium">
             <RotateCw size={12} /> Reenviar
