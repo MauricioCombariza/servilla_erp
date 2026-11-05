@@ -30,6 +30,14 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // VITE_FLUJO_PROXY: el servicio Go (flujo/) para las mismas rutas que le manda nginx
+      // en producción (infra/nginx.conf). Sin él, todo va a FastAPI.
+      ...(process.env.VITE_FLUJO_PROXY
+        ? {
+            "^/api/(tulas|asignacion-zonas|asignacion-qr|imile-sesion|flujo)(/|$)": process.env.VITE_FLUJO_PROXY,
+            "^/api/paquetes-despacho/(destino/|base$)": process.env.VITE_FLUJO_PROXY,
+          }
+        : {}),
       // VITE_API_PROXY: otro backend local (lo usa backend/scripts/e2e_flujo_paquetes.sh)
       "/api": process.env.VITE_API_PROXY ?? "http://localhost:8000",
     },

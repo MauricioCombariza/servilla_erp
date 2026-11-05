@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       todo:
-        description: "Reconstruir backend, frontend y nginx aunque no hayan cambiado"
+        description: "Reconstruir backend, flujo, frontend y nginx aunque no hayan cambiado"
         type: boolean
         default: false
 

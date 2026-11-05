@@ -5,7 +5,7 @@
 #
 # 1. Trae master y se vuelve a ejecutar con la versión nueva de este script.
 # 2. Si cambian las migraciones, saca un respaldo de la base antes (el backend las aplica al arrancar).
-# 3. Reconstruye solo lo que cambió (backend / frontend / nginx) y limpia la caché de construcción.
+# 3. Reconstruye solo lo que cambió (backend / flujo / frontend / nginx) y limpia la caché de construcción.
 # 4. Comprueba /health; si falla, termina con error (el workflow queda en rojo).
 set -euo pipefail
 
@@ -33,7 +33,7 @@ if [ -n "$FORZAR" ] && [ "$FORZAR" != "--todo" ]; then
   exit 2
 fi
 if [ "$FORZAR" = "--todo" ]; then
-  CAMBIOS="backend/ frontend/ infra/"
+  CAMBIOS="backend/ flujo/ frontend/ infra/"
 elif [ "$DEPLOY_ANTES" = "$DESPUES" ]; then
   echo "Nada nuevo en master: no se despliega"
   exit 0
@@ -43,10 +43,11 @@ fi
 
 SERVICIOS=()
 grep -q '^backend/' <<<"$CAMBIOS" && SERVICIOS+=(backend)
+grep -q '^flujo/' <<<"$CAMBIOS" && SERVICIOS+=(flujo)
 grep -q '^frontend/' <<<"$CAMBIOS" && SERVICIOS+=(frontend)
-grep -v '^infra/deploy.sh$' <<<"$CAMBIOS" | grep -q '^infra/' && SERVICIOS+=(backend frontend nginx)
+grep -v '^infra/deploy.sh$' <<<"$CAMBIOS" | grep -q '^infra/' && SERVICIOS+=(backend flujo frontend nginx)
 if [ "${#SERVICIOS[@]}" -eq 0 ]; then
-  echo "Los cambios no tocan backend, frontend ni infra: no se despliega"
+  echo "Los cambios no tocan backend, flujo, frontend ni infra: no se despliega"
   exit 0
 fi
 mapfile -t SERVICIOS < <(printf '%s\n' "${SERVICIOS[@]}" | sort -u)
@@ -82,6 +83,21 @@ echo "Esperando a que el backend responda (aplica migraciones al arrancar)..."
 for _ in $(seq 1 60); do
   if curl -fsS http://localhost:8080/health >/dev/null 2>&1; then
     echo "OK: $(curl -fsS http://localhost:8080/health)"
+    break
+  fi
+  sleep 2
+done
+if ! curl -fsS http://localhost:8080/health >/dev/null 2>&1; then
+  echo "ERROR: /health no responde después de 2 minutos. Últimas líneas del backend:" >&2
+  docker logs --tail 40 servilla_backend >&2 || true
+  exit 1
+fi
+
+# El servicio Go espera la migración que aplica el backend: se revisa después
+echo "Esperando al servicio Go (flujo)..."
+for _ in $(seq 1 60); do
+  if docker exec servilla_flujo node -e "fetch('http://localhost:8090/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" >/dev/null 2>&1; then
+    echo "OK: flujo responde"
     docker ps --filter name=servilla_ --format '{{.Names}}: {{.Status}}'
     df -h / | tail -1
     exit 0
@@ -89,6 +105,6 @@ for _ in $(seq 1 60); do
   sleep 2
 done
 
-echo "ERROR: /health no responde después de 2 minutos. Últimas líneas del backend:" >&2
-docker logs --tail 40 servilla_backend >&2 || true
+echo "ERROR: flujo no responde después de 2 minutos. Últimas líneas:" >&2
+docker logs --tail 40 servilla_flujo >&2 || true
 exit 1

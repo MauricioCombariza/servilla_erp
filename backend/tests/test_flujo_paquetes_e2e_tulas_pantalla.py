@@ -5,7 +5,10 @@ variable la prueba se salta.
 
 El backend de la prueba corre con el ingreso en iMile apagado (filas "iMile apagado"). Los
 estados de iMile (error → Reintentar → ok) se prueban en la pantalla cambiando la respuesta
-del backend en el navegador; contra iMile (falso) se prueban en test_flujo_paquetes_e2e.py."""
+del backend en el navegador; contra iMile (falso) se prueban en test_flujo_paquetes_e2e.py.
+
+La pantalla manda todo por la cola del celular (POST /api/flujo/sync, servicio Go): la
+prueba sin señal corta la red del navegador y revisa que nada se pierda ni se duplique."""
 import json
 import os
 from datetime import date
@@ -91,6 +94,33 @@ def _fila(page, serial):
     return page.locator("li").filter(has_text=serial[-4:]).filter(has_text=serial[:-4])
 
 
+def _cola_vacia(page):
+    """El aviso de conexión (role=status) solo se ve si hay algo por enviar o no hay señal."""
+    return expect(page.get_by_role("status")).to_have_count(0, timeout=20_000)
+
+
+def _cambiar_resultados(cambio):
+    """Handler de page.route para /api/flujo/sync: deja pasar el lote al servidor y cambia,
+    en la respuesta, el cuerpo de cada operación con cambio(tipo, body)."""
+    async def handler(route):
+        tipos = {o["op_id"]: o["tipo"] for o in json.loads(route.request.post_data)["ops"]}
+        resp = await route.fetch()
+        body = await resp.json()
+        for r in body["resultados"]:
+            if r["status"] == 200:
+                cambio(tipos.get(r["op_id"]), r["body"])
+        await route.fulfill(response=resp, body=json.dumps(body))
+    return handler
+
+
+async def _leidos_en_servidor(codigo: str) -> list[str]:
+    async with AsyncSessionLocal() as db:
+        return list((await db.execute(
+            select(TulaSerial.serial).join(Tula, Tula.id == TulaSerial.tula_id)
+            .where(Tula.usuario == USUARIO, Tula.codigo == codigo).order_by(TulaSerial.serial)
+        )).scalars().all())
+
+
 async def test_2_2_leer_la_tula_y_sus_paquetes_en_la_misma_pantalla(pagina):
     page = pagina
     await expect(page.get_by_text("Lee el código de la TULA", exact=True)).to_be_visible()
@@ -168,6 +198,7 @@ async def test_2_2_leer_la_tula_y_sus_paquetes_en_la_misma_pantalla(pagina):
     await page.get_by_role("button", name="Sí, cerrar").click()
     await expect(page.get_by_text("Tula BAG-E2E-2 cerrada")).to_be_visible()
     await expect(page.get_by_text("Lee el código de la TULA", exact=True)).to_be_visible()
+    await _cola_vacia(page)
 
     async with AsyncSessionLocal() as db:
         tulas = (await db.execute(select(Tula).where(Tula.usuario == USUARIO).order_by(Tula.id))).scalars().all()
@@ -178,11 +209,9 @@ async def test_2_5_tula_sin_etiqueta_y_reintentar_imile_desde_la_pantalla(pagina
     page = pagina
 
     # La respuesta del backend se cambia en el navegador para simular que iMile falló
-    async def imile_falla(route):
-        resp = await route.fetch()
-        body = await resp.json()
-        body["imile"] = {"estado": "error", "mensaje": "TimeoutError: iMile no respondió"}
-        await route.fulfill(response=resp, body=json.dumps(body))
+    def imile_falla(tipo, body):
+        if tipo == "serial":
+            body["imile"] = {"estado": "error", "mensaje": "TimeoutError: iMile no respondió"}
 
     async def imile_ok(route):
         resp = await route.fetch()
@@ -190,7 +219,10 @@ async def test_2_5_tula_sin_etiqueta_y_reintentar_imile_desde_la_pantalla(pagina
         body.update(imile_estado="ok", imile_mensaje=None)
         await route.fulfill(response=resp, body=json.dumps(body))
 
-    await page.route("**/api/tulas/*/seriales", imile_falla)
+    await page.route("**/api/flujo/sync", _cambiar_resultados(imile_falla))
+    # El estado real (iMile apagado) no debe pisar el simulado
+    await page.route("**/api/flujo/cambios*", lambda route: route.fulfill(
+        json={"cursor": "2000-01-01T00:00:00Z", "seriales": []}))
     await page.route("**/api/tulas/*/seriales/*/reintentar-imile", imile_ok)
 
     await page.get_by_role("button", name="Tula sin etiqueta").click()
@@ -206,14 +238,69 @@ async def test_2_5_tula_sin_etiqueta_y_reintentar_imile_desde_la_pantalla(pagina
     await expect(fila).to_contain_text("iMile ✓")
 
     # Al cerrar, lo que iMile dice que traía la tula: qué faltó y qué no venía en ella
-    async def con_faltantes(route):
-        resp = await route.fetch()
-        body = await resp.json()
-        body.update(faltantes=["TESTE2ET-0001", "TESTE2ET-0003"], no_esperados=["TESTE2ET-0002"])
-        await route.fulfill(response=resp, body=json.dumps(body))
+    def con_faltantes(tipo, body):
+        if tipo == "cerrar_tula":
+            body.update(faltantes=["TESTE2ET-0001", "TESTE2ET-0003"], no_esperados=["TESTE2ET-0002"])
 
-    await page.route("**/api/tulas/*/cerrar", con_faltantes)
+    await page.unroute("**/api/flujo/sync")
+    await page.route("**/api/flujo/sync", _cambiar_resultados(con_faltantes))
     await page.get_by_role("button", name="Cerrar tula").click()
     await page.get_by_role("button", name="Sí, cerrar").click()
     await expect(page.get_by_text("Faltaron (2)")).to_be_visible()
     await expect(page.get_by_text("Leídos que no venían en esta tula según iMile (1)")).to_be_visible()
+
+
+async def test_2_9_sin_senal_se_sigue_leyendo_y_nada_se_pierde_ni_se_duplica(pagina):
+    page = pagina
+    await page.get_by_label("Paquetes que trae").fill("4")
+    await _leer(page, "BAG-E2E-OFF")
+    await expect(page.get_by_text("Tula BAG-E2E-OFF")).to_be_visible()
+    await _cola_vacia(page)  # el servidor ya la abrió
+
+    # Se cae la señal: se sigue leyendo, con el destino de la base guardada en el celular
+    await page.context.set_offline(True)
+    await _leer(page, "TESTE2ET-0001")
+    await expect(page.get_by_text("60_3", exact=True).first).to_be_visible()
+    await _leer(page, "TESTE2ET-0003")
+    await _leer(page, NO_EN_TABLA)
+    await expect(page.get_by_text("No está en la tabla").first).to_be_visible()
+    await expect(_contador(page)).to_have_text("1faltan")
+    await expect(page.get_by_text("Sin señal: puedes seguir leyendo.")).to_be_visible()
+    await expect(_fila(page, "TESTE2ET-0001")).to_contain_text("por enviar")
+    assert await _leidos_en_servidor("BAG-E2E-OFF") == []
+
+    # Vuelve la señal: la cola se manda sola
+    await page.context.set_offline(False)
+    await _cola_vacia(page)
+    await expect(_fila(page, "TESTE2ET-0001")).to_contain_text("iMile apagado")
+    assert await _leidos_en_servidor("BAG-E2E-OFF") == ["TESTE2ET-0001", "TESTE2ET-0003", NO_EN_TABLA]
+
+    # La señal se corta justo después de que el servidor procesó el lote (la respuesta no
+    # llega): el celular lo reenvía y el servidor responde lo mismo sin duplicar
+    cortes = {"n": 0}
+
+    async def respuesta_perdida(route):
+        if cortes["n"] == 0:
+            cortes["n"] += 1
+            await route.fetch()  # el servidor sí lo recibe y lo guarda
+            await route.abort("internetdisconnected")
+        else:
+            await route.continue_()
+
+    await page.route("**/api/flujo/sync", respuesta_perdida)
+    await _leer(page, "TESTE2ET-0002")
+    await expect(_contador(page)).to_have_text("0faltan")
+    await expect(_fila(page, "TESTE2ET-0002")).to_contain_text("iMile apagado", timeout=20_000)
+    assert cortes["n"] == 1
+    leidos = await _leidos_en_servidor("BAG-E2E-OFF")
+    assert leidos == sorted(["TESTE2ET-0001", "TESTE2ET-0002", "TESTE2ET-0003", NO_EN_TABLA])
+
+    # Cerrar también pasa por la cola
+    await page.get_by_role("button", name="Cerrar tula").click()
+    await page.get_by_role("button", name="Sí, cerrar").click()
+    await expect(page.get_by_text("Tula BAG-E2E-OFF cerrada")).to_be_visible()
+    await _cola_vacia(page)
+    async with AsyncSessionLocal() as db:
+        estado = (await db.execute(
+            select(Tula.estado).where(Tula.usuario == USUARIO, Tula.codigo == "BAG-E2E-OFF"))).scalar_one()
+    assert estado == "cerrada"

@@ -47,6 +47,43 @@ services:
     restart: unless-stopped
     # No expone puerto al exterior — sólo accesible desde nginx
 
+  # Servicio Go (flujo/): escaneo de tulas, asignación de zonas y la sesión de iMile.
+  # nginx le manda solo esas rutas; el resto sigue en FastAPI. Usa la misma base y el
+  # mismo JWT_SECRET. Espera a que el backend aplique la migración 049 antes de atender.
+  flujo:
+    build:
+      context: ../flujo
+      dockerfile: Dockerfile
+    container_name: servilla_flujo
+    environment:
+      DATABASE_URL:     postgresql://servilla:${POSTGRES_PASSWORD}@postgres:5432/servilla_erp
+      JWT_SECRET:       ${JWT_SECRET}
+      IMILE_USER:       ${IMILE_USER:-}
+      IMILE_PASS:       ${IMILE_PASS:-}
+      IMILE_INGRESO_ACTIVO: ${IMILE_INGRESO_ACTIVO:-false}
+      IMILE_CONSULTA_TULA_ACTIVA: ${IMILE_CONSULTA_TULA_ACTIVA:-true}
+      IMILE_ASIGNACION_ACTIVA: ${IMILE_ASIGNACION_ACTIVA:-true}
+      # Páginas de iMile trabajando a la vez (Llegada / Asignar repartidor)
+      IMILE_POOL_INGRESO: ${IMILE_POOL_INGRESO:-2}
+      IMILE_POOL_ASIGNAR: ${IMILE_POOL_ASIGNAR:-1}
+    volumes:
+      # La misma sesión de iMile guardada que usaba el backend (imile_sesion.json)
+      - imile_secrets:/app/.secrets
+    depends_on:
+      postgres:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:8090/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    # Al apagar, termina la página de iMile que esté en curso (cada tarea toma < 90 s)
+    stop_grace_period: 90s
+    restart: unless-stopped
+
   frontend:
     build:
       context: ../frontend
@@ -65,6 +102,7 @@ services:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - backend
+      - flujo
       - frontend
     restart: unless-stopped
 

@@ -9,6 +9,13 @@ import { CurrencyCell } from "@/components/ui/CurrencyCell";
 import type { PlanillaResumen, ResumenLabores, Personal } from "@/types/domain";
 
 const fmt = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 });
+// Horas decimales → "H:MM" (4.5833 → "4:35")
+function fmtHoras(h: number): string {
+  const totalMin = Math.round((h || 0) * 60);
+  const hh = Math.floor(totalMin / 60);
+  const mm = totalMin % 60;
+  return `${hh}:${String(mm).padStart(2, "0")}`;
+}
 const MESES = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
 const HOY = new Date();
 const METODOS = ["efectivo","transferencia","cheque","tarjeta","otros"];
@@ -550,7 +557,7 @@ function SeleccionarTab({ mes, anio, soloSeriales, onGenerado }: {
                           <input type="checkbox" checked={fechasSel.has(d.fecha)} onChange={() => toggleFecha(d.fecha)} />
                         </td>
                         <td className="px-4 py-2 text-gray-700">{d.fecha}</td>
-                        <td className="px-4 py-2 text-gray-600">{fmt.format(d.total_horas)}h</td>
+                        <td className="px-4 py-2 text-gray-600">{fmtHoras(d.total_horas)}</td>
                         <td className="px-4 py-2 text-gray-600"><CurrencyCell value={d.total_horas_monto} /></td>
                         <td className="px-4 py-2 text-gray-600">{d.total_labores}</td>
                         <td className="px-4 py-2 text-gray-600"><CurrencyCell value={d.total_labores_monto} /></td>
@@ -837,7 +844,7 @@ function PendienteRow({ p, mes, anio, soloSeriales, onGenerar }: {
         <td className="px-4 py-3 text-gray-700"><CurrencyCell value={p.total_mensajero} /></td>
         {!soloSeriales && (
           <>
-            <td className="px-4 py-3 text-gray-600">{fmt.format(p.total_horas)}h · <CurrencyCell value={p.total_horas_monto} /></td>
+            <td className="px-4 py-3 text-gray-600">{fmtHoras(p.total_horas)} · <CurrencyCell value={p.total_horas_monto} /></td>
             <td className="px-4 py-3 text-gray-600">{p.total_labores} · <CurrencyCell value={p.total_labores_monto} /></td>
             <td className="px-4 py-3 text-gray-600"><CurrencyCell value={p.total_subsidio} /></td>
           </>
@@ -1001,6 +1008,7 @@ function DiarioDetalle({ diario }: { diario: (ResumenLabores & { fecha: string }
           <th className="px-3 py-1.5 text-right text-gray-500 font-medium">Monto horas</th>
           <th className="px-3 py-1.5 text-right text-gray-500 font-medium">Labores</th>
           <th className="px-3 py-1.5 text-right text-gray-500 font-medium">Monto labores</th>
+          <th className="px-3 py-1.5 text-right text-gray-500 font-medium">Subsidio transp.</th>
           <th className="px-3 py-1.5 text-right text-gray-500 font-medium">Total</th>
         </tr>
       </thead>
@@ -1008,10 +1016,11 @@ function DiarioDetalle({ diario }: { diario: (ResumenLabores & { fecha: string }
         {diario.map((d) => (
           <tr key={d.fecha}>
             <td className="px-3 py-1.5 text-gray-700">{d.fecha}</td>
-            <td className="px-3 py-1.5 text-right text-gray-700">{fmt.format(d.total_horas)}h</td>
+            <td className="px-3 py-1.5 text-right text-gray-700">{fmtHoras(d.total_horas)}</td>
             <td className="px-3 py-1.5 text-right text-gray-700">${fmt.format(d.total_horas_monto)}</td>
             <td className="px-3 py-1.5 text-right text-gray-700">{d.total_labores}</td>
             <td className="px-3 py-1.5 text-right text-gray-700">${fmt.format(d.total_labores_monto)}</td>
+            <td className="px-3 py-1.5 text-right text-gray-700">${fmt.format(d.total_subsidio ?? 0)}</td>
             <td className="px-3 py-1.5 text-right font-semibold text-gray-800">${fmt.format(d.total_general)}</td>
           </tr>
         ))}
