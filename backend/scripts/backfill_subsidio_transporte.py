@@ -1,7 +1,8 @@
 """
 Reconcilia subsidio_transporte con todo el histórico de registro_horas.
 
-Por cada (personal_id, fecha) en registro_horas con horas trabajadas > 0,
+Por cada (personal_id, fecha) en registro_horas con al menos 2 horas trabajadas
+(con menos no se paga transporte, decisión 2026-11-05),
 asegura que exista una fila en subsidio_transporte con tipo_subsidio =
 'transporte_completo' y la tarifa vigente (plana, $8.333/día trabajado,
 sin importar cuántas horas) — sin importar si el registro ya existía con
@@ -21,6 +22,7 @@ import asyncio
 from sqlalchemy import text
 
 from app.database import AsyncSessionLocal
+from app.routers.labores import HORAS_MINIMAS_SUBSIDIO
 
 _RECONCILE_SQL = """
     INSERT INTO subsidio_transporte (personal_id, fecha, horas_totales, tipo_subsidio, tarifa, origen)
@@ -35,7 +37,7 @@ _RECONCILE_SQL = """
         'recalculado'
     FROM registro_horas rh
     GROUP BY rh.personal_id, rh.fecha
-    HAVING SUM(rh.horas_trabajadas) > 0
+    HAVING SUM(rh.horas_trabajadas) >= :minimo
     ON CONFLICT (personal_id, fecha) DO UPDATE SET
         horas_totales = EXCLUDED.horas_totales,
         tipo_subsidio = EXCLUDED.tipo_subsidio,
@@ -55,7 +57,7 @@ _DRY_RUN_SQL = """
     LEFT JOIN subsidio_transporte st
         ON st.personal_id = rh.personal_id AND st.fecha = rh.fecha
     GROUP BY rh.personal_id, rh.fecha, st.tipo_subsidio, st.tarifa, st.liquidado
-    HAVING SUM(rh.horas_trabajadas) > 0
+    HAVING SUM(rh.horas_trabajadas) >= :minimo
        AND (st.tipo_subsidio IS DISTINCT FROM 'transporte_completo'
             OR st.tarifa IS NULL
             OR st.tarifa != (SELECT tarifa FROM tarifas_servicios
@@ -68,7 +70,7 @@ async def main(commit: bool) -> None:
     async with AsyncSessionLocal() as db:
         if not commit:
             print("=== DRY-RUN: use --commit para aplicar ===\n")
-            rows = (await db.execute(text(_DRY_RUN_SQL))).mappings().all()
+            rows = (await db.execute(text(_DRY_RUN_SQL), {"minimo": HORAS_MINIMAS_SUBSIDIO})).mappings().all()
             ya_liquidadas = [r for r in rows if r["liquidado"]]
             pendientes = [r for r in rows if not r["liquidado"]]
             print(f"Filas a crear/corregir: {len(pendientes)}")
@@ -81,7 +83,7 @@ async def main(commit: bool) -> None:
                 print(f"\n⚠ {len(ya_liquidadas)} filas están desactualizadas pero ya liquidadas — no se tocan.")
             print("\n[DRY-RUN] Sin cambios aplicados. Use --commit para aplicar.")
         else:
-            result = await db.execute(text(_RECONCILE_SQL))
+            result = await db.execute(text(_RECONCILE_SQL), {"minimo": HORAS_MINIMAS_SUBSIDIO})
             await db.commit()
             print(f"✅ subsidio_transporte reconciliado — {result.rowcount} filas creadas/actualizadas.")
 
