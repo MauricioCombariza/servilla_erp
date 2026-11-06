@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -322,6 +323,43 @@ func TestSyncIdempotente(t *testing.T) {
 	}
 	if n := e.contar(`SELECT count(*) FROM tulas WHERE estado = 'cerrada'`); n != 1 {
 		t.Fatal("la tula debe quedar cerrada")
+	}
+}
+
+// Un código leído por error (muy largo) no debe trabar la cola: se rechaza con 422, queda
+// guardado y lo que viene detrás se sigue haciendo.
+func TestSyncCodigoLargoNoTrabaLaCola(t *testing.T) {
+	e := preparar(t)
+	malo := "11111111-2222-4333-8444-666666666666"
+	bueno := "11111111-2222-4333-8444-777777777777"
+	ops := map[string]any{"ops": []map[string]any{
+		{"op_id": "b0000000-0000-4000-8000-000000000001", "tipo": "abrir_tula", "tula_local_id": malo, "datos": map[string]any{"codigo": strings.Repeat("X", 300)}},
+		{"op_id": "b0000000-0000-4000-8000-000000000002", "tipo": "serial", "tula_local_id": malo, "datos": map[string]any{"serial": "S0001"}},
+		{"op_id": "b0000000-0000-4000-8000-000000000003", "tipo": "abrir_tula", "tula_local_id": bueno, "datos": map[string]any{"codigo": "T2"}},
+		{"op_id": "b0000000-0000-4000-8000-000000000004", "tipo": "serial", "tula_local_id": bueno, "datos": map[string]any{"serial": strings.Repeat("9", 60)}},
+		{"op_id": "b0000000-0000-4000-8000-000000000005", "tipo": "serial", "tula_local_id": bueno, "datos": map[string]any{"serial": "S0002"}},
+	}}
+	var r struct {
+		Resultados []struct {
+			Status int `json:"status"`
+		} `json:"resultados"`
+		Pendientes int `json:"pendientes"`
+	}
+	esperarEstado(t, e.pedir("POST", "/api/flujo/sync", "flujo_esc", ops, &r), 200, "sync")
+	if r.Pendientes != 0 || len(r.Resultados) != 5 {
+		t.Fatalf("el lote debe hacerse entero: pendientes=%d resultados=%d", r.Pendientes, len(r.Resultados))
+	}
+	quiero := []int{422, 404, 200, 422, 200}
+	for i, q := range quiero {
+		if r.Resultados[i].Status != q {
+			t.Fatalf("op %d: %d, se esperaba %d", i, r.Resultados[i].Status, q)
+		}
+	}
+	if n := e.contar(`SELECT count(*) FROM operaciones_cliente`); n != 5 {
+		t.Fatalf("las 5 operaciones deben quedar guardadas, hay %d", n)
+	}
+	if n := e.contar(`SELECT count(*) FROM tula_seriales`); n != 1 {
+		t.Fatalf("una lectura, hay %d", n)
 	}
 }
 

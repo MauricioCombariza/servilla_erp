@@ -123,6 +123,13 @@ func leer(t Tula, leidos int) TulaRead {
 	return r
 }
 
+// Largos de las columnas (tulas.codigo, tula_seriales.serial): lo que no cabe se rechaza
+// con 422 en vez de llegar a la base como error que trabe la cola del celular.
+const (
+	MaxCodigo = 255
+	MaxSerial = 50
+)
+
 const columnasTula = `id, codigo, sin_etiqueta, total_esperado, seriales_esperados, estado, usuario, fecha,
 	fecha_apertura, fecha_cierre`
 
@@ -205,6 +212,9 @@ func (s *Servicio) Abrir(ctx context.Context, usuario string, a AbrirTula) (Tula
 		if c := strings.TrimSpace(*a.Codigo); c != "" {
 			codigo = &c
 		}
+	}
+	if codigo != nil && len([]rune(*codigo)) > MaxCodigo {
+		return TulaAbierta{}, httpx.Invalido("El código leído no parece de una tula (muy largo)")
 	}
 	if a.TotalEsperado != nil && *a.TotalEsperado < 0 {
 		return TulaAbierta{}, httpx.Invalido("total_esperado debe ser >= 0")
@@ -308,6 +318,9 @@ func (s *Servicio) Escanear(ctx context.Context, tulaID int64, serial, usuario s
 	serial = strings.TrimSpace(serial)
 	if serial == "" {
 		return EscaneoResult{}, httpx.Invalido("serial vacío")
+	}
+	if len([]rune(serial)) > MaxSerial {
+		return EscaneoResult{}, httpx.Invalido("El código leído no parece de un paquete (muy largo)")
 	}
 	var res EscaneoResult
 	err := db.EnTx(ctx, s.Pool, func(tx pgx.Tx) error {
