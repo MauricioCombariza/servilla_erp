@@ -18,17 +18,19 @@ async def listar(
     zona: str | None = Query(default=None),
     codigo: str | None = Query(default=None, description="Código del mensajero; vacío = sin asignar"),
     incluir_devoluciones: bool = Query(default=False),
+    incluir_descartados: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     _=_auth,
 ):
     hoy = svc.hoy_bogota()
-    listado = await svc.listar_estancados(db, dias_min, zona, codigo, hoy, incluir_devoluciones)
+    listado = await svc.listar_estancados(db, dias_min, zona, codigo, hoy, incluir_devoluciones, incluir_descartados)
     paquetes = listado.paquetes
     return PaquetesEstancadosResponse(
         corte=hoy,
         dias_min=dias_min,
         total=len(paquetes),
         devoluciones_ocultas=listado.devoluciones_ocultas,
+        descartados_ocultos=listado.descartados_ocultos,
         paquetes=paquetes,
         por_mensajero=svc.por_mensajero(paquetes),
         por_zona=svc.por_zona(paquetes),
@@ -41,11 +43,12 @@ async def excel(
     zona: str | None = Query(default=None),
     codigo: str | None = Query(default=None),
     incluir_devoluciones: bool = Query(default=False),
+    incluir_descartados: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     _=_auth,
 ):
     hoy = svc.hoy_bogota()
-    paquetes = (await svc.listar_estancados(db, dias_min, zona, codigo, hoy, incluir_devoluciones)).paquetes
+    paquetes = (await svc.listar_estancados(db, dias_min, zona, codigo, hoy, incluir_devoluciones, incluir_descartados)).paquetes
     contenido = svc.construir_excel(paquetes, dias_min, hoy)
     return Response(
         content=contenido,

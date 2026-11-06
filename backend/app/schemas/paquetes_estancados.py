@@ -21,6 +21,7 @@ class PaqueteEstancadoRow(BaseModel):
     origen_asignacion: str | None
     imile_estado: str | None
     devolucion: str | None
+    motivo_descarte: str | None
 
 
 class GrupoEstancadosRow(BaseModel):
@@ -37,6 +38,7 @@ class PaquetesEstancadosResponse(BaseModel):
     dias_min: int
     total: int
     devoluciones_ocultas: int
+    descartados_ocultos: int
     paquetes: list[PaqueteEstancadoRow]
     por_mensajero: list[GrupoEstancadosRow]
     por_zona: list[GrupoEstancadosRow]
