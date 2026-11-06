@@ -33,6 +33,7 @@ from app.routers.asignacion_zonas import router as asignacion_zonas_router
 from app.routers.asignacion_zonas import router_qr as asignacion_qr_router
 from app.routers.imagenes import router as imagenes_router
 from app.routers.generar_dat import router as generar_dat_router
+from app.routers.paquetes_estancados import router as paquetes_estancados_router
 from app.config import settings
 from app.database import engine
 from app.services.imile_automation import imile_automation
@@ -91,6 +92,7 @@ app.include_router(asignacion_zonas_router)
 app.include_router(asignacion_qr_router)
 app.include_router(imagenes_router)
 app.include_router(generar_dat_router)
+app.include_router(paquetes_estancados_router)
 
 
 @app.get("/health")

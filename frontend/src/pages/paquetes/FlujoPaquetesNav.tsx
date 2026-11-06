@@ -1,11 +1,12 @@
 import { NavLink } from "react-router-dom";
-import { MapPinned, PackageOpen, ScanSearch, Upload } from "lucide-react";
+import { Hourglass, MapPinned, PackageOpen, ScanSearch, Upload } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 
 const PASOS = [
   { to: "/subir-despacho", label: "Subir base", icon: Upload, pageKeys: ["paquetes_despacho"] },
   { to: "/escaneo-tulas", label: "Escaneo de tulas", icon: PackageOpen, pageKeys: ["escaneo_tulas"] },
   { to: "/asignacion-zonas", label: "Asignación de zonas", icon: MapPinned, pageKeys: ["asignacion_zonas"] },
+  { to: "/paquetes-estancados", label: "Estancados", icon: Hourglass, pageKeys: ["paquetes_estancados"] },
   // Solo consulta el destino de un paquete: la ve quien tenga cualquiera de los tres pasos
   {
     to: "/consultar-paquete", label: "Consultar paquete", icon: ScanSearch,
