@@ -16,6 +16,7 @@ export interface PaqueteEstancado {
   origen_asignacion: "serial" | "zona" | null;
   imile_estado: string | null;
   devolucion: string | null; // estado en devoluciones; null = no está en devolución
+  motivo_descarte: string | null; // por qué no es un paquete real (tula, serial cortado…); null = sí lo es
 }
 
 export interface GrupoEstancados {
@@ -30,6 +31,7 @@ export interface PaquetesEstancadosResponse {
   dias_min: number;
   total: number;
   devoluciones_ocultas: number;
+  descartados_ocultos: number;
   paquetes: PaqueteEstancado[];
   por_mensajero: GrupoEstancados[];
   por_zona: GrupoEstancados[];
@@ -39,12 +41,13 @@ export interface FiltrosEstancados {
   zona?: string;
   codigo?: string;
   incluir_devoluciones?: boolean;
+  incluir_descartados?: boolean;
 }
 
 export const paquetesEstancadosApi = {
-  listar: (diasMin = 2, incluirDevoluciones = false) =>
+  listar: (diasMin = 2, incluirDevoluciones = false, incluirDescartados = false) =>
     api.get<PaquetesEstancadosResponse>("/paquetes-estancados", {
-      params: { dias_min: diasMin, incluir_devoluciones: incluirDevoluciones },
+      params: { dias_min: diasMin, incluir_devoluciones: incluirDevoluciones, incluir_descartados: incluirDescartados },
     }),
 
   descargarExcel: (diasMin: number, filtros: FiltrosEstancados) =>

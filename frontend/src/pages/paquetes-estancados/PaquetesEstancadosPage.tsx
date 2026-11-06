@@ -85,6 +85,7 @@ function TablaGrupo({
 export function PaquetesEstancadosPage() {
   const [diasMin, setDiasMin] = useState(2);
   const [incluirDevoluciones, setIncluirDevoluciones] = useState(false);
+  const [incluirDescartados, setIncluirDescartados] = useState(false);
   const [codigo, setCodigo] = useState<string | null>(null);
   const [zona, setZona] = useState<string | null>(null);
   const [busqueda, setBusqueda] = useState("");
@@ -92,8 +93,9 @@ export function PaquetesEstancadosPage() {
   const [error, setError] = useState("");
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["paquetes-estancados", diasMin, incluirDevoluciones],
-    queryFn: () => paquetesEstancadosApi.listar(diasMin, incluirDevoluciones).then((r) => r.data),
+    queryKey: ["paquetes-estancados", diasMin, incluirDevoluciones, incluirDescartados],
+    queryFn: () =>
+      paquetesEstancadosApi.listar(diasMin, incluirDevoluciones, incluirDescartados).then((r) => r.data),
   });
 
   const filtrados: PaqueteEstancado[] = useMemo(() => {
@@ -115,6 +117,7 @@ export function PaquetesEstancadosPage() {
     try {
       const r = await paquetesEstancadosApi.descargarExcel(diasMin, {
         incluir_devoluciones: incluirDevoluciones,
+        incluir_descartados: incluirDescartados,
         ...(codigo !== null ? { codigo } : {}),
         ...(zona !== null ? { zona } : {}),
       });
@@ -150,6 +153,14 @@ export function PaquetesEstancadosPage() {
               onChange={(e) => setIncluirDevoluciones(e.target.checked)}
             />
             Incluir devoluciones
+          </label>
+          <label className="flex items-center gap-1.5 text-sm text-gray-600 mr-2">
+            <input
+              type="checkbox"
+              checked={incluirDescartados}
+              onChange={(e) => setIncluirDescartados(e.target.checked)}
+            />
+            Incluir lecturas descartadas
           </label>
           <label className="text-sm text-gray-600">Más de</label>
           <select
@@ -196,6 +207,13 @@ export function PaquetesEstancadosPage() {
               (van de vuelta al cliente). Marca "Incluir devoluciones" para verlos.
             </p>
           )}
+          {data.descartados_ocultos > 0 && (
+            <p className="text-sm text-gray-500">
+              No se listan {data.descartados_ocultos} lecturas que no son paquetes (códigos de tula,
+              seriales cortados o leídos dos veces, o rechazados por iMile y fuera de la base).
+              Marca "Incluir lecturas descartadas" para revisarlas.
+            </p>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             <TablaGrupo titulo="Por mensajero" grupos={data.por_mensajero} seleccionado={codigo}
@@ -240,11 +258,12 @@ export function PaquetesEstancadosPage() {
                     <th className="text-left px-3 py-2 font-medium">Asignado el</th>
                     <th className="text-left px-3 py-2 font-medium">iMile</th>
                     {incluirDevoluciones && <th className="text-left px-3 py-2 font-medium">Devolución</th>}
+                    {incluirDescartados && <th className="text-left px-3 py-2 font-medium">Descarte</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {filtrados.map((p) => (
-                    <tr key={p.serial} className="border-t">
+                    <tr key={p.serial} className={`border-t ${p.motivo_descarte ? "bg-gray-50 text-gray-400" : ""}`}>
                       <td className="px-3 py-1.5 font-mono">{p.serial}</td>
                       <td className="px-3 py-1.5 text-right">
                         <span className={`inline-block rounded px-1.5 font-medium ${colorDias(p.dias)}`}>{p.dias}</span>
@@ -264,10 +283,11 @@ export function PaquetesEstancadosPage() {
                       </td>
                       <td className="px-3 py-1.5">{p.imile_estado ?? "—"}</td>
                       {incluirDevoluciones && <td className="px-3 py-1.5">{p.devolucion ?? "—"}</td>}
+                      {incluirDescartados && <td className="px-3 py-1.5">{p.motivo_descarte ?? "—"}</td>}
                     </tr>
                   ))}
                   {filtrados.length === 0 && (
-                    <tr><td colSpan={incluirDevoluciones ? 10 : 9} className="px-3 py-6 text-center text-gray-400">
+                    <tr><td colSpan={9 + (incluirDevoluciones ? 1 : 0) + (incluirDescartados ? 1 : 0)} className="px-3 py-6 text-center text-gray-400">
                       No hay paquetes con más de {data.dias_min} días sin entregar.
                     </td></tr>
                   )}

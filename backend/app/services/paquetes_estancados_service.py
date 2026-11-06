@@ -7,11 +7,15 @@
 - Zona: la del último escaneo en tula; si no tiene, la de `paquetes_despacho`.
 - Devoluciones: si el serial está en `devoluciones` ya va de vuelta al cliente, no espera
   entrega; se marca con su estado y por defecto no se lista.
+- Lecturas descartadas: lo leído como paquete que no puede ser uno (código de tula, serial
+  cortado o dos lecturas pegadas, o algo que iMile rechazó y no está en la base). Se marca
+  con el motivo y por defecto no se lista. Ver `motivo_descarte`.
 - Asignado a: el último día (desde el ingreso) con asignación. La reasignación serial por
   serial gana sobre la zona, igual que `_mensajero_actual` en asignacion_zonas_service.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -24,12 +28,32 @@ from app.services.excel_utils import construir_excel_multi
 TZ = ZoneInfo("America/Bogota")
 SIN_ASIGNAR = "Sin asignar"
 
+# Formatos vistos en los seriales entregados (2026-11): 13 dígitos (61…, 36…, 60…) o IM + 14
+# dígitos. Los códigos de tula de iMile son 13 dígitos que empiezan por 26 (26 + AAMMDD…).
+RE_SERIAL_VALIDO = re.compile(r"^(?:\d{13}|IM\d{14})$")
+RE_CODIGO_TULA = re.compile(r"^26\d{11}$")
+DESCARTE_TULA = "Código de tula"
+DESCARTE_FORMATO = "Serial incompleto o mal leído"
+DESCARTE_RECHAZADO = "Rechazado por iMile y no está en la base"
+
+
+def motivo_descarte(serial: str, es_codigo_tula: bool, en_base: bool, rechazado_imile: bool | None) -> str | None:
+    """Por qué una lectura no es un paquete real; None si parece un paquete."""
+    if es_codigo_tula or RE_CODIGO_TULA.match(serial):
+        return DESCARTE_TULA
+    if not RE_SERIAL_VALIDO.match(serial):
+        return DESCARTE_FORMATO
+    if not en_base and rechazado_imile:
+        return DESCARTE_RECHAZADO
+    return None
+
 _SQL = text("""
 WITH ingreso AS (
     SELECT ts.serial,
            MIN(ts.fecha_escaneo) AS primer_ingreso,
            (MIN(ts.fecha_escaneo) AT TIME ZONE 'America/Bogota')::date AS dia_ingreso,
-           COUNT(DISTINCT ts.tula_id) AS lecturas
+           COUNT(DISTINCT ts.tula_id) AS lecturas,
+           bool_and(ts.imile_estado IN ('error', 'bloqueado')) AS rechazado_imile
     FROM tula_seriales ts
     GROUP BY ts.serial
 ),
@@ -44,7 +68,9 @@ SELECT p.serial, p.primer_ingreso, p.dias, p.lecturas,
        pd.localidad, pd.direccion, pd.nombre AS destinatario, pd.f_emi,
        asg_s.fecha AS fecha_serial, ps.codigo AS codigo_serial, ps.nombre_completo AS nombre_serial,
        asg_z.fecha AS fecha_zona, pz.codigo AS codigo_zona, pz.nombre_completo AS nombre_zona,
-       im.estado AS imile_estado, dv.estado AS devolucion
+       im.estado AS imile_estado, dv.estado AS devolucion,
+       pd.serial IS NOT NULL AS en_base, p.rechazado_imile,
+       EXISTS (SELECT 1 FROM tulas t WHERE t.codigo = p.serial) AS es_codigo_tula
 FROM pendientes p
 LEFT JOIN paquetes_despacho pd ON pd.serial = p.serial
 LEFT JOIN devoluciones dv ON dv.serial = p.serial
@@ -92,12 +118,14 @@ class PaqueteEstancado:
     origen_asignacion: str | None  # "serial" | "zona"
     imile_estado: str | None
     devolucion: str | None  # estado en `devoluciones`; None = no está en devolución
+    motivo_descarte: str | None  # None = parece un paquete real
 
 
 @dataclass(frozen=True)
 class ListadoEstancados:
     paquetes: list[PaqueteEstancado]
     devoluciones_ocultas: int  # en devolución, no listados porque no se pidieron
+    descartados_ocultos: int  # lecturas que no son paquetes, no listadas porque no se pidieron
 
 
 @dataclass(frozen=True)
@@ -127,6 +155,7 @@ async def listar_estancados(
     codigo: str | None = None,
     hoy: date | None = None,
     incluir_devoluciones: bool = False,
+    incluir_descartados: bool = False,
 ) -> ListadoEstancados:
     """Paquetes con más de `dias_min` días desde su primer ingreso y aún sin entregar.
     `codigo` filtra por mensajero; `codigo=""` deja solo los sin asignar."""
@@ -141,16 +170,21 @@ async def listar_estancados(
             dias=r.dias, lecturas=r.lecturas, codigo=cod, mensajero=nombre,
             fecha_asignacion=fecha_asig, origen_asignacion=origen, imile_estado=r.imile_estado,
             devolucion=r.devolucion,
+            motivo_descarte=motivo_descarte(r.serial, r.es_codigo_tula, r.en_base, r.rechazado_imile),
         ))
     if zona is not None:
         paquetes = [p for p in paquetes if p.zona == zona]
     if codigo is not None:
         paquetes = [p for p in paquetes if (p.codigo or "") == codigo.strip()]
-    ocultas = 0
+    descartados = 0
+    if not incluir_descartados:
+        descartados = sum(1 for p in paquetes if p.motivo_descarte is not None)
+        paquetes = [p for p in paquetes if p.motivo_descarte is None]
+    devoluciones = 0
     if not incluir_devoluciones:
-        ocultas = sum(1 for p in paquetes if p.devolucion is not None)
+        devoluciones = sum(1 for p in paquetes if p.devolucion is not None)
         paquetes = [p for p in paquetes if p.devolucion is None]
-    return ListadoEstancados(paquetes, ocultas)
+    return ListadoEstancados(paquetes, devoluciones, descartados)
 
 
 def _agrupar(paquetes: list[PaqueteEstancado], clave, nombre) -> list[GrupoEstancados]:
@@ -175,8 +209,8 @@ def por_zona(paquetes: list[PaqueteEstancado]) -> list[GrupoEstancados]:
 
 
 _COLUMNAS = ["Serial", "Días", "Primer ingreso", "Zona", "Localidad", "Dirección", "Destinatario",
-             "F. emisión", "Código", "Mensajero", "Asignado el", "Asignado por", "Estado iMile", "Devolución", "Tulas"]
-_WIDTHS = [22, 7, 18, 12, 18, 40, 28, 12, 8, 30, 12, 12, 14, 12, 7]
+             "F. emisión", "Código", "Mensajero", "Asignado el", "Asignado por", "Estado iMile", "Devolución", "Descarte", "Tulas"]
+_WIDTHS = [22, 7, 18, 12, 18, 40, 28, 12, 8, 30, 12, 12, 14, 12, 30, 7]
 
 
 def construir_excel(paquetes: list[PaqueteEstancado], dias_min: int, hoy: date) -> bytes:
@@ -195,6 +229,7 @@ def construir_excel(paquetes: list[PaqueteEstancado], dias_min: int, hoy: date) 
         "Asignado por": p.origen_asignacion,
         "Estado iMile": p.imile_estado,
         "Devolución": p.devolucion,
+        "Descarte": p.motivo_descarte,
         "Tulas": p.lecturas,
     } for p in paquetes]
     resumen = [{"Mensajero": g.nombre, "Código": g.clave, "Paquetes": g.paquetes, "Máx. días": g.max_dias}
