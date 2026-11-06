@@ -468,6 +468,15 @@ async def test_pendientes_excluye_seriales_no_liquidables_igual_que_generar(clie
         assert precios[1600.0]["monto_liquidable"] == 1600.0
         assert sum(x["monto_liquidable"] for x in precios.values()) == row["total_mensajero"]
         assert sum(x["monto_no_liquidable"] for x in precios.values()) == row["monto_no_liquidable"]
+        # Desglose por planilla: cuadra con cada fila de precio
+        pl300 = precios[300.0]["planillas"]
+        assert [p["planilla"] for p in pl300] == [planillas[1]]
+        assert pl300[0]["seriales_no_liquidables"] == 1
+        assert pl300[0]["fecha_escaner"] == "2026-04-08"
+        for x in precios.values():
+            for k in ("seriales_liquidables", "monto_liquidable",
+                      "seriales_no_liquidables", "monto_no_liquidable"):
+                assert sum(p[k] for p in x["planillas"]) == x[k]
 
         r = await client.post(
             "/api/liquidaciones/generar",

@@ -28,12 +28,22 @@ export interface PlanillaPendienteMensajero {
   valor_por_envio: number;
 }
 
+export interface PlanillaPorPrecio {
+  planilla: string | null;
+  fecha_escaner: string | null;
+  seriales_liquidables: number;
+  monto_liquidable: number;
+  seriales_no_liquidables: number;
+  monto_no_liquidable: number;
+}
+
 export interface SerialesPorPrecio {
   precio_mensajero: number;
   seriales_liquidables: number;
   monto_liquidable: number;
   seriales_no_liquidables: number;
   monto_no_liquidable: number;
+  planillas: PlanillaPorPrecio[];
 }
 
 export interface AjustePendiente {

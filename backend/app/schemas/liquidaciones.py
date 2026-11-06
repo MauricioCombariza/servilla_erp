@@ -75,12 +75,22 @@ class PlanillaPendienteMensajero(BaseModel):
     valor_por_envio: float
 
 
+class PlanillaPorPrecio(BaseModel):
+    planilla: str | None = None
+    fecha_escaner: date | None = None
+    seriales_liquidables: int
+    monto_liquidable: float
+    seriales_no_liquidables: int
+    monto_no_liquidable: float
+
+
 class SerialesPorPrecio(BaseModel):
     precio_mensajero: float
     seriales_liquidables: int
     monto_liquidable: float
     seriales_no_liquidables: int
     monto_no_liquidable: float
+    planillas: list[PlanillaPorPrecio] = []
 
 
 class ResumenPendientePago(BaseModel):
