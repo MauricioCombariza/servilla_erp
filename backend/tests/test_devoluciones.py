@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 from docx import Document
 from openpyxl import load_workbook
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -407,3 +407,74 @@ async def test_generar_documento_devolucion(client, headers):
 async def test_generar_documento_items_vacios_422(client, headers):
     r = await client.post("/api/devoluciones/documento", json={"items": []}, headers=headers)
     assert r.status_code == 422
+
+
+# ── Cancelados por la aplicación ──────────────────────────────────────────────
+
+CANC_NUEVO = "9990000001001"     # en la base de despacho, no en devoluciones
+CANC_EXISTE = "9990000001002"    # ya en devoluciones como transito
+CANC_SIN_BASE = "9990000001003"  # ni en la base ni en devoluciones
+
+
+@pytest.fixture
+async def limpiar_cancelados():
+    from app.database import AsyncSessionLocal
+    from app.models.devoluciones import Devolucion
+    from app.models.paquetes_despacho import PaqueteDespacho
+
+    seriales = [CANC_NUEVO, CANC_EXISTE, CANC_SIN_BASE]
+
+    async def _borrar():
+        async with AsyncSessionLocal() as db:
+            await db.execute(delete(Devolucion).where(Devolucion.serial.in_(seriales)))
+            await db.execute(delete(PaqueteDespacho).where(PaqueteDespacho.serial.in_(seriales)))
+            await db.commit()
+
+    await _borrar()
+    async with AsyncSessionLocal() as db:
+        db.add(PaqueteDespacho(serial=CANC_NUEVO, nombre="Cliente Cancelado", telefono="3001234567",
+                               direccion="CL 1 # 2-3", localidad="Suba", zona="70_1", f_emi=date(2026, 11, 1)))
+        db.add(Devolucion(serial=CANC_EXISTE, estado="transito"))
+        await db.commit()
+    yield
+    await _borrar()
+
+
+async def test_cancelados_crea_actualiza_y_rechaza_invalidos(client, headers, limpiar_cancelados):
+    r = await client.post(
+        "/api/devoluciones/cancelados",
+        json={"seriales": [CANC_NUEVO, f" {CANC_EXISTE} ", CANC_SIN_BASE, CANC_NUEVO, "2610212648301", "21"]},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert {i["serial"]: (i["resultado"], i["estado_anterior"], i["en_base"]) for i in body["items"]} == {
+        CANC_NUEVO: ("nuevo", None, True),
+        CANC_EXISTE: ("actualizado", "transito", False),
+        CANC_SIN_BASE: ("nuevo", None, False),
+        "2610212648301": ("invalido", None, False),  # código de tula
+        "21": ("invalido", None, False),             # lectura cortada
+    }
+    assert (body["nuevos"], body["actualizados"], body["ya_cancelados"], body["invalidos"]) == (2, 1, 0, 2)
+
+    from app.database import AsyncSessionLocal
+    from app.models.devoluciones import Devolucion
+
+    async with AsyncSessionLocal() as db:
+        devs = {d.serial: d for d in (await db.execute(
+            select(Devolucion).where(Devolucion.serial.in_([CANC_NUEVO, CANC_EXISTE, CANC_SIN_BASE, "21"]))
+        )).scalars()}
+    assert set(devs) == {CANC_NUEVO, CANC_EXISTE, CANC_SIN_BASE}
+    assert all(d.estado == "cancelado" and d.fecha_escaneo is not None for d in devs.values())
+    assert (devs[CANC_NUEVO].nombre, devs[CANC_NUEVO].localidad) == ("Cliente Cancelado", "Suba")
+
+    # Repetir no cambia nada
+    r = await client.post("/api/devoluciones/cancelados", json={"seriales": [CANC_NUEVO]}, headers=headers)
+    assert r.json()["items"][0]["resultado"] == "ya_cancelado"
+
+
+async def test_cancelado_cuenta_como_devolucion_al_verificar(client, headers, limpiar_cancelados):
+    await client.post("/api/devoluciones/cancelados", json={"seriales": [CANC_SIN_BASE]}, headers=headers)
+    r = await client.post("/api/devoluciones/verificar-seriales", json={"seriales": [CANC_SIN_BASE]}, headers=headers)
+    item = r.json()["items"][0]
+    assert (item["clasificacion"], item["estado_detalle"]) == ("devolucion", "cancelado")

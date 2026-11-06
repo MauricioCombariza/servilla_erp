@@ -75,3 +75,24 @@ class VerificarSerialesResult(BaseModel):
     total_devoluciones: int
     total_entregas: int
     total_ninguna: int
+
+
+class CanceladosRequest(BaseModel):
+    seriales: list[str] = Field(min_length=1, max_length=500)
+
+
+class CanceladoItem(BaseModel):
+    serial: str
+    # nuevo: se creó la devolución · actualizado: ya existía con otro estado
+    # ya_cancelado: no cambió nada · invalido: no tiene formato de paquete, no se guardó
+    resultado: Literal["nuevo", "actualizado", "ya_cancelado", "invalido"]
+    estado_anterior: str | None = None
+    en_base: bool  # estaba en la base de despacho (de ahí salen nombre/dirección)
+
+
+class CanceladosResult(BaseModel):
+    items: list[CanceladoItem]
+    nuevos: int
+    actualizados: int
+    ya_cancelados: int
+    invalidos: int
