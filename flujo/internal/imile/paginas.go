@@ -13,6 +13,8 @@ import (
 const (
 	rutaLlegada      = "/#/DSOperation/OperationManagement/arrivalScanAWB"
 	rutaApiIngreso   = "/inbound/submit"
+	rutaDescarga     = "/#/DSOperation/DSInbound/dsOffloadingScan"
+	rutaApiDescarga  = "/unloading/submit"
 	rutaAsignar      = "/#/DSOperation/DispatchManagement/assignDA"
 	rutaApiAsignar   = "/bizAssignDaScan/submit"
 	campoGuia        = "input[name='scanNumber']"
@@ -90,10 +92,17 @@ func cancelarVentanas(page playwright.Page, esperar bool) {
 // escanear escribe el serial en Número de Guía, presiona Enter y lee la respuesta que
 // la propia página recibe de iMile en `rutaApi`.
 func escanear(page playwright.Page, serial, rutaApi string, bloqueos map[string]string) (Resultado, error) {
+	r, _, err := escanearConCuerpo(page, serial, rutaApi, bloqueos)
+	return r, err
+}
+
+// escanearConCuerpo: como escanear, y además devuelve el cuerpo que respondió iMile.
+func escanearConCuerpo(page playwright.Page, serial, rutaApi string, bloqueos map[string]string) (Resultado, []byte, error) {
 	campo := page.Locator(campoGuia).First()
 	if err := campo.Fill(serial); err != nil {
-		return Resultado{}, err
+		return Resultado{}, nil, err
 	}
+	var crudo []byte
 	var body map[string]any
 	resp, err := page.ExpectResponse(func(u string) bool { return strings.Contains(u, rutaApi) },
 		func() error { return campo.Press("Enter") },
@@ -102,17 +111,34 @@ func escanear(page playwright.Page, serial, rutaApi string, bloqueos map[string]
 	switch {
 	case err == nil:
 		if b, errBody := resp.Body(); errBody == nil {
-			body = DecodificarCuerpo(b)
+			crudo, body = b, DecodificarCuerpo(b)
 		}
 	case errors.As(err, &tiempo) || errors.Is(err, playwright.ErrTimeout):
 		// sin respuesta a tiempo: queda sin_confirmar
 	default:
-		return Resultado{}, err
+		return Resultado{}, nil, err
 	}
 	if AbreVentanaBloqueo(body) {
 		cancelarVentanas(page, true)
 	}
-	return Clasificar(body, bloqueos), nil
+	return Clasificar(body, bloqueos), crudo, nil
+}
+
+// Descargar: "Descarga de escaneo" de una tula (dsOffloadingScan). Es una acción real en
+// iMile: después de esto la consulta (unloading/search) ya sabe qué paquetes trae. Se
+// escribe el código y Enter; si sale una ventana se cancela, nunca se confirma nada.
+// Devuelve también la respuesta de iMile para dejarla en el log (aún no se ha visto la
+// de una tula real descargada con éxito: la grabación del 2026-10-26 fue con "21").
+func (s *Sesion) Descargar(page playwright.Page, codigo string) (Resultado, []byte, error) {
+	if err := s.abrirPantalla(page, rutaDescarga, "dsOffloadingScan"); err != nil {
+		return Resultado{}, nil, err
+	}
+	cancelarVentanas(page, false)
+	r, crudo, err := escanearConCuerpo(page, strings.TrimSpace(codigo), rutaApiDescarga, BloqueosDescarga)
+	if err == nil && !AbreVentanaBloqueo(DecodificarCuerpo(crudo)) && verdadero(objeto(DecodificarCuerpo(crudo))["popup"]) {
+		cancelarVentanas(page, true) // iMile pidió ventana sin bloqueo: se cierra sin confirmar
+	}
+	return r, crudo, err
 }
 
 // Ingresar: Paso 2.5, "Llegada (Waybill No)". El peso no se llena y la fecha se deja como está.

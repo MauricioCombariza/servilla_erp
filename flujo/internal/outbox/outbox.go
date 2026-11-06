@@ -21,6 +21,9 @@ import (
 const (
 	TipoIngreso = "ingreso" // Paso 2.5: Llegada (Waybill No) / arrivalScanAWB
 	TipoAsignar = "asignar" // Paso 3.3: Asignar repartidor / assignDA
+	// Descarga de la tula (Descarga de escaneo / dsOffloadingScan): Serial = código de la
+	// tula. La hacen los mismos workers de ingreso, antes que los paquetes.
+	TipoDescarga = "descarga"
 
 	EstadoPendiente = "pendiente"
 	EstadoEnProceso = "en_proceso"
@@ -57,17 +60,23 @@ func Encolar(ctx context.Context, q db.DBTX, t Tarea) (int64, error) {
 // las de ese mensajero: la página de asignar ya lo tiene elegido en el selector DA.
 // Devuelve nil si no hay nada que hacer.
 func Reclamar(ctx context.Context, pool *pgxpool.Pool, tipo string, preferirPersonal *int64) (*Tarea, error) {
+	return ReclamarDe(ctx, pool, []string{tipo}, preferirPersonal)
+}
+
+// ReclamarDe: como Reclamar, entre varios tipos; el primero de la lista va antes (las
+// descargas de tula antes que los ingresos de sus paquetes).
+func ReclamarDe(ctx context.Context, pool *pgxpool.Pool, tipos []string, preferirPersonal *int64) (*Tarea, error) {
 	var t Tarea
 	err := pool.QueryRow(ctx, `
 		UPDATE imile_tareas SET estado = 'en_proceso', intentos = intentos + 1,
 		       lease_hasta = now() + make_interval(secs => $3), actualizado = now()
 		WHERE id = (
 			SELECT id FROM imile_tareas
-			WHERE tipo = $1 AND estado = 'pendiente' AND proximo_intento <= now()
-			ORDER BY (personal_id IS NOT DISTINCT FROM $2) DESC, id
+			WHERE tipo = ANY($1) AND estado = 'pendiente' AND proximo_intento <= now()
+			ORDER BY array_position($1, tipo), (personal_id IS NOT DISTINCT FROM $2) DESC, id
 			FOR UPDATE SKIP LOCKED LIMIT 1)
 		RETURNING id, tipo, serial, fecha, tula_serial_id, personal_id, envio_id::text, usuario, intentos`,
-		tipo, preferirPersonal, lease.Seconds(),
+		tipos, preferirPersonal, lease.Seconds(),
 	).Scan(&t.ID, &t.Tipo, &t.Serial, &t.Fecha, &t.TulaSerialID, &t.PersonalID, &t.EnvioID, &t.Usuario, &t.Intentos)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil

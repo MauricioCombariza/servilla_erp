@@ -40,6 +40,11 @@ DESCARGADOS = {
     "2610154964301": ["FAKE-T1-01", "FAKE-T1-02", "FAKE-T1-03", "FAKE-T1-04"],
     "2610154963701": ["FAKE-T2-01", "FAKE-T2-02"],
 }
+# Tulas que llegaron en el vehículo pero nadie ha descargado: al descargarlas
+# (unloading/submit) pasan a DESCARGADOS y ya aparecen en la consulta
+SIN_DESCARGAR = {
+    "2611063528401": ["FAKE-T3-01", "FAKE-T3-02", "FAKE-T3-03"],
+}
 
 LOGIN_HTML = f"""<!doctype html><html><body>
 <input name="userCode"><input name="password" type="password">
@@ -183,7 +188,17 @@ class _FakeImile(BaseHTTPRequestHandler):
         datos = json.loads(self.rfile.read(largo) or b"{}")
         if "/unloading/submit" in self.path:
             self.descargas.append(datos)
-            return self._json({"status": "success", "resultObject": None})
+            codigo = datos.get("scanNumber", "")
+            ro = {"scanNumber": codigo, "operateType": "offloading", "scanTypeDesc": "Descarga",
+                  "scanNumberType": "bag", "status": 2, "popup": False, "repeat": False, "voiceType": "success"}
+            if codigo in SIN_DESCARGAR:
+                DESCARGADOS[codigo] = SIN_DESCARGAR.pop(codigo)
+            elif codigo in DESCARGADOS:
+                ro.update(repeat=True, warnMsg="Repetido")
+            else:  # como iMile real con "21" (grabación 2026-10-26)
+                ro.update(scanNumberType="waybill", popup=True, blockCode=BLOQUEO_NO_EXISTE[0],
+                          blockInfo=BLOQUEO_NO_EXISTE[1], voiceType="fail")
+            return self._json({"status": "success", "resultObject": ro, "message": "Successful operation!"})
         if "/unloading/search" in self.path:
             filas = [{"waybillNo": w, "bagNo": b, "scanNumber": b, "scanNumberType": "bag", "scanType": "Offloading"}
                      for b, ws in DESCARGADOS.items() for w in ws]

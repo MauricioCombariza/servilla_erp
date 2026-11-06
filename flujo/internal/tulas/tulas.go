@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -45,7 +46,18 @@ type Servicio struct {
 	Pool          *pgxpool.Pool
 	Imile         ConsultaImile
 	IngresoActivo bool
+	// DescargaActiva: si iMile no tiene la tula descargada al abrirla, se encola su
+	// descarga (IMILE_DESCARGA_TULA_ACTIVA). La hacen los workers de ingreso.
+	DescargaActiva bool
 }
+
+// Las etiquetas de tula de iMile son de 13 dígitos (p. ej. 2611063528401). Solo esas se
+// descargan: un código leído por error nunca se manda a una acción real en iMile.
+var reCodigoTula = regexp.MustCompile(`^[0-9]{13}$`)
+
+func EsCodigoTula(codigo string) bool { return reCodigoTula.MatchString(codigo) }
+
+const mensajeDescargando = "Descargando la tula en iMile para saber cuántos paquetes trae…"
 
 type Tula struct {
 	ID                int64
@@ -289,9 +301,55 @@ func (s *Servicio) Abrir(ctx context.Context, usuario string, a AbrirTula) (Tula
 			return err
 		}
 		abierta = TulaAbierta{TulaRead: leer(*t, 0), ImileTotal: imileTotal}
+		if s.DescargaActiva && codigo != nil && total == nil && EsCodigoTula(*codigo) {
+			msg, err := s.encolarDescarga(ctx, tx, *t, usuario)
+			if err != nil {
+				return err
+			}
+			if msg != nil {
+				abierta.ImileTotal = msg
+			}
+		}
 		return nil
 	})
 	return abierta, err
+}
+
+// encolarDescarga: la descarga de la tula en iMile, una sola vez por código y día. Si ya
+// se pidió (la misma tula abierta otra vez), la tula nueva queda con lo que ya se sabe.
+func (s *Servicio) encolarDescarga(ctx context.Context, tx pgx.Tx, t Tula, usuario string) (*string, error) {
+	var ya bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM imile_tareas WHERE tipo = $1 AND serial = $2 AND fecha = $3
+		               AND estado NOT IN ('fallida', 'cancelada'))`,
+		outbox.TipoDescarga, *t.Codigo, t.Fecha).Scan(&ya); err != nil {
+		return nil, err
+	}
+	if ya {
+		var msg *string
+		err := tx.QueryRow(ctx, `
+			UPDATE tulas n SET imile_descarga_estado = o.imile_descarga_estado,
+			       imile_descarga_mensaje = o.imile_descarga_mensaje, imile_fecha = now(),
+			       total_esperado = COALESCE(n.total_esperado, o.total_esperado),
+			       seriales_esperados = COALESCE(n.seriales_esperados, o.seriales_esperados)
+			FROM (SELECT * FROM tulas WHERE codigo = $2 AND fecha = $3 AND id <> $1
+			      ORDER BY id DESC LIMIT 1) o
+			WHERE n.id = $1 RETURNING n.imile_descarga_mensaje`, t.ID, *t.Codigo, t.Fecha).Scan(&msg)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return msg, err
+	}
+	if _, err := outbox.Encolar(ctx, tx, outbox.Tarea{
+		Tipo: outbox.TipoDescarga, Serial: *t.Codigo, Fecha: t.Fecha, Usuario: usuario,
+	}); err != nil {
+		return nil, err
+	}
+	msg := mensajeDescargando
+	_, err := tx.Exec(ctx, `
+		UPDATE tulas SET imile_descarga_estado = 'pendiente', imile_descarga_mensaje = $2, imile_fecha = now()
+		WHERE id = $1`, t.ID, msg)
+	return &msg, err
 }
 
 func (s *Servicio) FijarTotal(ctx context.Context, tulaID int64, total *int) (TulaRead, error) {

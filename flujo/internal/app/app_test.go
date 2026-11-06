@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -47,7 +48,7 @@ type entorno struct {
 	zonas []string
 }
 
-func preparar(t *testing.T) *entorno {
+func preparar(t *testing.T, opciones ...func(*config.Config)) *entorno {
 	url := os.Getenv("FLUJO_TEST_DATABASE_URL")
 	if url == "" {
 		t.Skip("sin FLUJO_TEST_DATABASE_URL")
@@ -95,6 +96,9 @@ func preparar(t *testing.T) *entorno {
 			('S0003', 'Calle 3', NULL, NULL, NULL, $3, 'sin gestión')`, zonas[0], zonas[1], hoy)
 
 	cfg := config.Config{JWTSecret: secreto, IngresoActivo: true, AsignacionActiva: true}
+	for _, o := range opciones {
+		o(&cfg)
+	}
 	a := Nueva(pool, cfg, imile.NuevaSesion(cfg), consultaFalsa{})
 	srv := httptest.NewServer(a.Handler)
 	t.Cleanup(srv.Close)
@@ -360,6 +364,68 @@ func TestSyncCodigoLargoNoTrabaLaCola(t *testing.T) {
 	}
 	if n := e.contar(`SELECT count(*) FROM tula_seriales`); n != 1 {
 		t.Fatalf("una lectura, hay %d", n)
+	}
+}
+
+// Descarga automática (IMILE_DESCARGA_TULA_ACTIVA): si iMile no tiene la tula, al abrirla
+// se encola su descarga una sola vez por código y día; un código raro nunca se manda.
+func TestAbrirEncolaDescarga(t *testing.T) {
+	e := preparar(t, func(c *config.Config) { c.DescargaActiva = true })
+	type abierta struct {
+		ID         int64   `json:"id"`
+		ImileTotal *string `json:"imile_total"`
+	}
+	abrir := func(codigo string, cerrar bool) abierta {
+		t.Helper()
+		var a abierta
+		esperarEstado(t, e.pedir("POST", "/api/tulas", "flujo_esc", map[string]any{"codigo": codigo, "cerrar_anterior": cerrar}, &a), 201, "abrir "+codigo)
+		return a
+	}
+	tareas := func(codigo string) int {
+		return e.contar(`SELECT count(*) FROM imile_tareas WHERE tipo = 'descarga' AND serial = '` + codigo + `'`)
+	}
+
+	a := abrir("2611063528401", false)
+	if a.ImileTotal == nil || !strings.Contains(*a.ImileTotal, "Descargando") {
+		t.Fatalf("debe avisar que se está descargando: %v", a.ImileTotal)
+	}
+	if n := tareas("2611063528401"); n != 1 {
+		t.Fatalf("una tarea de descarga, hay %d", n)
+	}
+	abrir("T1", true) // iMile ya la tiene (consulta falsa): no se descarga
+	abrir("26111111111111111111", true)
+	if n := e.contar(`SELECT count(*) FROM imile_tareas WHERE tipo = 'descarga'`); n != 1 {
+		t.Fatalf("solo la tula de 13 dígitos se descarga, hay %d tareas", n)
+	}
+
+	// El worker la descargó: la tula queda con el total y el celular lo ve en /cambios
+	var c0 struct {
+		Cursor string `json:"cursor"`
+	}
+	esperarEstado(t, e.pedir("GET", "/api/flujo/cambios", "flujo_esc", nil, &c0), 200, "cambios")
+	time.Sleep(10 * time.Millisecond)
+	ejecutar(t, e.pool, `UPDATE tulas SET total_esperado = 3, imile_descarga_estado = 'ok',
+		imile_descarga_mensaje = 'iMile: la tula trae 3 paquetes', imile_fecha = now() + interval '10 seconds'
+		WHERE id = $1`, a.ID)
+	var c1 struct {
+		Tulas []struct {
+			TulaID        int64   `json:"tula_id"`
+			TotalEsperado *int    `json:"total_esperado"`
+			ImileTotal    *string `json:"imile_total"`
+		} `json:"tulas"`
+	}
+	esperarEstado(t, e.pedir("GET", "/api/flujo/cambios?desde="+url.QueryEscape(c0.Cursor), "flujo_esc", nil, &c1), 200, "cambios")
+	if len(c1.Tulas) != 1 || c1.Tulas[0].TulaID != a.ID || c1.Tulas[0].TotalEsperado == nil || *c1.Tulas[0].TotalEsperado != 3 {
+		t.Fatalf("cambios de la tula: %+v", c1.Tulas)
+	}
+
+	// La misma tula abierta otra vez el mismo día: no se vuelve a descargar y trae lo que ya se sabe
+	b := abrir("2611063528401", true)
+	if n := tareas("2611063528401"); n != 1 {
+		t.Fatalf("no debe repetirse la descarga, hay %d tareas", n)
+	}
+	if b.ImileTotal == nil || *b.ImileTotal != "iMile: la tula trae 3 paquetes" {
+		t.Fatalf("la tula reabierta debe traer el total ya conocido: %v", b.ImileTotal)
 	}
 }
 

@@ -25,6 +25,7 @@ type Config struct {
 	IngresoActivo    bool
 	ConsultaActiva   bool
 	AsignacionActiva bool
+	DescargaActiva   bool // necesita también el ingreso (sus workers) y la consulta encendidos
 	PoolIngreso      int
 	PoolAsignar      int
 	MaxIntentos      int
@@ -48,11 +49,14 @@ func Cargar() (Config, error) {
 		IngresoActivo:    envBool("IMILE_INGRESO_ACTIVO", false),
 		ConsultaActiva:   envBool("IMILE_CONSULTA_TULA_ACTIVA", false),
 		AsignacionActiva: envBool("IMILE_ASIGNACION_ACTIVA", true),
+		DescargaActiva:   envBool("IMILE_DESCARGA_TULA_ACTIVA", false),
 		PoolIngreso:      envInt("IMILE_POOL_INGRESO", 2),
 		PoolAsignar:      envInt("IMILE_POOL_ASIGNAR", 1),
 		MaxIntentos:      envInt("IMILE_MAX_INTENTOS", 5),
 		ConsultaCacheTTL: time.Duration(envInt("IMILE_CONSULTA_CACHE_S", 15)) * time.Second,
 	}
+	// Sin workers de ingreso nadie haría la descarga; sin consulta no se sabría el total
+	c.DescargaActiva = c.DescargaActiva && c.IngresoActivo && c.ConsultaActiva
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("falta DATABASE_URL")
 	}

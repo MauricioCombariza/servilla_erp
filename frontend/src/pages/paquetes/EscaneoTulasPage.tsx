@@ -283,10 +283,16 @@ export function EscaneoTulasPage() {
   }), [refrescarDelDia]);
 
   // Estado de iMile de cada paquete (lo hace el servidor en segundo plano)
-  useCambiosImile(tula?.id != null, (cambios) => {
+  useCambiosImile(tula?.id != null, (cambios, tulas) => {
     const id = tulaRef.current?.id;
     for (const c of cambios) {
       if (c.tula_id === id) actualizarLectura(c.serial, { imile: c.imile_estado, imileMensaje: c.imile_mensaje });
+    }
+    // La descarga automática en iMile terminó: el total que dio y su mensaje
+    const t = tulas.filter((x) => x.tula_id === id).pop();
+    if (t) {
+      setTula((x) => x && conContador({ ...x, total_esperado: x.total_esperado ?? t.total_esperado }));
+      if (t.imile_total) setImileTotal(t.imile_total);
     }
   });
 

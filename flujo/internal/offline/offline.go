@@ -312,9 +312,18 @@ type CambioSerial struct {
 	ImileMensaje *string `json:"imile_mensaje"`
 }
 
+// CambioTula: cómo va la descarga de la tula en iMile y el total que dio (2.3).
+type CambioTula struct {
+	TulaID         int64   `json:"tula_id"`
+	TotalEsperado  *int    `json:"total_esperado"`
+	DescargaEstado *string `json:"imile_descarga_estado"`
+	ImileTotal     *string `json:"imile_total"` // el mensaje que se muestra
+}
+
 type Cambios struct {
 	Cursor   time.Time      `json:"cursor"`
 	Seriales []CambioSerial `json:"seriales"`
+	Tulas    []CambioTula   `json:"tulas"`
 }
 
 // hCambios: GET /api/flujo/cambios?desde=<cursor> → estado de iMile de los paquetes del
@@ -328,6 +337,7 @@ func (s *Servicio) hCambios(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.Seriales = []CambioSerial{}
+	c.Tulas = []CambioTula{}
 	desde := r.URL.Query().Get("desde")
 	if desde == "" {
 		httpx.JSON(w, http.StatusOK, c)
@@ -351,6 +361,24 @@ func (s *Servicio) hCambios(w http.ResponseWriter, r *http.Request) {
 	c.Seriales, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (CambioSerial, error) {
 		var x CambioSerial
 		err := row.Scan(&x.TulaID, &x.Serial, &x.ImileEstado, &x.ImileMensaje)
+		return x, err
+	})
+	if err != nil {
+		httpx.Fallar(w, r, err)
+		return
+	}
+	rows, err = s.Pool.Query(ctx, `
+		SELECT id, total_esperado, imile_descarga_estado, imile_descarga_mensaje
+		FROM tulas WHERE usuario = $1 AND fecha >= $2 AND imile_fecha > $3
+		ORDER BY imile_fecha LIMIT 200`,
+		auth.DelContexto(ctx).Username, db.Fecha{Time: db.Hoy().AddDate(0, 0, -1)}, t)
+	if err != nil {
+		httpx.Fallar(w, r, err)
+		return
+	}
+	c.Tulas, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (CambioTula, error) {
+		var x CambioTula
+		err := row.Scan(&x.TulaID, &x.TotalEsperado, &x.DescargaEstado, &x.ImileTotal)
 		return x, err
 	})
 	if err != nil {

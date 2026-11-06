@@ -68,6 +68,9 @@ services:
       IMILE_INGRESO_ACTIVO: ${IMILE_INGRESO_ACTIVO:-false}
       IMILE_CONSULTA_TULA_ACTIVA: ${IMILE_CONSULTA_TULA_ACTIVA:-true}
       IMILE_ASIGNACION_ACTIVA: ${IMILE_ASIGNACION_ACTIVA:-true}
+      # Descarga automática de la tula en iMile al abrirla si iMile aún no la tiene
+      # (acción real en iMile). Necesita IMILE_INGRESO_ACTIVO y la consulta encendidos.
+      IMILE_DESCARGA_TULA_ACTIVA: ${IMILE_DESCARGA_TULA_ACTIVA:-false}
       # Páginas de iMile trabajando a la vez (Llegada / Asignar repartidor)
       IMILE_POOL_INGRESO: ${IMILE_POOL_INGRESO:-2}
       IMILE_POOL_ASIGNAR: ${IMILE_POOL_ASIGNAR:-1}
