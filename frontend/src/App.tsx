@@ -28,6 +28,7 @@ import { BuscarPaquetePage } from "@/pages/buscar/BuscarPaquetePage";
 import { ImagenesPage } from "@/pages/imagenes/ImagenesPage";
 import { AjusteDireccionesPage } from "@/pages/direcciones/AjusteDireccionesPage";
 import { PendientesEntregaPage } from "@/pages/pendientes-entrega/PendientesEntregaPage";
+import { PaquetesEstancadosPage } from "@/pages/paquetes-estancados/PaquetesEstancadosPage";
 import { DevolucionesPage } from "@/pages/devoluciones/DevolucionesPage";
 import { EscaneoDevolucionesPage } from "@/pages/devoluciones/EscaneoDevolucionesPage";
 import { EscaneoCarrytPage } from "@/pages/carryt/EscaneoCarrytPage";
@@ -177,6 +178,7 @@ export default function App() {
             <Route path="/imagenes" element={<PageGuard pageKey="imagenes"><ImagenesPage /></PageGuard>} />
             <Route path="/direcciones" element={<PageGuard pageKey="direcciones"><AjusteDireccionesPage /></PageGuard>} />
             <Route path="/pendientes-entrega" element={<PageGuard pageKey="pendientes_entrega"><PendientesEntregaPage /></PageGuard>} />
+            <Route path="/paquetes-estancados" element={<PageGuard pageKey="paquetes_estancados"><PaquetesEstancadosPage /></PageGuard>} />
             <Route path="/devoluciones" element={<PageGuard pageKey="devoluciones"><DevolucionesPage /></PageGuard>} />
             <Route path="/geocercas" element={<PageGuard pageKey="geocercas"><GeocercasPage /></PageGuard>} />
             <Route path="/generar-dat" element={<PageGuard pageKey="generar_dat"><GenerarDatPage /></PageGuard>} />
