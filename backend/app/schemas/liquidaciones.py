@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class LiquidacionRead(BaseModel):
@@ -82,6 +82,21 @@ class PlanillaPorPrecio(BaseModel):
     monto_liquidable: float
     seriales_no_liquidables: int
     monto_no_liquidable: float
+
+
+class CambiarPrecioPlanillaRequest(BaseModel):
+    """Cambia el precio de los seriales pendientes de un mensajero en una planilla
+    que hoy tienen `precio_actual` (una fila del desglose por precio)."""
+    planilla: str
+    precio_actual: float
+    precio_nuevo: float = Field(ge=0)
+    mes: int
+    anio: int
+
+
+class CambiarPrecioPlanillaResult(BaseModel):
+    planilla: str
+    seriales_actualizados: int
 
 
 class SerialesPorPrecio(BaseModel):

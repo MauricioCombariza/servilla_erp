@@ -599,3 +599,83 @@ async def test_generar_sin_planilla_explicita_solo_toma_el_mes(client, auth_head
     finally:
         async with AsyncSessionLocal() as db:
             await _cleanup(db)
+
+
+@pytest.mark.asyncio
+async def test_precios_cambiar_precio_fila_y_liquidar_solo_seleccion(client, auth_headers):
+    """Desde el desglose por precio: cambiar el precio de una fila (precio, planilla)
+    solo toca esos seriales del mensajero, y generar con una selección de planillas
+    deja las demás pendientes."""
+    from app.database import AsyncSessionLocal
+    from sqlalchemy import text
+
+    async def _cleanup(db):
+        await db.execute(text("DELETE FROM seriales_gestion WHERE serial LIKE 'LQ06-%'"))
+        await db.execute(text("DELETE FROM liquidaciones WHERE personal_id IN "
+                               "(SELECT id FROM personal WHERE codigo = 'LQ06')"))
+        await db.execute(text("DELETE FROM personal WHERE codigo = 'LQ06'"))
+        await db.commit()
+
+    async with AsyncSessionLocal() as db:
+        await _cleanup(db)
+        r = await db.execute(text("""
+            INSERT INTO personal (codigo, nombre_completo, identificacion, tipo_personal, activo)
+            VALUES ('LQ06', 'Mensajero Seleccion Test', '777706TEST', 'mensajero', TRUE)
+            RETURNING id
+        """))
+        pid = r.scalar_one()
+        # 7TESTLQ06A: 2 a $750 + 1 a $295 ; 7TESTLQ06B: 1 a $750
+        seriales = [("7TESTLQ06A", 750), ("7TESTLQ06A", 750), ("7TESTLQ06A", 295), ("7TESTLQ06B", 750)]
+        for i, (planilla, precio) in enumerate(seriales):
+            await db.execute(text("""
+                INSERT INTO seriales_gestion
+                    (serial, planilla, f_esc, cod_men, mensajero_id,
+                     tipo_gestion, tipo_envio, ambito, estado,
+                     precio_mensajero, precio_cliente, origen, editado_manualmente)
+                VALUES
+                    (:serial, :planilla, '2026-04-08', 'LQ06', :pid,
+                     'Entrega', 'sobre', 'bogota', 'pendiente', :precio, 0, 'manual', FALSE)
+            """), {"serial": f"LQ06-{i}", "planilla": planilla, "pid": pid, "precio": precio})
+        await db.commit()
+
+    try:
+        r = await client.patch(
+            f"/api/liquidaciones/precios/{pid}",
+            json={"planilla": "7TESTLQ06A", "precio_actual": 750, "precio_nuevo": 800, "mes": 4, "anio": 2026},
+            headers=auth_headers,
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["seriales_actualizados"] == 2
+
+        r = await client.patch(
+            f"/api/liquidaciones/precios/{pid}",
+            json={"planilla": "", "precio_actual": 750, "precio_nuevo": 800, "mes": 4, "anio": 2026},
+            headers=auth_headers,
+        )
+        assert r.status_code == 400
+
+        r = await client.get(f"/api/liquidaciones/precios/{pid}", params={"mes": 4, "anio": 2026},
+                             headers=auth_headers)
+        precios = {x["precio_mensajero"]: x for x in r.json()}
+        assert set(precios) == {295.0, 750.0, 800.0}
+        assert [p["planilla"] for p in precios[750.0]["planillas"]] == ["7TESTLQ06B"]
+        assert precios[800.0]["monto_liquidable"] == 1600.0
+
+        r = await client.post(
+            "/api/liquidaciones/generar",
+            json={"personal_id": pid, "periodo_mes": 4, "periodo_anio": 2026,
+                  "fecha_pago_programada": "2026-05-08",
+                  "planillas": ["7TESTLQ06A"], "fechas_alistamiento": []},
+            headers=auth_headers,
+        )
+        assert r.status_code == 201, r.text
+        assert r.json()["total_a_pagar"] == 1600.0 + 295.0
+
+        r = await client.get(f"/api/liquidaciones/precios/{pid}", params={"mes": 4, "anio": 2026},
+                             headers=auth_headers)
+        restantes = r.json()
+        assert [(x["precio_mensajero"], [p["planilla"] for p in x["planillas"]]) for x in restantes] \
+            == [(750.0, ["7TESTLQ06B"])]
+    finally:
+        async with AsyncSessionLocal() as db:
+            await _cleanup(db)
