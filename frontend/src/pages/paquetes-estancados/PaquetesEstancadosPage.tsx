@@ -204,7 +204,7 @@ export function PaquetesEstancadosPage() {
           {data.devoluciones_ocultas > 0 && (
             <p className="text-sm text-gray-500">
               No se listan {data.devoluciones_ocultas} paquetes que están en devolución
-              (van de vuelta al cliente). Marca "Incluir devoluciones" para verlos.
+              o cancelados por la aplicación (van de vuelta al cliente). Marca "Incluir devoluciones" para verlos.
             </p>
           )}
           {data.descartados_ocultos > 0 && (

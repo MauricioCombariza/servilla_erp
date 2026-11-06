@@ -15,7 +15,6 @@
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -24,14 +23,11 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.excel_utils import construir_excel_multi
+from app.services.seriales_formato import RE_SERIAL_VALIDO, parece_codigo_tula
 
 TZ = ZoneInfo("America/Bogota")
 SIN_ASIGNAR = "Sin asignar"
 
-# Formatos vistos en los seriales entregados (2026-11): 13 dígitos (61…, 36…, 60…) o IM + 14
-# dígitos. Los códigos de tula de iMile son 13 dígitos que empiezan por 26 (26 + AAMMDD…).
-RE_SERIAL_VALIDO = re.compile(r"^(?:\d{13}|IM\d{14})$")
-RE_CODIGO_TULA = re.compile(r"^26\d{11}$")
 DESCARTE_TULA = "Código de tula"
 DESCARTE_FORMATO = "Serial incompleto o mal leído"
 DESCARTE_RECHAZADO = "Rechazado por iMile y no está en la base"
@@ -39,7 +35,7 @@ DESCARTE_RECHAZADO = "Rechazado por iMile y no está en la base"
 
 def motivo_descarte(serial: str, es_codigo_tula: bool, en_base: bool, rechazado_imile: bool | None) -> str | None:
     """Por qué una lectura no es un paquete real; None si parece un paquete."""
-    if es_codigo_tula or RE_CODIGO_TULA.match(serial):
+    if es_codigo_tula or parece_codigo_tula(serial):
         return DESCARTE_TULA
     if not RE_SERIAL_VALIDO.match(serial):
         return DESCARTE_FORMATO

@@ -43,7 +43,25 @@ export interface VerificarSerialesResult {
   total_ninguna: number;
 }
 
+export interface CanceladoItem {
+  serial: string;
+  resultado: "nuevo" | "actualizado" | "ya_cancelado" | "invalido";
+  estado_anterior: string | null;
+  en_base: boolean;
+}
+
+export interface CanceladosResult {
+  items: CanceladoItem[];
+  nuevos: number;
+  actualizados: number;
+  ya_cancelados: number;
+  invalidos: number;
+}
+
 export const devolucionesApi = {
+  marcarCancelados: (seriales: string[]) =>
+    api.post<CanceladosResult>("/devoluciones/cancelados", { seriales }),
+
   list: (params?: { estado?: string; q?: string; limit?: number; offset?: number }) =>
     api.get<Devolucion[]>("/devoluciones/", { params }),
 
