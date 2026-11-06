@@ -26,6 +26,12 @@ type Workers struct {
 	Ingreso     int
 	Asignar     int
 	MaxIntentos int
+	// Descarga: los workers de ingreso también descargan tulas (tareas "descarga"), antes
+	// que los paquetes. Consultor: para saber el total de la tula después de descargarla.
+	Descarga  bool
+	Consultor *Consultor
+	// Pausa entre consultas del total tras descargar (iMile tarda un poco en mostrarla)
+	EsperaTrasDescarga time.Duration
 
 	wg sync.WaitGroup
 }
@@ -34,6 +40,9 @@ func (w *Workers) Arrancar(ctx context.Context) {
 	tipos := []string{}
 	if w.Ingreso > 0 {
 		tipos = append(tipos, outbox.TipoIngreso)
+		if w.Descarga {
+			tipos = append(tipos, outbox.TipoDescarga)
+		}
 	}
 	if w.Asignar > 0 {
 		tipos = append(tipos, outbox.TipoAsignar)
@@ -45,11 +54,33 @@ func (w *Workers) Arrancar(ctx context.Context) {
 		slog.Info("imile: tareas recuperadas tras reinicio", "n", n)
 	}
 	avisos := outbox.Despertador(ctx, w.Pool, tipos...)
+	if w.Descarga && w.Ingreso > 0 {
+		// Una descarga nueva despierta a los workers de ingreso
+		w.wg.Add(1)
+		go func() {
+			defer w.wg.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-avisos[outbox.TipoDescarga]:
+					select {
+					case avisos[outbox.TipoIngreso] <- struct{}{}:
+					default:
+					}
+				}
+			}
+		}()
+	}
+	reclamaIngreso := []string{outbox.TipoIngreso}
+	if w.Descarga {
+		reclamaIngreso = []string{outbox.TipoDescarga, outbox.TipoIngreso}
+	}
 	for i := 0; i < w.Ingreso; i++ {
-		w.lanzar(ctx, outbox.TipoIngreso, i, avisos[outbox.TipoIngreso])
+		w.lanzar(ctx, outbox.TipoIngreso, reclamaIngreso, i, avisos[outbox.TipoIngreso])
 	}
 	for i := 0; i < w.Asignar; i++ {
-		w.lanzar(ctx, outbox.TipoAsignar, i, avisos[outbox.TipoAsignar])
+		w.lanzar(ctx, outbox.TipoAsignar, []string{outbox.TipoAsignar}, i, avisos[outbox.TipoAsignar])
 	}
 	w.wg.Add(1)
 	go func() {
@@ -70,27 +101,28 @@ func (w *Workers) Arrancar(ctx context.Context) {
 // Esperar a que los workers terminen la tarea que tienen en curso (apagado con gracia).
 func (w *Workers) Esperar() { w.wg.Wait() }
 
-func (w *Workers) lanzar(ctx context.Context, tipo string, i int, aviso <-chan struct{}) {
+func (w *Workers) lanzar(ctx context.Context, tipo string, reclama []string, i int, aviso <-chan struct{}) {
 	w.wg.Add(1)
 	go func() {
 		defer w.wg.Done()
-		wk := &worker{Workers: w, tipo: tipo, log: slog.With("worker", fmt.Sprintf("%s-%d", tipo, i))}
+		wk := &worker{Workers: w, tipo: tipo, reclama: reclama, log: slog.With("worker", fmt.Sprintf("%s-%d", tipo, i))}
 		wk.correr(ctx, aviso)
 	}()
 }
 
 type worker struct {
 	*Workers
-	tipo string
-	log  *slog.Logger
-	page playwright.Page
+	tipo    string
+	reclama []string // tipos de tarea que toma, en orden de prioridad
+	log     *slog.Logger
+	page    playwright.Page
 	// mensajero elegido en el selector DA de esta página (para preferir sus tareas)
 	personalActual *int64
 }
 
 func (wk *worker) correr(ctx context.Context, aviso <-chan struct{}) {
 	for ctx.Err() == nil {
-		t, err := outbox.Reclamar(ctx, wk.Pool, wk.tipo, wk.personalActual)
+		t, err := outbox.ReclamarDe(ctx, wk.Pool, wk.reclama, wk.personalActual)
 		if err != nil && ctx.Err() == nil {
 			wk.log.Error("no se pudo leer la cola", "err", err)
 		}
@@ -111,6 +143,10 @@ func (wk *worker) correr(ctx context.Context, aviso <-chan struct{}) {
 }
 
 func (wk *worker) hacer(ctx context.Context, t outbox.Tarea) {
+	if t.Tipo == outbox.TipoDescarga {
+		wk.descargar(ctx, t)
+		return
+	}
 	inicio := time.Now()
 	var nombre string
 	if t.Tipo == outbox.TipoAsignar {
@@ -215,10 +251,16 @@ func (wk *worker) reintentar(ctx context.Context, t outbox.Tarea, motivo string)
 		if err := outbox.Reintentar(ctx, tx, t, motivo); err != nil {
 			return err
 		}
+		msg := fmt.Sprintf("Reintentando (%d/%d): %s", t.Intentos, wk.MaxIntentos, motivo)
+		if t.Tipo == outbox.TipoDescarga {
+			_, err := tx.Exec(ctx, `
+				UPDATE tulas SET imile_descarga_estado = 'pendiente', imile_descarga_mensaje = $3, imile_fecha = now()
+				WHERE codigo = $1 AND fecha = $2`, t.Serial, t.Fecha, "Descargando la tula en iMile… "+msg)
+			return err
+		}
 		if t.TulaSerialID == nil {
 			return nil
 		}
-		msg := fmt.Sprintf("Reintentando (%d/%d): %s", t.Intentos, wk.MaxIntentos, motivo)
 		_, err := tx.Exec(ctx, `
 			UPDATE tula_seriales SET imile_estado = 'pendiente', imile_mensaje = $2, imile_fecha = now()
 			WHERE id = $1`, *t.TulaSerialID, msg)
@@ -240,6 +282,17 @@ func (wk *worker) guardar(ctx context.Context, t outbox.Tarea, r Resultado, esta
 					WHERE id = $1`, *t.TulaSerialID, r.Estado, r.Mensaje); err != nil {
 					return err
 				}
+			}
+		case outbox.TipoDescarga:
+			// Llega aquí solo cuando la descarga falló del todo (ver descargar)
+			msg := "iMile no pudo descargar la tula: escribe el total a mano"
+			if r.Mensaje != nil {
+				msg = "iMile no pudo descargar la tula (" + *r.Mensaje + "): escribe el total a mano"
+			}
+			if _, err := tx.Exec(ctx, `
+				UPDATE tulas SET imile_descarga_estado = $3, imile_descarga_mensaje = $4, imile_fecha = now()
+				WHERE codigo = $1 AND fecha = $2`, t.Serial, t.Fecha, r.Estado, msg); err != nil {
+				return err
 			}
 		case outbox.TipoAsignar:
 			if _, err := tx.Exec(ctx, `
@@ -266,4 +319,75 @@ func nombreEnImile(ctx context.Context, q db.DBTX, personalID *int64) (string, e
 		SELECT COALESCE(NULLIF(btrim(nombre_imile), ''), nombre_completo) FROM personal WHERE id = $1`,
 		*personalID).Scan(&nombre)
 	return nombre, err
+}
+
+// descargar: la tula t.Serial en "Descarga de escaneo" de iMile y, si quedó descargada,
+// cuántos paquetes trae (se guarda en la tula para que el celular lo muestre).
+func (wk *worker) descargar(ctx context.Context, t outbox.Tarea) {
+	inicio := time.Now()
+	var crudo []byte
+	r, err := wk.conSesion(func(page playwright.Page) (Resultado, error) {
+		var r Resultado
+		var err error
+		r, crudo, err = wk.Sesion.Descargar(page, t.Serial)
+		return r, err
+	})
+	// La respuesta completa queda en el log: todavía se está conociendo cómo responde iMile
+	respuesta := string(crudo)
+	if len(respuesta) > 3000 {
+		respuesta = respuesta[:3000]
+	}
+	wk.log.Info("descarga de tula", "codigo", t.Serial, "estado", r.Estado, "intento", t.Intentos,
+		"ms", time.Since(inicio).Milliseconds(), "respuesta", respuesta, "err", err)
+	switch {
+	case err != nil:
+		wk.fallar(ctx, t, err)
+		return
+	case !r.Definitivo() && t.Intentos < wk.MaxIntentos:
+		wk.reintentar(ctx, t, "iMile no devolvió respuesta")
+		return
+	case r.Estado != OK && r.Estado != Repetido:
+		if err := wk.guardar(ctx, t, r, outbox.EstadoHecha); err != nil {
+			wk.log.Error("no se pudo guardar el resultado", "err", err, "codigo", t.Serial)
+		}
+		return
+	}
+
+	// Descargada (o ya lo estaba): cuántos paquetes trae
+	var consulta *ConsultaTula
+	mensaje := "Descargada en iMile, pero todavía no dice cuántos paquetes trae: escribe el total a mano"
+	if wk.Consultor != nil {
+		for i := 0; i < 3 && consulta == nil; i++ {
+			if i > 0 {
+				time.Sleep(wk.EsperaTrasDescarga)
+			}
+			c, err := wk.Consultor.Consultar(ctx, t.Serial)
+			if err != nil {
+				wk.log.Warn("no se pudo consultar la tula tras descargarla", "codigo", t.Serial, "err", err)
+				continue
+			}
+			if c.Encontrada {
+				consulta = &c
+			}
+		}
+	}
+	var total *int
+	var esperados []string
+	if consulta != nil {
+		total, esperados = consulta.Total, consulta.Seriales
+		mensaje = fmt.Sprintf("iMile: la tula trae %d paquetes", *consulta.Total)
+	}
+	err = db.EnTx(ctx, wk.Pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `
+			UPDATE tulas SET imile_descarga_estado = $3, imile_descarga_mensaje = $4, imile_fecha = now(),
+			       total_esperado = COALESCE(total_esperado, $5),
+			       seriales_esperados = COALESCE(seriales_esperados, $6)
+			WHERE codigo = $1 AND fecha = $2`, t.Serial, t.Fecha, r.Estado, mensaje, total, esperados); err != nil {
+			return err
+		}
+		return outbox.Terminar(ctx, tx, t.ID, outbox.EstadoHecha, r.Estado, &mensaje)
+	})
+	if err != nil {
+		wk.log.Error("no se pudo guardar la descarga", "err", err, "codigo", t.Serial)
+	}
 }

@@ -22,6 +22,9 @@ const (
 // 2026-10-08/09): 1121 y 31000 = ya estaba ingresado; 1119 = el serial no existe en iMile.
 var BloqueosIngreso = map[string]string{"1121": Repetido, "1119": Error, "31000": Repetido}
 
+// En Descarga de escaneo: 1119 = el código no existe en iMile (visto 2026-10-26 con "21").
+var BloqueosDescarga = map[string]string{"1119": Error}
+
 // En Asignar repartidor: 1119 no existe; 1118 "Guía ya cerrada" (2026-10-23).
 var BloqueosAsignacion = map[string]string{"1119": Error, "1118": Cerrada}
 

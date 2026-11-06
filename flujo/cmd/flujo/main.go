@@ -22,7 +22,7 @@ import (
 )
 
 // La migración de Alembic que crea imile_tareas, operaciones_cliente y tulas.local_id
-const migracionMinima = "049"
+const migracionMinima = "051"
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
@@ -56,13 +56,16 @@ func correr() error {
 	defer sesion.Cerrar()
 
 	var consulta tulas.ConsultaImile
+	var consultor *imile.Consultor
 	if cfg.ConsultaActiva {
-		consulta = imile.NuevoConsultor(sesion, cfg.ConsultaCacheTTL)
+		consultor = imile.NuevoConsultor(sesion, cfg.ConsultaCacheTTL)
+		consulta = consultor
 	}
 	aplicacion := app.Nueva(pool, cfg, sesion, consulta)
 
 	// Workers de iMile: solo los de las automatizaciones encendidas
-	workers := &imile.Workers{Pool: pool, Sesion: sesion, MaxIntentos: cfg.MaxIntentos}
+	workers := &imile.Workers{Pool: pool, Sesion: sesion, MaxIntentos: cfg.MaxIntentos,
+		Descarga: cfg.DescargaActiva, Consultor: consultor, EsperaTrasDescarga: 3 * time.Second}
 	if cfg.IngresoActivo {
 		workers.Ingreso = cfg.PoolIngreso
 	}
@@ -72,7 +75,7 @@ func correr() error {
 	ctxWorkers, pararWorkers := context.WithCancel(context.Background())
 	workers.Arrancar(ctxWorkers)
 	slog.Info("flujo arrancó", "puerto", cfg.Puerto, "ingreso", workers.Ingreso, "asignar", workers.Asignar,
-		"consulta_tula", cfg.ConsultaActiva)
+		"consulta_tula", cfg.ConsultaActiva, "descarga_tula", cfg.DescargaActiva)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Puerto,

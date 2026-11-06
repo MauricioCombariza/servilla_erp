@@ -149,3 +149,84 @@ func TestPoolContraImileFalso(t *testing.T) {
 	parar()
 	w.Esperar()
 }
+
+// Descarga de tula (dsOffloadingScan) contra el iMile falso: la tula sin descargar queda
+// descargada y con su total; una ya descargada es "repetido" y también da el total; un
+// código que iMile no conoce queda en error y la tula pide el total a mano.
+func TestDescargaContraImileFalso(t *testing.T) {
+	url, dbURL := os.Getenv("FAKE_IMILE_URL"), os.Getenv("FLUJO_TEST_DATABASE_URL")
+	if url == "" || dbURL == "" {
+		t.Skip("sin FAKE_IMILE_URL / FLUJO_TEST_DATABASE_URL")
+	}
+	ctx := context.Background()
+	pool, err := db.Conectar(ctx, dbURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	hoy := db.Hoy()
+	if _, err := pool.Exec(ctx, `TRUNCATE imile_tareas, tulas RESTART IDENTITY CASCADE`); err != nil {
+		t.Fatal(err)
+	}
+	codigos := []string{"2611063528401", "2610154963701", "2699999999901"}
+	for _, c := range codigos {
+		if _, err := pool.Exec(ctx, `INSERT INTO tulas (codigo, estado, usuario, fecha, imile_descarga_estado)
+			VALUES ($1, 'cerrada', 't', $2, 'pendiente')`, c, hoy); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := outbox.Encolar(ctx, pool, outbox.Tarea{Tipo: outbox.TipoDescarga, Serial: c, Fecha: hoy, Usuario: "t"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := config.Config{ImileUser: "operador", ImilePass: "clave-secreta", ImileBaseURL: url,
+		ImileStatePath: t.TempDir() + "/sesion.json", ImileHeadless: true, ImileDriverDir: os.Getenv("PLAYWRIGHT_DRIVER_PATH")}
+	sesion := NuevaSesion(cfg)
+	sesion.esperaCargaMs, sesion.recorridoQuietoMs, sesion.recorridoMaxMs = 200, 1_000, 5_000
+	defer sesion.Cerrar()
+
+	ctxW, parar := context.WithCancel(ctx)
+	w := &Workers{Pool: pool, Sesion: sesion, Ingreso: 1, MaxIntentos: 3, Descarga: true,
+		Consultor: NuevoConsultor(sesion, time.Second), EsperaTrasDescarga: 200 * time.Millisecond}
+	w.Arrancar(ctxW)
+	limite := time.Now().Add(2 * time.Minute)
+	for {
+		var n int
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM imile_tareas WHERE estado IN ('pendiente', 'en_proceso')`).Scan(&n)
+		if n == 0 {
+			break
+		}
+		if time.Now().After(limite) {
+			t.Fatal("la cola no se vació a tiempo")
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	parar()
+	w.Esperar()
+
+	quiero := map[string]struct {
+		estado string
+		total  *int
+	}{
+		"2611063528401": {OK, ptrInt(3)},
+		"2610154963701": {Repetido, ptrInt(2)},
+		"2699999999901": {Error, nil},
+	}
+	for c, q := range quiero {
+		var estado, mensaje string
+		var total *int
+		var esperados []string
+		if err := pool.QueryRow(ctx, `SELECT imile_descarga_estado, imile_descarga_mensaje, total_esperado, seriales_esperados
+			FROM tulas WHERE codigo = $1`, c).Scan(&estado, &mensaje, &total, &esperados); err != nil {
+			t.Fatal(c, err)
+		}
+		if estado != q.estado || (total == nil) != (q.total == nil) || (total != nil && *total != *q.total) {
+			t.Errorf("%s: estado=%s total=%v (%s), se esperaba %s/%v", c, estado, total, mensaje, q.estado, q.total)
+		}
+		if q.total != nil && len(esperados) != *q.total {
+			t.Errorf("%s: %d seriales esperados", c, len(esperados))
+		}
+	}
+}
+
+func ptrInt(n int) *int { return &n }

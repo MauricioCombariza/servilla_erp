@@ -24,7 +24,8 @@ type App struct {
 
 // Nueva: consulta puede ser nil (consulta de tula a iMile apagada).
 func Nueva(pool *pgxpool.Pool, cfg config.Config, sesion *imile.Sesion, consulta tulas.ConsultaImile) *App {
-	servTulas := &tulas.Servicio{Pool: pool, IngresoActivo: cfg.IngresoActivo, Imile: consulta}
+	servTulas := &tulas.Servicio{Pool: pool, IngresoActivo: cfg.IngresoActivo, Imile: consulta,
+		DescargaActiva: cfg.DescargaActiva}
 	servAsignacion := &asignacion.Servicio{Pool: pool, AsignacionActiva: cfg.AsignacionActiva}
 	a := auth.New(pool, cfg.JWTSecret)
 
