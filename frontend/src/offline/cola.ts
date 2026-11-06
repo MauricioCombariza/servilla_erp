@@ -30,7 +30,9 @@ export type ResultadoOp = { op_id: string; status: number; body: unknown };
 
 type RespuestaSync = { resultados: ResultadoOp[]; tulas: Record<string, number>; pendientes: number };
 
-export type Bloqueo = { seq: number; op: Op; detalle: unknown };
+// status 409: había otra tula abierta en el servidor · 422: el código no sirve (p. ej. se
+// leyó algo que no es la etiqueta). En los dos casos lo leído después espera a que se decida.
+export type Bloqueo = { seq: number; op: Op; status: number; detalle: unknown };
 
 type EstadoCola = {
   pendientes: number;
@@ -141,8 +143,8 @@ export async function sincronizar(): Promise<void> {
       for (const e of envio) {
         const r = porOp.get(e.valor.op_id);
         if (!r) break; // el servidor paró ahí (falla suya): se reintenta desde esta
-        if (e.valor.tipo === "abrir_tula" && r.status === 409) {
-          bloqueo = { seq: e.seq, op: e.valor, detalle: (r.body as { detail?: unknown })?.detail };
+        if (e.valor.tipo === "abrir_tula" && (r.status === 409 || r.status === 422)) {
+          bloqueo = { seq: e.seq, op: e.valor, status: r.status, detalle: (r.body as { detail?: unknown })?.detail };
         } else {
           hechas.push(e.seq);
         }
@@ -189,6 +191,18 @@ export async function resolverConflicto(decision: "cerrar" | "seguir", tulaAbier
       }
     }
   }
+  useCola.setState({ bloqueo: null });
+  void sincronizar();
+}
+
+/**
+ * El servidor rechazó el código de la tula (422): se abre como "tula sin etiqueta" y lo
+ * leído después sigue en ella, en vez de perderse.
+ */
+export async function abrirSinEtiqueta(): Promise<void> {
+  const b = useCola.getState().bloqueo;
+  if (!b || b.op.tipo !== "abrir_tula") return;
+  await colaReemplazar<Op>(b.seq, { ...b.op, op_id: nuevoId(), datos: { ...(b.op.datos ?? {}), codigo: null } });
   useCola.setState({ bloqueo: null });
   void sincronizar();
 }

@@ -17,13 +17,16 @@ import {
 } from "@/api/tulas";
 import { actualizarBase, destinoLocal } from "@/offline/base";
 import { useCambiosImile } from "@/offline/cambios";
-import { alResultado, encolar, nuevoId, pendientesEnCola, resolverConflicto, useCola, type Op } from "@/offline/cola";
+import { abrirSinEtiqueta, alResultado, encolar, nuevoId, pendientesEnCola, resolverConflicto, useCola, type Op } from "@/offline/cola";
 import { kvGuardar, kvLeer } from "@/offline/idb";
 import { CompartirVista } from "./CompartirVista";
 import { FlujoPaquetesNav } from "./FlujoPaquetesNav";
 import { CerrarSesionBoton } from "./CerrarSesionBoton";
 
 const SCANNER_ELEMENT_ID = "tulas-qr-reader";
+// Largos de tulas.codigo y tula_seriales.serial (flujo/internal/tulas: MaxCodigo, MaxSerial)
+const MAX_CODIGO_TULA = 255;
+const MAX_SERIAL = 50;
 const SCAN_FORMATS = [
   Html5QrcodeSupportedFormats.QR_CODE,
   Html5QrcodeSupportedFormats.CODE_128,
@@ -385,7 +388,21 @@ export function EscaneoTulasPage() {
   }
 
   // Al abrir una tula sin señal había otra abierta en el servidor (p. ej. desde otro celular)
-  const choque = cola.bloqueo?.op.tipo === "abrir_tula" ? (cola.bloqueo.detalle as TulaAbiertaConflicto | undefined) : undefined;
+  const choque = cola.bloqueo?.op.tipo === "abrir_tula" && cola.bloqueo.status === 409
+    ? (cola.bloqueo.detalle as TulaAbiertaConflicto | undefined)
+    : undefined;
+  // El servidor no aceptó el código de la tula (422): lo leído espera a que se abra sin etiqueta
+  const rechazo = cola.bloqueo?.op.tipo === "abrir_tula" && cola.bloqueo.status === 422 ? cola.bloqueo : null;
+
+  function seguirSinEtiqueta() {
+    if (!rechazo) return;
+    if (tula?.local_id === rechazo.op.tula_local_id) {
+      setTula((x) => x && conContador({ ...x, codigo: null, sin_etiqueta: true }));
+      setImileTotal(null);
+    }
+    void abrirSinEtiqueta();
+    enfocar();
+  }
 
   function resolverChoque(decision: "cerrar" | "seguir") {
     if (!choque) return;
@@ -406,6 +423,18 @@ export function EscaneoTulasPage() {
     const ahora = Date.now();
     if (ultimaLecturaRef.current.codigo === cod && ahora - ultimaLecturaRef.current.at < ANTIRREBOTE_MS) return;
     ultimaLecturaRef.current = { codigo: cod, at: ahora };
+
+    // Lo que no cabe en la base (se leyó otra cosa, p. ej. un QR) se avisa aquí mismo
+    if (modo === "tula" && cod.length > MAX_CODIGO_TULA) {
+      setAviso("Eso no parece el código de una tula");
+      vibrar([50, 50, 50]);
+      return;
+    }
+    if (modo === "paquetes" && cod.length > MAX_SERIAL) {
+      setAviso("Eso no parece el código de un paquete");
+      vibrar([50, 50, 50]);
+      return;
+    }
 
     if (modo === "tula") abrirTula(cod);
     else leerPaquete(cod);
@@ -640,6 +669,26 @@ export function EscaneoTulasPage() {
                 Pasar lo leído a la que estaba abierta
               </button>
             </div>
+          </div>
+        )}
+
+        {rechazo && (
+          <div role="alert" className="rounded-xl border border-red-300 bg-red-50 p-4 text-sm">
+            <p className="font-medium text-red-900">
+              No se pudo abrir la tula {String(rechazo.op.datos?.codigo ?? "").slice(0, 30)}
+              {String(rechazo.op.datos?.codigo ?? "").length > 30 ? "…" : ""}:{" "}
+              {typeof rechazo.detalle === "string" ? rechazo.detalle : "el código no sirve"}.
+            </p>
+            <p className="text-red-800 mt-1">
+              Lo que leíste sigue guardado, pero no llega al servidor hasta que se abra la tula.
+            </p>
+            <button
+              type="button"
+              onClick={seguirSinEtiqueta}
+              className="w-full mt-3 bg-primary hover:bg-primary-hover text-white font-medium py-2.5 rounded-lg"
+            >
+              Abrir como tula sin etiqueta
+            </button>
           </div>
         )}
 

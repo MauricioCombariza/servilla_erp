@@ -17,11 +17,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"servilla/flujo/internal/asignacion"
@@ -98,6 +100,8 @@ func (s *Servicio) hSync(w http.ResponseWriter, r *http.Request) {
 		res, err := s.aplicar(r.Context(), u, op, resp.Tulas)
 		if err != nil {
 			// Falla del servidor: se para aquí para no alterar el orden de lo que sigue
+			slog.ErrorContext(r.Context(), "sync: operación sin hacer, se reintentará",
+				"op_id", op.OpID, "tipo", op.Tipo, "usuario", u.Username, "err", err)
 			resp.Pendientes = len(body.Ops) - i
 			break
 		}
@@ -144,6 +148,10 @@ func (s *Servicio) aplicar(ctx context.Context, u auth.Usuario, op Op, locales m
 		res.Status, res.Body = http.StatusOK, cuerpo
 	case errors.As(err, &e) && e.Status < 500:
 		res.Status, res.Body = e.Status, map[string]any{"detail": e.Detail}
+	case esErrorDeDatos(err):
+		// Reintentarla daría lo mismo para siempre y trabaría todo lo que viene detrás
+		slog.WarnContext(ctx, "sync: operación rechazada por la base", "op_id", op.OpID, "tipo", op.Tipo, "err", err)
+		res.Status, res.Body = http.StatusUnprocessableEntity, map[string]any{"detail": "Dato inválido: " + err.Error()}
 	default:
 		return res, err
 	}
@@ -159,6 +167,17 @@ func (s *Servicio) aplicar(ctx context.Context, u auth.Usuario, op Op, locales m
 		return res, err
 	}
 	return res, nil
+}
+
+// esErrorDeDatos: el dato no cabe o no cumple una restricción (SQLSTATE clase 22 o 23).
+// No es una falla pasajera del servidor: reintentar la misma operación nunca va a servir.
+func esErrorDeDatos(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || len(pgErr.Code) < 2 {
+		return false
+	}
+	clase := pgErr.Code[:2]
+	return clase == "22" || clase == "23"
 }
 
 // recordarTula: tras abrir una tula sin señal, las operaciones siguientes del mismo lote
