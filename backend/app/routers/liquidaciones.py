@@ -11,6 +11,8 @@ from app.models.personal import Personal
 from app.schemas.liquidaciones import (
     AjustarMontoLiquidacionRequest,
     AjusteLiquidacionRead,
+    CambiarPrecioPlanillaRequest,
+    CambiarPrecioPlanillaResult,
     GenerarLiquidacionRequest,
     LiquidacionRead,
     LiquidacionUpdate,
@@ -232,6 +234,45 @@ async def seriales_por_precio(
         grupo.seriales_no_liquidables += pl.seriales_no_liquidables
         grupo.monto_no_liquidable += pl.monto_no_liquidable
     return list(por_precio.values())
+
+
+@router.patch("/precios/{personal_id}", response_model=CambiarPrecioPlanillaResult)
+async def cambiar_precio_en_planilla(
+    personal_id: int,
+    body: CambiarPrecioPlanillaRequest,
+    db: AsyncSession = Depends(get_db),
+    _=_auth,
+):
+    """Ajusta el precio de una fila (precio, planilla) del desglose de /precios.
+
+    A diferencia de PATCH /gestiones/planillas/{p}/precio (toda la planilla, todos
+    los mensajeros), solo toca los seriales pendientes de este mensajero en el mes
+    que hoy tienen `precio_actual`. Marca editado_manualmente=TRUE para que
+    recalcular_precios no lo pise. "Sin planilla" ('' / 'nan') no se permite:
+    marcarlo como editado congela el serial sin planilla real (el upsert del CSV
+    ya no le asignaría la suya)."""
+    if body.planilla.strip() in ("", "nan"):
+        raise HTTPException(
+            status_code=400,
+            detail="No se puede cambiar el precio de seriales sin planilla asignada",
+        )
+    result = await db.execute(
+        text("""
+            UPDATE seriales_gestion sg
+            SET precio_mensajero = :nuevo, editado_manualmente = TRUE
+            WHERE sg.mensajero_id = :pid AND sg.estado = 'pendiente'
+              AND sg.planilla = :planilla
+              AND ABS(sg.precio_mensajero - :actual) < 0.005
+              AND EXTRACT(MONTH FROM sg.f_esc) = :mes
+              AND EXTRACT(YEAR  FROM sg.f_esc) = :anio
+        """),
+        {"nuevo": body.precio_nuevo, "pid": personal_id, "planilla": body.planilla,
+         "actual": body.precio_actual, "mes": body.mes, "anio": body.anio},
+    )
+    await db.commit()
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="No hay seriales pendientes con ese precio en la planilla")
+    return CambiarPrecioPlanillaResult(planilla=body.planilla, seriales_actualizados=result.rowcount)
 
 
 # ── Helpers de selección explícita (planillas / fechas) ────────────────────────

@@ -175,7 +175,14 @@ export function LiquidacionesPanel({ mes, anio, soloSeriales = false }: { mes: n
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {pendientes.map((p) => (
-                    <PendienteRow key={p.personal_id} p={p} mes={mes} anio={anio} soloSeriales={soloSeriales} onGenerar={() => setGenerando(p)} />
+                    <PendienteRow key={p.personal_id} p={p} mes={mes} anio={anio} soloSeriales={soloSeriales} onGenerar={() => setGenerando(p)}
+                      onGeneradoParcial={() => {
+                        qc.invalidateQueries({ queryKey: ["liq-pendientes"] });
+                        qc.invalidateQueries({ queryKey: ["liquidaciones"] });
+                        qc.invalidateQueries({ queryKey: ["pago-precios"] });
+                        qc.invalidateQueries({ queryKey: ["pago-planillas"] });
+                        setTab("liquidaciones");
+                      }} />
                   ))}
                 </tbody>
               </table>
@@ -801,10 +808,12 @@ function AjustarLiquidacionModal({ liquidacion, onClose, onSaved }: {
 
 // ── Fila expandible de pendiente ────────────────────────────────────────────────
 
-function PendienteRow({ p, mes, anio, soloSeriales, onGenerar }: {
-  p: Pendiente; mes: number; anio: number; soloSeriales: boolean; onGenerar: () => void;
+function PendienteRow({ p, mes, anio, soloSeriales, onGenerar, onGeneradoParcial }: {
+  p: Pendiente; mes: number; anio: number; soloSeriales: boolean; onGenerar: () => void; onGeneradoParcial: () => void;
 }) {
   const [expandido, setExpandido] = useState(false);
+  const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
+  const [confirmando, setConfirmando] = useState(false);
   const esMensajero = p.tipo_personal === "mensajero";
   const { desde, hasta } = rangoMes(mes, anio);
 
@@ -889,7 +898,12 @@ function PendienteRow({ p, mes, anio, soloSeriales, onGenerar }: {
               cargandoPrecios ? (
                 <p className="text-xs text-gray-400 mb-3">Cargando seriales por precio…</p>
               ) : precios.length > 0 && (
-                <PreciosDetalle precios={precios} />
+                <>
+                  <PreciosDetalle precios={precios} personalId={p.personal_id} mes={mes} anio={anio}
+                    seleccion={seleccion} onSeleccion={setSeleccion} />
+                  <SeleccionPlanillasBarra precios={precios} seleccion={seleccion} onSeleccion={setSeleccion}
+                    onGenerar={() => setConfirmando(true)} />
+                </>
               )
             )}
             {esMensajero ? (
@@ -912,11 +926,76 @@ function PendienteRow({ p, mes, anio, soloSeriales, onGenerar }: {
           </td>
         </tr>
       )}
+      {confirmando && (
+        <ConfirmarLiquidacionModal
+          personalId={p.personal_id} mes={mes} anio={anio}
+          planillas={Array.from(seleccion)}
+          fechasAlistamiento={[]}
+          totalCalculado={totalSeleccionado(precios, seleccion).monto}
+          onClose={() => setConfirmando(false)}
+          onSaved={() => {
+            setConfirmando(false);
+            setSeleccion(new Set());
+            onGeneradoParcial();
+          }}
+        />
+      )}
     </>
   );
 }
 
-function PreciosDetalle({ precios }: { precios: SerialesPorPrecio[] }) {
+/** Clave de selección: la planilla tal cual la espera /generar ('' para sin planilla). */
+const clavePlanilla = (pl: string | null) => pl ?? "";
+
+function totalSeleccionado(precios: SerialesPorPrecio[], seleccion: Set<string>) {
+  let seriales = 0, monto = 0;
+  for (const x of precios) for (const pl of x.planillas ?? []) {
+    if (!seleccion.has(clavePlanilla(pl.planilla))) continue;
+    seriales += pl.seriales_liquidables + pl.seriales_no_liquidables;
+    monto += pl.monto_liquidable + pl.monto_no_liquidable;
+  }
+  return { seriales, monto };
+}
+
+function SeleccionPlanillasBarra({ precios, seleccion, onSeleccion, onGenerar }: {
+  precios: SerialesPorPrecio[]; seleccion: Set<string>;
+  onSeleccion: (s: Set<string>) => void; onGenerar: () => void;
+}) {
+  const todas = new Set<string>();
+  const liquidables = new Set<string>();
+  for (const x of precios) for (const pl of x.planillas ?? []) {
+    todas.add(clavePlanilla(pl.planilla));
+    if (pl.seriales_no_liquidables === 0) liquidables.add(clavePlanilla(pl.planilla));
+  }
+  const { seriales, monto } = totalSeleccionado(precios, seleccion);
+  const btn = "text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50";
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2 mb-3 text-xs">
+      <div className="text-gray-600">
+        <span className="font-medium text-gray-800">{seleccion.size}</span> de {todas.size} planilla(s) para liquidar
+        {" · "}{seriales} seriales · <span className="font-semibold text-gray-900">${fmt.format(monto)}</span>
+        <span className="text-gray-400"> — las demás quedan pendientes para después</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <button className={btn} onClick={() => onSeleccion(new Set(liquidables))}>Solo liquidables</button>
+        <button className={btn} onClick={() => onSeleccion(new Set(todas))}>Todas</button>
+        <button className={btn} onClick={() => onSeleccion(new Set())} disabled={seleccion.size === 0}>Ninguna</button>
+        <button
+          onClick={onGenerar}
+          disabled={seleccion.size === 0}
+          className="flex items-center gap-1 bg-primary hover:bg-primary-hover text-white px-2.5 py-1 rounded disabled:opacity-50"
+        >
+          <Plus size={12} /> Generar con selección
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PreciosDetalle({ precios, personalId, mes, anio, seleccion, onSeleccion }: {
+  precios: SerialesPorPrecio[]; personalId: number; mes: number; anio: number;
+  seleccion: Set<string>; onSeleccion: (s: Set<string>) => void;
+}) {
   const [abiertos, setAbiertos] = useState<Set<number>>(new Set());
   const toggle = (precio: number) =>
     setAbiertos((prev) => {
@@ -977,7 +1056,9 @@ function PreciosDetalle({ precios }: { precios: SerialesPorPrecio[] }) {
               {abierto && (
                 <tr>
                   <td colSpan={8} className="bg-gray-50/60 px-3 py-2">
-                    <PlanillasPorPrecioDetalle planillas={x.planillas} />
+                    <PlanillasPorPrecioDetalle planillas={x.planillas} precio={x.precio_mensajero}
+                      personalId={personalId} mes={mes} anio={anio}
+                      seleccion={seleccion} onSeleccion={onSeleccion} />
                   </td>
                 </tr>
               )}
@@ -1001,41 +1082,105 @@ function PreciosDetalle({ precios }: { precios: SerialesPorPrecio[] }) {
   );
 }
 
-function PlanillasPorPrecioDetalle({ planillas }: { planillas: PlanillaPorPrecio[] }) {
+function PlanillasPorPrecioDetalle({ planillas, precio, personalId, mes, anio, seleccion, onSeleccion }: {
+  planillas: PlanillaPorPrecio[]; precio: number; personalId: number; mes: number; anio: number;
+  seleccion: Set<string>; onSeleccion: (s: Set<string>) => void;
+}) {
+  const qc = useQueryClient();
+  const [editando, setEditando] = useState<string | null>(null);
+  const [valor, setValor] = useState("");
+  const [error, setError] = useState("");
+  const cambiar = useMutation({
+    mutationFn: ({ planilla, nuevo }: { planilla: string; nuevo: number }) =>
+      liqApi.cambiarPrecioPlanilla(personalId, { planilla, precio_actual: precio, precio_nuevo: nuevo, mes, anio }),
+    onSuccess: () => {
+      setEditando(null);
+      setError("");
+      qc.invalidateQueries({ queryKey: ["pago-precios", personalId, mes, anio] });
+      qc.invalidateQueries({ queryKey: ["pago-planillas"] });
+      qc.invalidateQueries({ queryKey: ["liq-pendientes"] });
+      qc.invalidateQueries({ queryKey: ["sel-planillas"] });
+    },
+    onError: (err: any) => setError(err?.response?.data?.detail ?? "No se pudo cambiar el precio"),
+  });
+  function toggle(clave: string) {
+    const s = new Set(seleccion);
+    if (s.has(clave)) s.delete(clave); else s.add(clave);
+    onSeleccion(s);
+  }
   const th = "px-3 py-1 text-right text-gray-500 font-medium";
   const td = "px-3 py-1 text-right text-gray-700";
   const sinPlanilla = (pl: string | null) => !pl || pl === "nan";
   return (
-    <table className="w-full text-xs bg-white border border-gray-200 rounded">
-      <thead className="bg-gray-50 border-b border-gray-100">
-        <tr>
-          <th className="px-3 py-1 text-left text-gray-500 font-medium">Fecha</th>
-          <th className="px-3 py-1 text-left text-gray-500 font-medium">Planilla</th>
-          <th className={th}>Liquidables</th>
-          <th className={th}>Monto liq.</th>
-          <th className={th}>No liquidables</th>
-          <th className={th}>Monto no liq.</th>
-          <th className={th}>Total seriales</th>
-          <th className={th}>Total</th>
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-gray-50">
-        {planillas.map((pl, i) => (
-          <tr key={`${pl.planilla ?? ""}-${i}`}>
-            <td className="px-3 py-1 text-gray-700">{pl.fecha_escaner ?? "—"}</td>
-            <td className="px-3 py-1 font-mono text-gray-700">
-              {sinPlanilla(pl.planilla) ? <span className="italic text-gray-400">(sin planilla{pl.planilla === "nan" ? ": nan" : ""})</span> : pl.planilla}
-            </td>
-            <td className={td}>{pl.seriales_liquidables}</td>
-            <td className={td}>${fmt.format(pl.monto_liquidable)}</td>
-            <td className={`${td} ${pl.seriales_no_liquidables > 0 ? "text-amber-600" : ""}`}>{pl.seriales_no_liquidables}</td>
-            <td className={`${td} ${pl.monto_no_liquidable > 0 ? "text-amber-600" : ""}`}>${fmt.format(pl.monto_no_liquidable)}</td>
-            <td className={td}>{pl.seriales_liquidables + pl.seriales_no_liquidables}</td>
-            <td className={`${td} font-semibold`}>${fmt.format(pl.monto_liquidable + pl.monto_no_liquidable)}</td>
+    <>
+      {error && <p className="text-xs text-red-600 mb-1">{error}</p>}
+      <table className="w-full text-xs bg-white border border-gray-200 rounded">
+        <thead className="bg-gray-50 border-b border-gray-100">
+          <tr>
+            <th className="px-3 py-1 w-6" title="Liquidar ahora (incluye la planilla completa)" />
+            <th className="px-3 py-1 text-left text-gray-500 font-medium">Fecha</th>
+            <th className="px-3 py-1 text-left text-gray-500 font-medium">Planilla</th>
+            <th className={th}>Precio</th>
+            <th className={th}>Liquidables</th>
+            <th className={th}>Monto liq.</th>
+            <th className={th}>No liquidables</th>
+            <th className={th}>Monto no liq.</th>
+            <th className={th}>Total seriales</th>
+            <th className={th}>Total</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody className="divide-y divide-gray-50">
+          {planillas.map((pl, i) => {
+            const clave = clavePlanilla(pl.planilla);
+            const seleccionada = seleccion.has(clave);
+            return (
+              <tr key={`${clave}-${i}`} className={seleccionada ? "bg-blue-50/50" : ""}>
+                <td className="px-3 py-1">
+                  <input type="checkbox" checked={seleccionada} onChange={() => toggle(clave)} />
+                </td>
+                <td className="px-3 py-1 text-gray-700">{pl.fecha_escaner ?? "—"}</td>
+                <td className="px-3 py-1 font-mono text-gray-700">
+                  {sinPlanilla(pl.planilla) ? <span className="italic text-gray-400">(sin planilla{pl.planilla === "nan" ? ": nan" : ""})</span> : pl.planilla}
+                </td>
+                <td className={td}>
+                  {editando === clave ? (
+                    <span className="inline-flex items-center gap-1">
+                      <input type="number" step="any" min={0} autoFocus value={valor}
+                        onChange={(e) => setValor(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && valor !== "") cambiar.mutate({ planilla: clave, nuevo: parseFloat(valor) });
+                          if (e.key === "Escape") setEditando(null);
+                        }}
+                        className="border border-gray-300 rounded px-1.5 py-0.5 w-20 text-right" />
+                      <button disabled={cambiar.isPending || valor === ""}
+                        onClick={() => cambiar.mutate({ planilla: clave, nuevo: parseFloat(valor) })}
+                        className="bg-primary text-white px-1.5 py-0.5 rounded disabled:opacity-60">OK</button>
+                      <button onClick={() => setEditando(null)} className="text-gray-400 hover:text-gray-600"><X size={12} /></button>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1">
+                      ${fmt.format(precio)}
+                      {/* "Sin planilla" no es un lote: editarlo lo congelaría sin planilla real */}
+                      {!sinPlanilla(pl.planilla) && (
+                        <button title="Cambiar precio de estos seriales"
+                          onClick={() => { setEditando(clave); setValor(String(precio)); setError(""); }}
+                          className="text-gray-400 hover:text-primary"><Pencil size={11} /></button>
+                      )}
+                    </span>
+                  )}
+                </td>
+                <td className={td}>{pl.seriales_liquidables}</td>
+                <td className={td}>${fmt.format(pl.monto_liquidable)}</td>
+                <td className={`${td} ${pl.seriales_no_liquidables > 0 ? "text-amber-600" : ""}`}>{pl.seriales_no_liquidables}</td>
+                <td className={`${td} ${pl.monto_no_liquidable > 0 ? "text-amber-600" : ""}`}>${fmt.format(pl.monto_no_liquidable)}</td>
+                <td className={td}>{pl.seriales_liquidables + pl.seriales_no_liquidables}</td>
+                <td className={`${td} font-semibold`}>${fmt.format(pl.monto_liquidable + pl.monto_no_liquidable)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </>
   );
 }
 
