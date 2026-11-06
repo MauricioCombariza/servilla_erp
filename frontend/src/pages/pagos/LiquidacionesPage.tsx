@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle, DollarSign, Trash2, Plus, Rows3, SlidersHorizontal, X, Pencil } from "lucide-react";
+import { CheckCircle, ChevronDown, ChevronRight, DollarSign, Trash2, Plus, Rows3, SlidersHorizontal, X, Pencil } from "lucide-react";
 import { gestionesApi } from "@/api/gestiones";
 import { laboresApi } from "@/api/labores";
 import { personalApi } from "@/api/personal";
-import { liqApi, type Pendiente, type Liquidacion, type SerialesPorPrecio, type AjustePendiente } from "@/api/liquidaciones";
+import { liqApi, type Pendiente, type Liquidacion, type SerialesPorPrecio, type PlanillaPorPrecio, type AjustePendiente } from "@/api/liquidaciones";
 import { CurrencyCell } from "@/components/ui/CurrencyCell";
 import type { PlanillaResumen, ResumenLabores, Personal } from "@/types/domain";
 
@@ -917,6 +917,13 @@ function PendienteRow({ p, mes, anio, soloSeriales, onGenerar }: {
 }
 
 function PreciosDetalle({ precios }: { precios: SerialesPorPrecio[] }) {
+  const [abiertos, setAbiertos] = useState<Set<number>>(new Set());
+  const toggle = (precio: number) =>
+    setAbiertos((prev) => {
+      const s = new Set(prev);
+      if (s.has(precio)) s.delete(precio); else s.add(precio);
+      return s;
+    });
   const tot = precios.reduce(
     (a, x) => ({
       sl: a.sl + x.seriales_liquidables, ml: a.ml + x.monto_liquidable,
@@ -937,20 +944,46 @@ function PreciosDetalle({ precios }: { precios: SerialesPorPrecio[] }) {
           <th className={th}>Monto no liquidable</th>
           <th className={th}>Total seriales</th>
           <th className={th}>Total</th>
+          <th className="px-3 py-1.5" />
         </tr>
       </thead>
       <tbody className="divide-y divide-gray-50">
-        {precios.map((x) => (
-          <tr key={x.precio_mensajero}>
-            <td className="px-3 py-1.5 text-gray-700">${fmt.format(x.precio_mensajero)}</td>
-            <td className={td}>{x.seriales_liquidables}</td>
-            <td className={td}>${fmt.format(x.monto_liquidable)}</td>
-            <td className={`${td} ${x.seriales_no_liquidables > 0 ? "text-amber-600" : ""}`}>{x.seriales_no_liquidables}</td>
-            <td className={`${td} ${x.monto_no_liquidable > 0 ? "text-amber-600" : ""}`}>${fmt.format(x.monto_no_liquidable)}</td>
-            <td className={td}>{x.seriales_liquidables + x.seriales_no_liquidables}</td>
-            <td className={`${td} font-semibold`}>${fmt.format(x.monto_liquidable + x.monto_no_liquidable)}</td>
-          </tr>
-        ))}
+        {precios.map((x) => {
+          const abierto = abiertos.has(x.precio_mensajero);
+          const nPlanillas = x.planillas?.length ?? 0;
+          return (
+            <Fragment key={x.precio_mensajero}>
+              <tr>
+                <td className="px-3 py-1.5 text-gray-700">${fmt.format(x.precio_mensajero)}</td>
+                <td className={td}>{x.seriales_liquidables}</td>
+                <td className={td}>${fmt.format(x.monto_liquidable)}</td>
+                <td className={`${td} ${x.seriales_no_liquidables > 0 ? "text-amber-600" : ""}`}>{x.seriales_no_liquidables}</td>
+                <td className={`${td} ${x.monto_no_liquidable > 0 ? "text-amber-600" : ""}`}>${fmt.format(x.monto_no_liquidable)}</td>
+                <td className={td}>{x.seriales_liquidables + x.seriales_no_liquidables}</td>
+                <td className={`${td} font-semibold`}>${fmt.format(x.monto_liquidable + x.monto_no_liquidable)}</td>
+                <td className="px-3 py-1.5 text-right">
+                  {nPlanillas > 0 && (
+                    <button
+                      onClick={() => toggle(x.precio_mensajero)}
+                      className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border transition-colors ${abierto ? "border-primary text-primary bg-blue-50" : "border-gray-300 text-gray-500 hover:bg-gray-50"}`}
+                      title="Ver planillas que suman en este precio"
+                    >
+                      {abierto ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                      Planillas ({nPlanillas})
+                    </button>
+                  )}
+                </td>
+              </tr>
+              {abierto && (
+                <tr>
+                  <td colSpan={8} className="bg-gray-50/60 px-3 py-2">
+                    <PlanillasPorPrecioDetalle planillas={x.planillas} />
+                  </td>
+                </tr>
+              )}
+            </Fragment>
+          );
+        })}
       </tbody>
       <tfoot className="bg-gray-50 border-t border-gray-200 font-semibold">
         <tr>
@@ -961,8 +994,47 @@ function PreciosDetalle({ precios }: { precios: SerialesPorPrecio[] }) {
           <td className={`${td} text-amber-600`}>${fmt.format(tot.mn)}</td>
           <td className={td}>{tot.sl + tot.sn}</td>
           <td className={td}>${fmt.format(tot.ml + tot.mn)}</td>
+          <td />
         </tr>
       </tfoot>
+    </table>
+  );
+}
+
+function PlanillasPorPrecioDetalle({ planillas }: { planillas: PlanillaPorPrecio[] }) {
+  const th = "px-3 py-1 text-right text-gray-500 font-medium";
+  const td = "px-3 py-1 text-right text-gray-700";
+  const sinPlanilla = (pl: string | null) => !pl || pl === "nan";
+  return (
+    <table className="w-full text-xs bg-white border border-gray-200 rounded">
+      <thead className="bg-gray-50 border-b border-gray-100">
+        <tr>
+          <th className="px-3 py-1 text-left text-gray-500 font-medium">Fecha</th>
+          <th className="px-3 py-1 text-left text-gray-500 font-medium">Planilla</th>
+          <th className={th}>Liquidables</th>
+          <th className={th}>Monto liq.</th>
+          <th className={th}>No liquidables</th>
+          <th className={th}>Monto no liq.</th>
+          <th className={th}>Total seriales</th>
+          <th className={th}>Total</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-gray-50">
+        {planillas.map((pl, i) => (
+          <tr key={`${pl.planilla ?? ""}-${i}`}>
+            <td className="px-3 py-1 text-gray-700">{pl.fecha_escaner ?? "—"}</td>
+            <td className="px-3 py-1 font-mono text-gray-700">
+              {sinPlanilla(pl.planilla) ? <span className="italic text-gray-400">(sin planilla{pl.planilla === "nan" ? ": nan" : ""})</span> : pl.planilla}
+            </td>
+            <td className={td}>{pl.seriales_liquidables}</td>
+            <td className={td}>${fmt.format(pl.monto_liquidable)}</td>
+            <td className={`${td} ${pl.seriales_no_liquidables > 0 ? "text-amber-600" : ""}`}>{pl.seriales_no_liquidables}</td>
+            <td className={`${td} ${pl.monto_no_liquidable > 0 ? "text-amber-600" : ""}`}>${fmt.format(pl.monto_no_liquidable)}</td>
+            <td className={td}>{pl.seriales_liquidables + pl.seriales_no_liquidables}</td>
+            <td className={`${td} font-semibold`}>${fmt.format(pl.monto_liquidable + pl.monto_no_liquidable)}</td>
+          </tr>
+        ))}
+      </tbody>
     </table>
   );
 }

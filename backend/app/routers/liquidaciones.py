@@ -16,6 +16,7 @@ from app.schemas.liquidaciones import (
     LiquidacionUpdate,
     PagarLiquidacionRequest,
     PlanillaPendienteMensajero,
+    PlanillaPorPrecio,
     ResumenPendientePago,
     SerialesPorPrecio,
 )
@@ -191,9 +192,13 @@ async def seriales_por_precio(
 ):
     """Seriales pendientes del mes agrupados por precio_mensajero, separando
     liquidables y no liquidables con el mismo criterio que /pendientes y /generar."""
+    # Una sola pasada agrupada por (precio, planilla): las filas por precio se
+    # obtienen sumando, así el desglose por planilla cuadra exacto con el total.
     sql = text(f"""
         SELECT
             sg.precio_mensajero,
+            sg.planilla,
+            MIN(sg.f_esc) AS fecha_escaner,
             COUNT(*) FILTER (WHERE {_COND_PLANILLA_LIQUIDABLE}) AS seriales_liquidables,
             COALESCE(SUM(sg.precio_mensajero) FILTER (WHERE {_COND_PLANILLA_LIQUIDABLE}), 0) AS monto_liquidable,
             COUNT(*) FILTER (WHERE NOT COALESCE({_COND_PLANILLA_LIQUIDABLE}, FALSE)) AS seriales_no_liquidables,
@@ -202,11 +207,31 @@ async def seriales_por_precio(
         WHERE sg.mensajero_id = :pid AND sg.estado = 'pendiente'
           AND EXTRACT(MONTH FROM sg.f_esc) = :mes
           AND EXTRACT(YEAR  FROM sg.f_esc) = :anio
-        GROUP BY sg.precio_mensajero
-        ORDER BY sg.precio_mensajero ASC
+        GROUP BY sg.precio_mensajero, sg.planilla
+        ORDER BY sg.precio_mensajero ASC, sg.planilla ASC
     """)
     rows = (await db.execute(sql, {"pid": personal_id, "mes": mes, "anio": anio})).mappings().all()
-    return [SerialesPorPrecio(**dict(r)) for r in rows]
+
+    por_precio: dict = {}
+    for r in rows:
+        grupo = por_precio.get(r["precio_mensajero"])
+        if grupo is None:
+            grupo = por_precio[r["precio_mensajero"]] = SerialesPorPrecio(
+                precio_mensajero=r["precio_mensajero"],
+                seriales_liquidables=0, monto_liquidable=0,
+                seriales_no_liquidables=0, monto_no_liquidable=0,
+            )
+        pl = PlanillaPorPrecio(
+            planilla=r["planilla"], fecha_escaner=r["fecha_escaner"],
+            seriales_liquidables=r["seriales_liquidables"], monto_liquidable=r["monto_liquidable"],
+            seriales_no_liquidables=r["seriales_no_liquidables"], monto_no_liquidable=r["monto_no_liquidable"],
+        )
+        grupo.planillas.append(pl)
+        grupo.seriales_liquidables += pl.seriales_liquidables
+        grupo.monto_liquidable += pl.monto_liquidable
+        grupo.seriales_no_liquidables += pl.seriales_no_liquidables
+        grupo.monto_no_liquidable += pl.monto_no_liquidable
+    return list(por_precio.values())
 
 
 # ── Helpers de selección explícita (planillas / fechas) ────────────────────────
