@@ -386,3 +386,36 @@ def test_ajuste_zonas_60(indice, direccion, zona):
 ])
 def test_paridad_bordes_60_1_y_60_13(indice, direccion, zona):
     assert sectorizar(direccion, indice).zona == zona
+
+
+@pytest.mark.parametrize("direccion,zona", [
+    # Direcciones reales que salían sin zona (al oriente de la CR 20, Chapinero)
+    ("CL 72 13 50", "70_1"),  # placa par: lado norte de la CL 72
+    ("CL 72A 01 83", "70_1"),
+    ("CL 77 15 17", "70_2"),
+    ("CL 78 8 64", "70_2"),
+    ("CL 79 18 50", "70_2"),
+    ("CL 85 14 43", "80_1"),
+    ("CL 93BIS 19 69", "80_1"),
+    ("CL 93BIS 20 10", "80_1"),  # sobre la CR 20 con placa par: antes exigía impar
+    ("CL 95 17 76", "80_1"),
+    ("CL 96 12 65", "80_1"),
+    ("CL 97 19A 33", "80_1"),
+    ("CR 11 82 30", "80_1"),
+    # Lo que ya era de esas zonas sigue igual
+    ("CL 86 # 22-11", "80_1"),
+    ("CL 74 # 22-11", "70_1"),
+])
+def test_zonas_orientales_cl_72_a_100_llegan_hasta_la_cr_1(indice, direccion, zona):
+    assert sectorizar(direccion, indice).zona == zona
+
+
+@pytest.mark.parametrize("direccion,zona", [
+    ("CL 74 # 27-11", "70_3"),  # al occidente de la CR 24 no cambia
+    ("CL 86 # 27-11", "80_2"),
+    ("CL 101 15 20", None),  # al norte de la CL 100 no se extiende
+    ("CL 70 13 20", None),  # al sur de la CL 72 tampoco
+    ("CL 72 13 49", None),  # placa impar sobre la CL 72 = lado sur (franja de las 60)
+])
+def test_zonas_orientales_no_se_salen_de_la_franja(indice, direccion, zona):
+    assert sectorizar(direccion, indice).zona == zona
