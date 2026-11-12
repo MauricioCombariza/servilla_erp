@@ -18,3 +18,4 @@ from app.models.paquetes_despacho import PaqueteDespacho  # noqa: F401
 from app.models.tulas import Tula, TulaSerial  # noqa: F401
 from app.models.enlaces_vista import EnlaceVista  # noqa: F401
 from app.models.asignaciones_zona import AsignacionImile, AsignacionSerial, AsignacionZona  # noqa: F401
+from app.models.seguimiento import Proyecto, TareaRecurrente, TareaSeguimiento  # noqa: F401
