@@ -41,6 +41,7 @@ PAGE_CATALOG: list[PageDef] = [
     PageDef("escaneo_tulas", "Escaneo de Tulas", "/escaneo-tulas"),
     PageDef("asignacion_zonas", "Asignación de Zonas", "/asignacion-zonas"),
     PageDef("paquetes_estancados", "Paquetes Estancados", "/paquetes-estancados"),
+    PageDef("seguimiento_tareas", "Tareas y Proyectos", "/seguimiento"),
 ]
 
 PAGE_KEYS: set[str] = {p.key for p in PAGE_CATALOG}
