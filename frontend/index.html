@@ -13,6 +13,23 @@
       rel="stylesheet"
     />
     <title>AgriVision · ERP</title>
+    <script>
+      // Si la app no arranca (p. ej. un celular viejo), mostrar el error en vez de una pantalla en blanco.
+      (function () {
+        function mostrar(msg) {
+          var root = document.getElementById("root");
+          if (!root || root.childNodes.length) return;
+          root.innerHTML =
+            '<div style="font-family:sans-serif;padding:16px;color:#991b1b">' +
+            "<p><b>La aplicación no pudo abrir en este navegador.</b></p>" +
+            '<p style="font-size:13px;word-break:break-word"></p>' +
+            '<p style="font-size:13px;color:#555">' + navigator.userAgent + "</p></div>";
+          root.firstChild.childNodes[1].textContent = String(msg);
+        }
+        window.addEventListener("error", function (e) { mostrar(e.message || e); });
+        window.addEventListener("unhandledrejection", function (e) { mostrar(e.reason); });
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
