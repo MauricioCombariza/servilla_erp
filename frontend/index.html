@@ -14,20 +14,74 @@
     />
     <title>AgriVision · ERP</title>
     <script>
-      // Si la app no arranca (p. ej. un celular viejo), mostrar el error en vez de una pantalla en blanco.
+      // Celulares viejos (iOS <= 13, Safari o Chrome): si la app no se dibuja, se carga la versión
+      // compatible (-legacy) y, si tampoco abre, se muestra el error en pantalla en vez de blanco.
+      // Los errores se mandan a /__diag (queda en el log de nginx) para poder revisarlos.
       (function () {
-        function mostrar(msg) {
+        var errores = [];
+        function avisar(etapa) {
+          try {
+            new Image().src = "/__diag?e=" + encodeURIComponent(etapa) +
+              "&m=" + encodeURIComponent(errores.join(" | ").slice(0, 1500)) +
+              "&ua=" + encodeURIComponent(navigator.userAgent) + "&t=" + new Date().getTime();
+          } catch (x) {}
+        }
+        function vacia() {
           var root = document.getElementById("root");
-          if (!root || root.childNodes.length) return;
+          return root && !root.childNodes.length;
+        }
+        function mostrar(titulo) {
+          var root = document.getElementById("root");
+          if (!vacia()) return;
           root.innerHTML =
             '<div style="font-family:sans-serif;padding:16px;color:#991b1b">' +
-            "<p><b>La aplicación no pudo abrir en este navegador.</b></p>" +
+            "<p><b></b></p>" +
             '<p style="font-size:13px;word-break:break-word"></p>' +
-            '<p style="font-size:13px;color:#555">' + navigator.userAgent + "</p></div>";
-          root.firstChild.childNodes[1].textContent = String(msg);
+            '<p style="font-size:12px;color:#555;word-break:break-word"></p></div>';
+          var ps = root.firstChild.childNodes;
+          ps[0].firstChild.textContent = titulo;
+          ps[1].textContent = errores.join(" | ") || "(sin mensaje de error)";
+          ps[2].textContent = navigator.userAgent;
         }
-        window.addEventListener("error", function (e) { mostrar(e.message || e); });
-        window.addEventListener("unhandledrejection", function (e) { mostrar(e.reason); });
+        window.addEventListener("error", function (e) {
+          errores.push((e && e.message) || "error" + (e && e.target && e.target.src ? " cargando " + e.target.src : ""));
+        }, true);
+        window.addEventListener("unhandledrejection", function (e) { errores.push(String(e && e.reason)); });
+
+        function cargarLegacy() {
+          var poli = document.getElementById("vite-legacy-polyfill");
+          var entrada = document.getElementById("vite-legacy-entry");
+          if (window.System || !poli || !entrada) {
+            avisar("no-abre");
+            return mostrar("La aplicación no pudo abrir en este navegador.");
+          }
+          avisar("modern-fallo");
+          var s = document.createElement("script");
+          s.src = poli.src;
+          s.onload = function () {
+            window.System.import(entrada.getAttribute("data-src"))["catch"](function (e) { errores.push(String(e)); });
+            setTimeout(function () {
+              if (vacia()) { avisar("legacy-fallo"); mostrar("La aplicación no pudo abrir en este navegador."); }
+            }, 15000);
+          };
+          s.onerror = function () { errores.push("no se pudo descargar " + poli.src); mostrar("No se pudo descargar la aplicación."); };
+          document.body.appendChild(s);
+        }
+
+        // "complete" = ya corrieron los scripts de la app; si aun así #root está vacío, falló
+        var vueltas = 0;
+        var revisar = setInterval(function () {
+          vueltas++;
+          if (!vacia()) return clearInterval(revisar);
+          if (document.readyState === "complete") {
+            clearInterval(revisar);
+            setTimeout(function () { if (vacia()) cargarLegacy(); }, 1500);
+          } else if (vueltas > 120) {
+            clearInterval(revisar);
+            avisar("sin-cargar");
+            mostrar("La aplicación no terminó de cargar. Revisa la señal y vuelve a abrir.");
+          }
+        }, 1000);
       })();
     </script>
   </head>
