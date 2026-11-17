@@ -386,3 +386,27 @@ def test_ajuste_zonas_60(indice, direccion, zona):
 ])
 def test_paridad_bordes_60_1_y_60_13(indice, direccion, zona):
     assert sectorizar(direccion, indice).zona == zona
+
+
+@pytest.mark.parametrize("direccion,dir_std,localidad", [
+    # 111811 no llegaba a la CR 20 y la dirección caía en 110851 (Kennedy)
+    ("Calle 29 sur #20-09 casa", "CL 29 20 09 SUR", "Rafael Uribe Uribe"),
+    # 110871 (Kennedy) llegaba hasta la CL 63 y se comía Fontibón 110921
+    ("Cll 15#119 a60. Fontibon recodo apto Rojos Apartamentos rojos Tel casa 601 3565838",
+     "CL 15 119A 60", "Fontibon"),
+])
+def test_localidades_corregidas_2026_11_17(indice, direccion, dir_std, localidad):
+    r = sectorizar(direccion, indice)
+    assert r.direccion_estandarizada == dir_std
+    assert r.localidad == localidad
+
+
+@pytest.mark.parametrize("direccion", [
+    "Callé 29 sur #20-09",
+    "CALLÉ 29 SUR # 20-09",
+    "callé29 sur 20 09",
+])
+def test_calle_con_tilde_es_calle(indice, direccion):
+    r = sectorizar(direccion, indice)
+    assert r.direccion_estandarizada == "CL 29 20 09 SUR"
+    assert r.localidad == "Rafael Uribe Uribe"
