@@ -30,6 +30,9 @@ services:
     environment:
       DATABASE_URL:     postgresql+asyncpg://servilla:${POSTGRES_PASSWORD}@postgres:5432/servilla_erp
       BASES_WEB_URL:    ${BASES_WEB_URL:-}
+      # Imágenes de guía del servidor legado (sin valor = deshabilitado). Ver backend/.env.example
+      IMAGENES_LEGADO_URL: ${IMAGENES_LEGADO_URL:-}
+      IMAGENES_LEGADO_CA:  ${IMAGENES_LEGADO_CA:-}
       JWT_SECRET:       ${JWT_SECRET}
       ALLOWED_ORIGINS:  ${ALLOWED_ORIGINS:-http://localhost}
       ENVIRONMENT:      ${ENVIRONMENT:-production}

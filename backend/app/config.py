@@ -5,6 +5,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     database_url: str = Field(...)
     bases_web_url: str = ""
+    # Imágenes de guía del servidor legado: https://host/guias (sin valor por defecto: vacío = deshabilitado).
+    # Con imagenes_legado_ca (ruta a un .pem) se verifica el certificado TLS; sin él no se verifica.
+    imagenes_legado_url: str = ""
+    imagenes_legado_ca: str = ""
 
     jwt_secret: str = Field(...)
     jwt_algorithm: str = "HS256"
