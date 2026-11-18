@@ -53,6 +53,9 @@ jobs:
           cache-dependency-path: backend/pyproject.toml
       - name: Instalar dependencias
         run: pip install -e ".[dev]"
+      # Las pruebas de iMile abren Chromium contra un iMile falso local (tests/fake_imile.py)
+      - name: Chromium para Playwright
+        run: playwright install --with-deps chromium
       - name: Errores graves de Python (sintaxis)
         run: ruff check --select E9,F63,F7 app tests
       - name: Migraciones desde cero
