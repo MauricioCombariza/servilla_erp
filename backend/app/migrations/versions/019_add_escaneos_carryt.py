@@ -19,7 +19,7 @@ def upgrade() -> None:
     op.create_table(
         "escaneos_carryt",
         sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
-        sa.Column("cliente", sa.String(50), server_default="'Carryt'", nullable=False),
+        sa.Column("cliente", sa.String(50), server_default="Carryt", nullable=False),
         sa.Column("fecha", sa.Date, server_default=sa.text("CURRENT_DATE"), nullable=False),
         sa.Column("cod_men", sa.String(4), nullable=False),
         sa.Column("nombre_mensajero", sa.String(150), nullable=False),

@@ -1,0 +1,119 @@
+name: CI
+
+# Corre en cada PR hacia master y, desde deploy.yml, antes de desplegar (si falla no se
+# despliega). Un PR no se debe unir si algo aquí sale en rojo (regla de rama en master). Cubre M-04 4.11.3.28: pruebas automáticas
+# + análisis estático (SAST) antes de la revisión por otra persona.
+on:
+  pull_request:
+    branches: [master]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (migraciones + pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: servilla_ci
+          POSTGRES_USER: servilla
+          POSTGRES_PASSWORD: solo-ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U servilla -d servilla_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # Base vacía, solo para pruebas: nunca datos reales (contrato 2.7.o)
+      DATABASE_URL: postgresql+asyncpg://servilla:solo-ci@localhost:5432/servilla_ci
+      JWT_SECRET: solo-ci-no-es-secreto
+      ENVIRONMENT: test
+      BASES_WEB_URL: ""
+      IMAGENES_LEGADO_URL: ""
+      IMILE_USER: ""
+      IMILE_PASS: ""
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Instalar dependencias
+        run: pip install -e ".[dev]"
+      - name: Errores graves de Python (sintaxis)
+        run: ruff check --select E9,F63,F7 app tests
+      - name: Migraciones desde cero
+        run: alembic upgrade head
+      - name: Pruebas
+        run: python -m pytest -q -p no:cacheprovider
+
+  flujo:
+    name: Servicio Go (vet + test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: flujo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: flujo/go.mod
+          cache-dependency-path: flujo/go.sum
+      - run: go vet ./...
+      - run: go test ./...
+
+  frontend:
+    name: Frontend (tipos + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  sast:
+    name: Seguridad (Semgrep)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      # Primer escaneo: informa sin bloquear. Cuando se resuelvan los hallazgos actuales
+      # (plan de remediación), se quita --no-error... y pasa a bloquear el PR.
+      - name: Escaneo
+        run: |
+          semgrep scan --config p/python --config p/typescript --config p/react \
+            --config p/golang --config p/secrets --config p/owasp-top-ten \
+            --exclude 'backend/tests' --exclude '**/*.lock' \
+            --sarif --output semgrep.sarif --text-output semgrep.txt || true
+          tail -n 40 semgrep.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: semgrep
+          path: |
+            semgrep.sarif
+            semgrep.txt
