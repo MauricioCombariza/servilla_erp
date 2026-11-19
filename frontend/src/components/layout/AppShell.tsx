@@ -1,3 +1,4 @@
+import { AvisoClavesExternas } from "@/components/AvisoClavesExternas";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   Users, UserCheck, ShoppingCart, FileText, BarChart2,
@@ -119,6 +120,7 @@ export function AppShell() {
           </button>
           <span className="text-sm font-medium text-gray-700">Logística</span>
         </header>
+        <AvisoClavesExternas />
 
         <main className="flex-1 overflow-y-auto p-6">
           <Outlet />
