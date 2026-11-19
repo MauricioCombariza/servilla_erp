@@ -9,7 +9,7 @@ package outbox
 import (
 	"context"
 	"errors"
-	"math/rand"
+	"math/rand" // nosemgrep: go.lang.security.audit.crypto.math_random.math-random-used -- solo reparte reintentos en el tiempo
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -102,7 +102,7 @@ func Terminar(ctx context.Context, q db.DBTX, id int64, estado, resultado string
 func Reintentar(ctx context.Context, q db.DBTX, t Tarea, motivo string) error {
 	espera := time.Duration(1<<min(t.Intentos, 8)) * time.Second
 	// Azar solo para repartir los reintentos en el tiempo, no es un secreto: math/rand basta.
-	espera = min(espera, 5*time.Minute) + time.Duration(rand.Int63n(int64(time.Second))) // nosemgrep: go.lang.security.audit.crypto.math_random.math-random-used
+	espera = min(espera, 5*time.Minute) + time.Duration(rand.Int63n(int64(time.Second)))
 	_, err := q.Exec(ctx, `
 		UPDATE imile_tareas SET estado = 'pendiente', ultimo_error = $2, lease_hasta = NULL,
 		       proximo_intento = now() + make_interval(secs => $3), actualizado = now()
