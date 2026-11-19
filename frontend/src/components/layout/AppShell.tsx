@@ -3,7 +3,7 @@ import {
   Users, UserCheck, ShoppingCart, FileText, BarChart2,
   Clock, DollarSign, Truck, Receipt, Wallet, Calculator, List, ClipboardCheck,
   LogOut, Menu, X, ArrowDownCircle, ArrowUpCircle, Search, Building2, MapPin, PackageCheck,
-  ScanLine, Radio, RotateCcw, ShieldCheck, Hexagon, Image as ImageIcon, FileCog, Upload, PackageOpen, MapPinned, Hourglass, ListChecks,
+  ScanLine, Radio, RotateCcw, ShieldCheck, Hexagon, Image as ImageIcon, FileCog, Upload, PackageOpen, MapPinned, Hourglass, ListChecks, KeyRound
 } from "lucide-react";
 import { useState } from "react";
 import { useAuthStore } from "@/store/authStore";
@@ -92,6 +92,13 @@ export function AppShell() {
           ))}
         </nav>
 
+        <NavLink
+          to="/cambiar-clave"
+          className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-400 hover:text-white hover:bg-white/10 border-t border-white/10"
+        >
+          <KeyRound size={16} />
+          Cambiar contraseña
+        </NavLink>
         <button
           onClick={handleLogout}
           className="flex items-center gap-3 px-4 py-3 text-sm text-gray-400 hover:text-white hover:bg-white/10 border-t border-white/10"

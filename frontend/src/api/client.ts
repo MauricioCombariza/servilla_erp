@@ -13,7 +13,7 @@ api.interceptors.response.use(
   (res) => res,
   async (error) => {
     if (error.response?.status === 401) {
-      const { refreshToken, logout, setTokens, setUser, role, nombreCompleto } = useAuthStore.getState();
+      const { refreshToken, logout, setTokens, setUser, setClave, role, nombreCompleto } = useAuthStore.getState();
       const isFormData = error.config?.data instanceof FormData;
 
       if (refreshToken && !error.config._retry && !isFormData) {
@@ -22,6 +22,13 @@ api.interceptors.response.use(
           const res = await axios.post("/api/auth/refresh", { refresh_token: refreshToken });
           setTokens(res.data.access_token, res.data.refresh_token);
           setUser(res.data.role ?? role, res.data.nombre_completo ?? nombreCompleto, res.data.page_keys ?? []);
+          setClave(res.data.debe_cambiar_clave ?? false, res.data.dias_para_vencer ?? null);
+          // La clave venció: el token nuevo solo sirve para cambiarla. Lo pendiente del
+          // celular (cola offline) se queda guardado y se envía después del cambio.
+          if (res.data.debe_cambiar_clave) {
+            if (window.location.pathname !== "/cambiar-clave") window.location.assign("/cambiar-clave");
+            return Promise.reject(error);
+          }
           error.config.headers.Authorization = `Bearer ${res.data.access_token}`;
           return api(error.config);
         } catch (e) {

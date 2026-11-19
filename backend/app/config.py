@@ -15,6 +15,13 @@ class Settings(BaseSettings):
     jwt_access_expire_minutes: int = 60
     jwt_refresh_expire_days: int = 30
 
+    # Cambio periódico de contraseñas del ERP (SER-MNT-PR-02 §20.3: 45 días para usuarios y
+    # administradores; el banco exige entre 20 y 45). Aviso unos días antes de que venza.
+    clave_vigencia_dias: int = 45
+    clave_aviso_dias: int = 7
+    clave_min_largo: int = 12
+    clave_historial: int = 5  # no se puede repetir ninguna de las últimas N claves
+
     allowed_origins: str = "http://localhost:5173"
     environment: str = "development"
 
