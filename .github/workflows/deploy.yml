@@ -4,6 +4,8 @@ name: Desplegar en producción
 # 1. Las imágenes (backend, flujo, frontend) se construyen AQUÍ, en el runner de GitHub, y se
 #    suben a GHCR con la etiqueta del commit. El VPS (4 GB) ya no compila: compilar allá lo
 #    dejaba sin memoria (sitio caído ~20 min, Chrome de iMile muerto por OOM).
+#    Antes corre ci.yml (pruebas + Semgrep); si falla, no se despliega.
+#    El job `desplegar` usa el entorno `produccion`: espera la aprobación de un revisor (S5).
 # 2. infra/deploy.sh en el servidor descarga las imágenes de ese commit y reinicia solo lo que cambió.
 # Desde la pestaña Actions también se puede lanzar a mano; con "todo" reinicia todo.
 on:
@@ -20,7 +22,12 @@ env:
   REGISTRO: ghcr.io/mauriciocombariza
 
 jobs:
+  # Las mismas pruebas del PR, otra vez sobre master: si fallan, no se construye ni se despliega
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   construir:
+    needs: ci
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
