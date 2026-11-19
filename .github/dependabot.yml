@@ -1,0 +1,11 @@
+# Las acciones van fijadas por SHA (no por etiqueta, que se puede mover). Dependabot abre
+# un PR cuando sale una versión nueva, para no quedarse con versiones viejas.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      acciones:
+        patterns: ["*"]
