@@ -17,7 +17,21 @@ function hoyBogota(): string {
 
 type ErrorCarga = { mensaje: string; faltantes?: string[]; columnasArchivo?: string[] };
 
+// Con señal mala la subida se corta: se reintenta sola (la carga reemplaza por serial,
+// así que mandar el mismo archivo otra vez deja la base igual)
+const INTENTOS_SUBIDA = 4;
+const ESPERA_SUBIDA_MS = 120_000;
+
+const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function sinRespuesta(e: unknown): boolean {
+  return !(e as { response?: unknown })?.response;
+}
+
 function leerError(e: unknown): ErrorCarga {
+  if (sinRespuesta(e)) {
+    return { mensaje: "No hay señal o el servidor no respondió. Revisa la conexión y vuelve a subir la base." };
+  }
   const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
   if (detail && typeof detail === "object" && "faltantes" in detail) {
     const d = detail as ColumnasFaltantes;
@@ -37,9 +51,20 @@ export function SubirDespachoPage() {
   const [fEmi, setFEmi] = useState(hoyBogota());
   const [resultado, setResultado] = useState<CargaDespachoResult | null>(null);
   const [error, setError] = useState<ErrorCarga | null>(null);
+  const [intento, setIntento] = useState(0);
 
   const cargar = useMutation({
-    mutationFn: () => paquetesDespachoApi.cargar(archivo!, fEmi).then((r) => r.data),
+    mutationFn: async () => {
+      for (let i = 1; ; i++) {
+        setIntento(i);
+        try {
+          return (await paquetesDespachoApi.cargar(archivo!, fEmi, ESPERA_SUBIDA_MS)).data;
+        } catch (e) {
+          if (!sinRespuesta(e) || i >= INTENTOS_SUBIDA) throw e;
+          await esperar(2000 * 2 ** (i - 1)); // 2 s, 4 s, 8 s
+        }
+      }
+    },
     onSuccess: (data) => {
       setResultado(data);
       setError(null);
@@ -112,7 +137,9 @@ export function SubirDespachoPage() {
             className="w-full inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary-hover text-white font-medium py-3 rounded-lg text-base transition-colors disabled:opacity-40 disabled:cursor-not-allowed mt-5"
           >
             <Upload size={18} />
-            {cargar.isPending ? "Subiendo y sectorizando..." : "Subir base"}
+            {cargar.isPending
+              ? intento > 1 ? `Sin señal, reintentando (${intento}/${INTENTOS_SUBIDA})...` : "Subiendo y sectorizando..."
+              : "Subir base"}
           </button>
 
           {error && (

@@ -1,16 +1,20 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { ClavesExternasTable } from "./ClavesExternasTable";
 import { UsuariosTable } from "./UsuariosTable";
 import { RolesTable } from "./RolesTable";
 
 export function UsuariosRolesPage() {
-  const [tab, setTab] = useState<"usuarios" | "roles">("usuarios");
+  type Tab = "usuarios" | "roles" | "claves";
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState<Tab>((params.get("tab") as Tab) ?? "usuarios");
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Administración</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Usuarios, roles y páginas visibles por rol</p>
+          <p className="text-sm text-gray-500 mt-0.5">Usuarios, roles, páginas visibles por rol y claves de otros sistemas</p>
         </div>
       </div>
 
@@ -18,6 +22,7 @@ export function UsuariosRolesPage() {
         {[
           { key: "usuarios" as const, label: "Usuarios" },
           { key: "roles" as const, label: "Roles" },
+          { key: "claves" as const, label: "Claves de otros sistemas" },
         ].map((t) => (
           <button
             key={t.key}
@@ -33,7 +38,7 @@ export function UsuariosRolesPage() {
         ))}
       </div>
 
-      {tab === "usuarios" ? <UsuariosTable /> : <RolesTable />}
+      {tab === "usuarios" ? <UsuariosTable /> : tab === "roles" ? <RolesTable /> : <ClavesExternasTable />}
     </div>
   );
 }

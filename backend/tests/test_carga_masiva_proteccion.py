@@ -72,6 +72,10 @@ async def maestros():
         ))
         await db.execute(text("DELETE FROM personal WHERE codigo = :c"), {"c": _COD_CE})
         await db.execute(
+            text("DELETE FROM ordenes WHERE cliente_id IN (SELECT id FROM clientes WHERE nit = :n)"),
+            {"n": _CLIENTE_NIT},
+        )
+        await db.execute(
             text("DELETE FROM clientes WHERE nit = :n"), {"n": _CLIENTE_NIT}
         )
         await db.commit()
@@ -138,6 +142,10 @@ async def maestros():
             {"cid": cliente_id},
         )
         await db.execute(text("DELETE FROM personal WHERE codigo = :c"), {"c": _COD_CE})
+        # La carga masiva crea órdenes del cliente de prueba: sin borrarlas, el cliente no se puede borrar
+        await db.execute(
+            text("DELETE FROM ordenes WHERE cliente_id = :cid"), {"cid": cliente_id}
+        )
         await db.execute(
             text("DELETE FROM clientes WHERE id = :cid"), {"cid": cliente_id}
         )

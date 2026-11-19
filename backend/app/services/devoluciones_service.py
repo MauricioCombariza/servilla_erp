@@ -11,15 +11,17 @@ from __future__ import annotations
 
 import io
 import logging
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pandas as pd
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.devoluciones import Devolucion
+from app.models.paquetes_despacho import PaqueteDespacho
 from app.schemas.devoluciones import CargaMasivaDevolucionesResult
 from app.services.excel_utils import construir_excel
+from app.services.seriales_formato import es_serial_valido
 
 logger = logging.getLogger(__name__)
 
@@ -161,3 +163,57 @@ def construir_excel_reporte_devolucion(fecha: date, devoluciones: list[Devolucio
     ]
     widths = [6, 20, 28, 40, 20]
     return construir_excel(titulo, COLUMNAS_EXCEL_REPORTE_DEVOLUCION, filas, widths)
+
+
+# ── Cancelados por la aplicación ──────────────────────────────────────────────
+# Paquetes que la app (iMile) canceló y se retornaron al cliente. Quedan en devoluciones
+# con estado "cancelado" para que no sigan contando como pendientes en ningún reporte.
+
+ESTADO_CANCELADO = "cancelado"
+
+
+async def registrar_cancelados(db: AsyncSession, seriales: list[str]) -> list[dict]:
+    """Marca cada serial como cancelado: crea la devolución (con los datos de contacto de
+    la base de despacho, si está) o le cambia el estado a la que ya existe. Los seriales
+    con formato inválido (códigos de tula, lecturas cortadas) no se guardan."""
+    unicos = list(dict.fromkeys(s.strip() for s in seriales if s and s.strip()))
+    validos = [s for s in unicos if es_serial_valido(s)]
+
+    existentes = {
+        d.serial: d
+        for d in (await db.execute(select(Devolucion).where(Devolucion.serial.in_(validos)))).scalars()
+    } if validos else {}
+    base = {
+        p.serial: p
+        for p in (await db.execute(select(PaqueteDespacho).where(PaqueteDespacho.serial.in_(validos)))).scalars()
+    } if validos else {}
+
+    ahora = datetime.now(UTC)
+    items: list[dict] = []
+    for serial in unicos:
+        if serial not in validos:
+            items.append({"serial": serial, "resultado": "invalido", "estado_anterior": None, "en_base": False})
+            continue
+        paquete = base.get(serial)
+        d = existentes.get(serial)
+        if d is None:
+            db.add(Devolucion(
+                serial=serial,
+                nombre=paquete.nombre if paquete else None,
+                telefono=paquete.telefono[:20] if paquete and paquete.telefono else None,
+                direccion=paquete.direccion if paquete else None,
+                localidad=paquete.localidad if paquete else None,
+                estado=ESTADO_CANCELADO,
+                fecha_escaneo=ahora,
+            ))
+            resultado, anterior = "nuevo", None
+        elif d.estado == ESTADO_CANCELADO:
+            resultado, anterior = "ya_cancelado", d.estado
+        else:
+            resultado, anterior = "actualizado", d.estado
+            d.estado = ESTADO_CANCELADO
+            d.fecha_escaneo = ahora
+        items.append({"serial": serial, "resultado": resultado, "estado_anterior": anterior,
+                      "en_base": paquete is not None})
+    await db.commit()
+    return items

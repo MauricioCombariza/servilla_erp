@@ -1,11 +1,11 @@
 from datetime import UTC, datetime
 
-import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import claves
 from app.auth.dependencies import require_role
 from app.auth.pages import PAGE_CATALOG, PAGE_KEYS
 from app.database import get_db
@@ -13,16 +13,17 @@ from app.models.roles import Rol, RolPagina
 from app.models.usuarios import Usuario
 from app.schemas.usuarios_admin import (
     PaginaRead,
-    RolCreate, RolRead, RolUpdate,
-    UsuarioAdminCreate, UsuarioAdminPasswordReset, UsuarioAdminRead, UsuarioAdminUpdate,
+    RolCreate,
+    RolRead,
+    RolUpdate,
+    UsuarioAdminCreate,
+    UsuarioAdminPasswordReset,
+    UsuarioAdminRead,
+    UsuarioAdminUpdate,
 )
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 _auth = Depends(require_role("administrador"))
-
-
-def _hash_password(plain: str) -> str:
-    return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
 
 
 # ── Páginas (catálogo fijo) ───────────────────────────────────────────────────
@@ -44,12 +45,14 @@ async def list_usuarios(db: AsyncSession = Depends(get_db), _=_auth):
 async def create_usuario(body: UsuarioAdminCreate, db: AsyncSession = Depends(get_db), _=_auth):
     usuario = Usuario(
         username=body.username,
-        password_hash=_hash_password(body.password),
+        password_hash="",
         nombre_completo=body.nombre_completo,
         email=body.email,
         rol=body.rol,
         fecha_creacion=datetime.now(UTC),
     )
+    # Clave temporal: la persona la cambia al entrar por primera vez
+    await claves.poner_clave(db, usuario, body.password, temporal=True)
     db.add(usuario)
     try:
         await db.commit()
@@ -114,7 +117,8 @@ async def reset_password(
     usuario = result.scalar_one_or_none()
     if usuario is None:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    usuario.password_hash = _hash_password(body.password)
+    # Clave temporal: la persona la cambia al entrar
+    await claves.poner_clave(db, usuario, body.password, temporal=True)
     await db.commit()
 
 

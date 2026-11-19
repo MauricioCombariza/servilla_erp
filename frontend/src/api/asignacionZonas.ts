@@ -71,8 +71,8 @@ export const asignacionZonasApi = {
   asignar: (codigo: string, zonas: string[], reasignar = false) =>
     api.put<ZonasMensajero>(m(codigo), { zonas, reasignar }),
 
-  asignarSerial: (codigo: string, serial: string) =>
-    api.post<AsignacionSerial>(`${m(codigo)}/seriales`, { serial }),
+  asignarSerial: (codigo: string, serial: string, timeout?: number) =>
+    api.post<AsignacionSerial>(`${m(codigo)}/seriales`, { serial }, { timeout }),
 
   quitarSerial: (codigo: string, serial: string) =>
     api.delete(`${m(codigo)}/seriales/${encodeURIComponent(serial)}`),

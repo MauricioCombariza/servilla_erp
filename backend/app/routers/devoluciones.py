@@ -9,6 +9,9 @@ from app.auth.dependencies import require_page
 from app.database import get_db
 from app.models.devoluciones import Devolucion
 from app.schemas.devoluciones import (
+    CanceladoItem,
+    CanceladosRequest,
+    CanceladosResult,
     CargaMasivaDevolucionesResult,
     DevolucionCreate,
     DevolucionDocumentoItem,
@@ -25,6 +28,7 @@ from app.services.devoluciones_service import (
     construir_excel_reporte_devolucion,
     get_devoluciones_del_dia,
     procesar_excel_devoluciones,
+    registrar_cancelados,
 )
 from app.services.excel_utils import XLSX_MEDIA_TYPE
 from app.services.verificacion_seriales_service import (
@@ -154,6 +158,22 @@ async def carga_masiva(file: UploadFile, db: AsyncSession = Depends(get_db), _=_
         return await procesar_excel_devoluciones(contenido, db)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/cancelados", response_model=CanceladosResult)
+async def marcar_cancelados(body: CanceladosRequest, db: AsyncSession = Depends(get_db), _=_auth):
+    """Paquetes cancelados por la aplicación y retornados al cliente."""
+    items = [CanceladoItem(**i) for i in await registrar_cancelados(db, body.seriales)]
+    if not items:
+        raise HTTPException(status_code=400, detail="No se recibió ningún serial")
+    contar = lambda r: sum(1 for i in items if i.resultado == r)  # noqa: E731
+    return CanceladosResult(
+        items=items,
+        nuevos=contar("nuevo"),
+        actualizados=contar("actualizado"),
+        ya_cancelados=contar("ya_cancelado"),
+        invalidos=contar("invalido"),
+    )
 
 
 @router.patch("/{devolucion_id}", response_model=DevolucionRead)

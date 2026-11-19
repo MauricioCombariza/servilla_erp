@@ -61,7 +61,7 @@ async def clasificar_seriales(seriales: list[str], db: AsyncSession) -> list[Ser
 
         d = por_devolucion.get(serial)
         if d is not None:
-            if d.estado == "devolucion":
+            if d.estado in ("devolucion", "cancelado"):
                 clasificacion = "devolucion"
             elif d.estado == "entregado":
                 clasificacion = "entrega"

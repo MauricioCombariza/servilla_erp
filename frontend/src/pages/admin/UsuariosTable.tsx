@@ -6,6 +6,19 @@ import { Plus, Pencil } from "lucide-react";
 import { UsuarioForm } from "./UsuarioForm";
 import type { Usuario } from "@/types/domain";
 
+/** Vencimiento de la clave (cada 45 días, SER-MNT-PR-02 §20.3) */
+function EstadoClave({ u }: { u: Usuario }) {
+  if (u.debe_cambiar_clave) {
+    return <span className="bg-amber-50 text-amber-700 text-xs px-2 py-0.5 rounded-full">Debe cambiarla</span>;
+  }
+  if (!u.clave_vence_en) return <span className="text-gray-400">—</span>;
+  const vence = new Date(u.clave_vence_en);
+  const dias = Math.floor((vence.getTime() - Date.now()) / 86_400_000);
+  const fecha = vence.toLocaleDateString("es-CO");
+  if (dias < 0) return <span className="bg-red-50 text-red-700 text-xs px-2 py-0.5 rounded-full">Vencida ({fecha})</span>;
+  return <span className={`text-xs ${dias <= 7 ? "text-amber-700" : "text-gray-600"}`}>Vence {fecha}</span>;
+}
+
 export function UsuariosTable() {
   const qc = useQueryClient();
   const [showForm, setShowForm] = useState(false);
@@ -51,7 +64,7 @@ export function UsuariosTable() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                {["Usuario", "Nombre", "Email", "Rol", "Último acceso", "Estado", ""].map((h) => (
+                {["Usuario", "Nombre", "Email", "Rol", "Último acceso", "Contraseña", "Estado", ""].map((h) => (
                   <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">
                     {h}
                   </th>
@@ -69,6 +82,9 @@ export function UsuariosTable() {
                   </td>
                   <td className="px-4 py-3 text-gray-600">
                     {u.ultimo_acceso ? new Date(u.ultimo_acceso).toLocaleString("es-CO") : "—"}
+                  </td>
+                  <td className="px-4 py-3">
+                    <EstadoClave u={u} />
                   </td>
                   <td className="px-4 py-3">
                     <button onClick={() => toggleActivo.mutate(u)}>

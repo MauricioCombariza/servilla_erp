@@ -23,6 +23,7 @@ from app.routers.pendientes_entrega import router as pendientes_entrega_router
 from app.routers.escaneos_carryt import router as escaneos_carryt_router
 from app.routers.escaneos_imile_offload import router as escaneos_imile_offload_router
 from app.routers.usuarios_admin import router as usuarios_admin_router
+from app.routers.claves_externas import router as claves_externas_router
 from app.routers.devoluciones import router as devoluciones_router
 from app.routers.geocercas import router as geocercas_router
 from app.routers.paquetes_despacho import router as paquetes_despacho_router
@@ -33,6 +34,8 @@ from app.routers.asignacion_zonas import router as asignacion_zonas_router
 from app.routers.asignacion_zonas import router_qr as asignacion_qr_router
 from app.routers.imagenes import router as imagenes_router
 from app.routers.generar_dat import router as generar_dat_router
+from app.routers.paquetes_estancados import router as paquetes_estancados_router
+from app.routers.seguimiento import router as seguimiento_router
 from app.config import settings
 from app.database import engine
 from app.services.imile_automation import imile_automation
@@ -81,6 +84,7 @@ app.include_router(pendientes_entrega_router)
 app.include_router(escaneos_carryt_router)
 app.include_router(escaneos_imile_offload_router)
 app.include_router(usuarios_admin_router)
+app.include_router(claves_externas_router)
 app.include_router(devoluciones_router)
 app.include_router(geocercas_router)
 app.include_router(paquetes_despacho_router)
@@ -91,6 +95,8 @@ app.include_router(asignacion_zonas_router)
 app.include_router(asignacion_qr_router)
 app.include_router(imagenes_router)
 app.include_router(generar_dat_router)
+app.include_router(paquetes_estancados_router)
+app.include_router(seguimiento_router)
 
 
 @app.get("/health")

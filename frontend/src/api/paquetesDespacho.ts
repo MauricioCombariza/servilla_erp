@@ -38,12 +38,13 @@ export interface PaqueteDespacho {
 }
 
 export const paquetesDespachoApi = {
-  cargar: (file: File, fEmi: string) => {
+  cargar: (file: File, fEmi: string, timeout?: number) => {
     const form = new FormData();
     form.append("file", file);
     form.append("f_emi", fEmi);
     return api.post<CargaDespachoResult>("/paquetes-despacho/cargar", form, {
       headers: { "Content-Type": "multipart/form-data" },
+      timeout,
     });
   },
 

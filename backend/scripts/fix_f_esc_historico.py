@@ -63,9 +63,9 @@ from datetime import datetime
 FECHA_LIMITE = datetime(2026, 7, 1).date()
 
 MYSQL_BW = {
-    "host":     os.environ.get("MYSQL_HOST_BW", "186.180.15.66"),
-    "port":     int(os.environ.get("MYSQL_PORT_BW", 12539)),
-    "user":     os.environ.get("MYSQL_USER_BW", "servilla_remoto"),
+    "host":     os.environ["MYSQL_HOST_BW"],
+    "port":     int(os.environ.get("MYSQL_PORT_BW", 3306)),
+    "user":     os.environ["MYSQL_USER_BW"],
     "password": os.environ.get("MYSQL_PASSWORD_BW", ""),
     "database": os.environ.get("MYSQL_DB_BW", "bases_web"),
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { CAMARA_TRASERA, CONFIG_ESCANER, crearEscaner } from "@/utils/escanerCamara";
-import { AlertTriangle, Camera, CameraOff, MapPinned, RotateCcw, Send } from "lucide-react";
+import { AlertTriangle, Camera, CameraOff, CloudOff, MapPinned, RotateCcw, Send } from "lucide-react";
 import {
   asignacionZonasApi,
   type AsignacionSerial,
@@ -12,6 +12,7 @@ import {
   type TotalMensajero,
   type ZonasMensajero,
 } from "@/api/asignacionZonas";
+import { alResultado, encolar, useCola } from "@/offline/cola";
 import { FlujoPaquetesNav } from "./FlujoPaquetesNav";
 
 function leerError(e: unknown): { status?: number; detail?: unknown } {
@@ -31,6 +32,8 @@ const SCAN_FORMATS = [
   Html5QrcodeSupportedFormats.ITF,
 ];
 const ANTIRREBOTE_MS = 2000; // la cámara lee el mismo código varias veces por segundo
+// Con señal mala no se espera más: el serial queda en la cola del celular
+const ESPERA_ASIGNAR_MS = 8000;
 
 /**
  * Pasos 3.1 y 3.2 (con sesión del ERP): se ingresa el código del mensajero, se le eligen
@@ -383,6 +386,22 @@ function SerialesDelMensajero({ mensajero, seriales, cargando, onCambio, onMensa
   const [camara, setCamara] = useState(false);
   const campoRef = useRef<HTMLInputElement>(null);
   const ultimaLecturaRef = useRef<{ codigo: string; at: number }>({ codigo: "", at: 0 });
+  const cola = useCola();
+  const [guardado, setGuardado] = useState<string | null>(null);
+
+  const onCambioRef = useRef(onCambio);
+  onCambioRef.current = onCambio;
+
+  // Lo que se guardó sin señal llega después: se refresca la lista (o se avisa si falló)
+  useEffect(() => alResultado((op, r) => {
+    if (op.tipo !== "asignar_serial") return;
+    if (r.status >= 200 && r.status < 300) {
+      onCambioRef.current();
+    } else {
+      const detail = (r.body as { detail?: unknown })?.detail;
+      setError(`${String(op.datos?.serial ?? "")}: ${typeof detail === "string" ? detail : "no se pudo asignar"}`);
+    }
+  }), []);
 
   async function asignar(raw: string) {
     const s = raw.trim();
@@ -391,13 +410,21 @@ function SerialesDelMensajero({ mensajero, seriales, cargando, onCambio, onMensa
     if (ultimaLecturaRef.current.codigo === s && ahora - ultimaLecturaRef.current.at < ANTIRREBOTE_MS) return;
     ultimaLecturaRef.current = { codigo: s, at: ahora };
     setError(null);
+    setGuardado(null);
     try {
-      setUltimo((await asignacionZonasApi.asignarSerial(mensajero.codigo, s)).data);
+      setUltimo((await asignacionZonasApi.asignarSerial(mensajero.codigo, s, ESPERA_ASIGNAR_MS)).data);
       onCambio();
     } catch (err) {
-      const { detail } = leerError(err);
+      const { status, detail } = leerError(err);
       setUltimo(null);
-      setError(typeof detail === "string" ? detail : "No se pudo asignar el serial");
+      if (status === undefined) {
+        // Sin respuesta (sin señal o muy lenta): se guarda y se manda solo al volver la señal.
+        // Si sí había llegado, reenviarlo deja lo mismo.
+        void encolar({ tipo: "asignar_serial", datos: { codigo: mensajero.codigo, serial: s } });
+        setGuardado(s);
+      } else {
+        setError(typeof detail === "string" ? detail : "No se pudo asignar el serial");
+      }
     } finally {
       // Con la cámara abierta no se enfoca el campo: en el celular sacaría el teclado
       if (!camara) campoRef.current?.focus();
@@ -483,6 +510,20 @@ function SerialesDelMensajero({ mensajero, seriales, cargando, onCambio, onMensa
         </form>
         {camara && <div id={SCANNER_ELEMENT_ID} className="mt-3 w-full rounded-xl overflow-hidden bg-black" />}
         {error && <p role="alert" className="mt-2 text-sm text-red-700">{error}</p>}
+        {guardado && (
+          <p role="status" className="mt-2 text-sm text-gray-700 flex items-center gap-1.5">
+            <CloudOff size={16} className="shrink-0" />
+            <span>
+              <span className="font-mono font-semibold">{guardado.slice(-4)}</span>: sin señal, quedó guardado en el
+              celular y se asigna solo al volver la señal.
+            </span>
+          </p>
+        )}
+        {cola.pendientes > 0 && (
+          <p className="mt-1 text-xs text-gray-500">
+            {cola.sinSenal ? "Sin señal" : "Enviando"} · {cola.pendientes} por enviar
+          </p>
+        )}
         {ultimo && (
           <p className={`mt-2 text-sm ${ultimo.ya_era_suyo ? "text-amber-800" : "text-green-800"}`}>
             <span className="font-mono font-semibold">{ultimo.ultimos_4}</span>
