@@ -999,9 +999,7 @@ ORDER BY fecha, tipo DESC;
 -- DATOS INICIALES
 -- ============================================================
 
--- Usuario admin (password: admin123 — cambiar en producción)
-INSERT INTO usuarios (username, password_hash, nombre_completo, email, rol) VALUES
-('admin', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5NU7RXVdgxEgi', 'Administrador', 'admin@servilla.co', 'administrador');
+-- Usuarios: ninguno sembrado. El primero se crea con scripts/crear_usuario.py.
 
 -- Bogotá
 INSERT INTO ciudades (nombre, departamento, codigo, es_bogota, ambito) VALUES

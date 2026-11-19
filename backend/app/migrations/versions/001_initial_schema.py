@@ -881,11 +881,8 @@ def upgrade() -> None:
     """)
 
     # ── Datos iniciales ────────────────────────────────────────────────────────
-    op.execute("""
-        INSERT INTO usuarios (username, password_hash, nombre_completo, email, rol)
-        VALUES ('admin', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5NU7RXVdgxEgi',
-                'Administrador', 'admin@servilla.co', 'administrador')
-    """)
+    # Sin usuarios sembrados: ninguna contraseña ni hash vive en el código. El primer
+    # administrador se crea con scripts/crear_usuario.py (pide la clave por teclado).
     op.execute("""
         INSERT INTO ciudades (nombre, departamento, codigo, es_bogota, ambito)
         VALUES ('Bogotá D.C.', 'Cundinamarca', 'BOG', true, 'bogota')
