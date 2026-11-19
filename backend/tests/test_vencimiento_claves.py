@@ -140,3 +140,10 @@ async def test_clave_asignada_por_admin_es_temporal(client):
     r = await client.put(f"/api/admin/usuarios/{uid}/password", headers=h, json={"password": NUEVA})
     assert r.status_code == 204
     assert (await _login(client, NUEVA, "test_temporal")).json()["debe_cambiar_clave"] is True
+
+
+async def test_login_sin_distinguir_mayusculas(client):
+    # El teclado del celular pone la primera letra en mayúscula ("Mariela")
+    await _crear()
+    r = await _login(client, CLAVE, f"  {USUARIO.capitalize()} ")
+    assert r.status_code == 200
