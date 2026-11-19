@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/authStore";
 import { AppShell } from "@/components/layout/AppShell";
 import { Login } from "@/pages/Login";
+import { CambiarClavePage } from "@/pages/CambiarClavePage";
+import { AvisoClave } from "@/components/AvisoClave";
 import { Forbidden } from "@/pages/Forbidden";
 import { ClientesPage } from "@/pages/clientes/ClientesPage";
 import { ClienteDetailPage } from "@/pages/clientes/ClienteDetailPage";
@@ -58,7 +60,10 @@ const qc = new QueryClient({
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
-  return token ? <>{children}</> : <Navigate to="/login" replace />;
+  const debeCambiarClave = useAuthStore((s) => s.debeCambiarClave);
+  if (!token) return <Navigate to="/login" replace />;
+  if (debeCambiarClave) return <Navigate to="/cambiar-clave" replace />;
+  return <>{children}</>;
 }
 
 function PageGuard({ pageKey, children }: { pageKey: string | string[]; children: React.ReactNode }) {
@@ -79,8 +84,10 @@ export default function App() {
     <QueryClientProvider client={qc}>
       <BrowserRouter>
         <AlDia />
+        <AvisoClave />
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/cambiar-clave" element={<CambiarClavePage />} />
           {/* Paso 2.7: pública, se abre con el QR del día (sin iniciar sesión) */}
           <Route path="/ver-zonas/:token" element={<VerZonasPage />} />
           <Route

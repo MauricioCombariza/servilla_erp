@@ -13,7 +13,7 @@ import { useAuthStore } from "@/store/authStore";
  */
 const CADA_MS = 5 * 60_000;
 
-type Me = { rol: string; nombre_completo: string; page_keys: string[] };
+type Me = { rol: string; nombre_completo: string; page_keys: string[]; dias_para_vencer: number | null };
 
 async function versionPublicada(): Promise<string | null> {
   try {
@@ -43,10 +43,14 @@ export function AlDia() {
         }
         setHayNueva(true);
       }
-      if (useAuthStore.getState().token) {
+      const sesion = useAuthStore.getState();
+      if (sesion.token && !sesion.debeCambiarClave) {
         try {
           const me = (await api.get<Me>("/auth/me")).data;
-          if (vivo) useAuthStore.getState().setUser(me.rol, me.nombre_completo, me.page_keys);
+          if (vivo) {
+            sesion.setUser(me.rol, me.nombre_completo, me.page_keys);
+            sesion.setClave(false, me.dias_para_vencer);
+          }
         } catch {
           // sin señal o sesión vencida: el cliente ya maneja el 401
         }

@@ -51,13 +51,23 @@ async def _recalcular_costos_ordenes(db: AsyncSession, orden_ids: set[int]) -> N
         """), {"alist": costo_alist, "peg": row.peg, "transp": row.transp, "oid": oid})
 
 
+# Con menos de estas horas en el día no se paga subsidio de transporte (decisión 2026-11-05)
+HORAS_MINIMAS_SUBSIDIO = 2
+
+
 async def _upsert_subsidio_transporte(db: AsyncSession, personal_id: int, fecha) -> None:
     res = await db.execute(text("""
         SELECT COALESCE(SUM(horas_trabajadas), 0)
         FROM registro_horas WHERE personal_id = :pid AND fecha = :fecha
     """), {"pid": personal_id, "fecha": fecha})
     horas = float(res.scalar())
-    if horas <= 0:
+    if horas < HORAS_MINIMAS_SUBSIDIO:
+        # También al editar o borrar horas: si el día baja de 2 h, se quita el subsidio
+        # que ya tenía (si todavía no se liquidó).
+        await db.execute(text("""
+            DELETE FROM subsidio_transporte
+            WHERE personal_id = :pid AND fecha = :fecha AND liquidado = FALSE
+        """), {"pid": personal_id, "fecha": fecha})
         return
 
     # Alistamiento siempre recibe transporte completo, sin importar las horas trabajadas.

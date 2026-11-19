@@ -3,8 +3,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useNavigate } from "react-router-dom";
 import { useState } from "react";
-import { authApi } from "@/api/auth";
-import { useAuthStore } from "@/store/authStore";
+import { authApi, guardarSesion } from "@/api/auth";
 
 const schema = z.object({
   username: z.string().min(1, "Requerido"),
@@ -18,17 +17,15 @@ export function Login() {
   });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const { setTokens, setUser } = useAuthStore();
   const navigate = useNavigate();
 
   async function onSubmit(data: FormData) {
     setLoading(true);
     setError("");
     try {
-      const res = await authApi.login(data.username, data.password);
-      setTokens(res.data.access_token, res.data.refresh_token);
-      setUser(res.data.role, res.data.nombre_completo, res.data.page_keys);
-      navigate("/clientes");
+      const res = await authApi.login(data.username.trim().toLowerCase(), data.password);
+      guardarSesion(res.data);
+      navigate(res.data.debe_cambiar_clave ? "/cambiar-clave" : "/clientes");
     } catch {
       setError("Usuario o contraseña incorrectos");
     } finally {
@@ -47,6 +44,10 @@ export function Login() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Usuario</label>
             <input
               {...register("username")}
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              autoComplete="username"
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary outline-none"
               autoFocus
             />

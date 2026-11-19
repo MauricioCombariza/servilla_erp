@@ -23,6 +23,7 @@ from app.routers.pendientes_entrega import router as pendientes_entrega_router
 from app.routers.escaneos_carryt import router as escaneos_carryt_router
 from app.routers.escaneos_imile_offload import router as escaneos_imile_offload_router
 from app.routers.usuarios_admin import router as usuarios_admin_router
+from app.routers.claves_externas import router as claves_externas_router
 from app.routers.devoluciones import router as devoluciones_router
 from app.routers.geocercas import router as geocercas_router
 from app.routers.paquetes_despacho import router as paquetes_despacho_router
@@ -84,6 +85,7 @@ app.include_router(pendientes_entrega_router)
 app.include_router(escaneos_carryt_router)
 app.include_router(escaneos_imile_offload_router)
 app.include_router(usuarios_admin_router)
+app.include_router(claves_externas_router)
 app.include_router(devoluciones_router)
 app.include_router(geocercas_router)
 app.include_router(paquetes_despacho_router)

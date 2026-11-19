@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class LoginRequest(BaseModel):
@@ -13,6 +13,13 @@ class TokenResponse(BaseModel):
     role: str
     nombre_completo: str
     page_keys: list[str] = []
+    debe_cambiar_clave: bool = False
+    dias_para_vencer: int | None = None
+
+
+class CambioClaveRequest(BaseModel):
+    clave_actual: str
+    clave_nueva: str = Field(max_length=100)
 
 
 class RefreshRequest(BaseModel):
@@ -27,3 +34,4 @@ class UserMe(BaseModel):
     rol: str
     activo: bool
     page_keys: list[str] = []
+    dias_para_vencer: int | None = None

@@ -45,8 +45,8 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
           cache: pip
@@ -71,8 +71,8 @@ jobs:
       run:
         working-directory: flujo
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: flujo/go.mod
           cache-dependency-path: flujo/go.sum
@@ -87,8 +87,8 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
           cache: npm
@@ -101,19 +101,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     container:
-      image: semgrep/semgrep
+      image: semgrep/semgrep:1.185.0@sha256:67518c174185a2043fdbed16c70631b79209499b3671178e7194379b48295a0d
     steps:
-      - uses: actions/checkout@v4
-      # Primer escaneo: informa sin bloquear. Cuando se resuelvan los hallazgos actuales
-      # (plan de remediación), se quita --no-error... y pasa a bloquear el PR.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Bloquea el PR si aparece un hallazgo nuevo. avoid-sqlalchemy-text queda por fuera
+      # mientras se revisan los 25 que hay (casi todos con parámetros): cuando se resuelvan,
+      # se quita el --exclude-rule. Un falso positivo se marca en la línea con
+      # "# nosemgrep: <regla>" y el porqué.
       - name: Escaneo
         run: |
           semgrep scan --config p/python --config p/typescript --config p/react \
             --config p/golang --config p/secrets --config p/owasp-top-ten \
             --exclude 'backend/tests' --exclude '**/*.lock' \
-            --sarif --output semgrep.sarif --text-output semgrep.txt || true
-          tail -n 40 semgrep.txt || true
-      - uses: actions/upload-artifact@v4
+            --exclude-rule python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text \
+            --error --sarif --output semgrep.sarif --text-output semgrep.txt
+      - name: Hallazgos
+        if: always()
+        run: tail -n 60 semgrep.txt || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: semgrep

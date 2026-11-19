@@ -19,6 +19,13 @@ RUN npm pack playwright-core@1.57.0 --silent \
     && ./node package/cli.js install --with-deps chromium \
     && rm -rf /var/lib/apt/lists/* /root/.npm
 COPY --from=build /out/flujo /usr/local/bin/flujo
+# Corre como usuario sin privilegios (Semgrep missing-user). UID 10001, el mismo del
+# backend: los dos escriben la sesión de iMile en el volumen compartido imile_secrets.
+ARG APP_UID=10001
+RUN groupadd --gid ${APP_UID} servilla \
+    && useradd --uid ${APP_UID} --gid servilla --create-home --shell /usr/sbin/nologin servilla \
+    && mkdir -p /app/.secrets && chown servilla:servilla /app/.secrets
 WORKDIR /app
+USER servilla
 EXPOSE 8090
 CMD ["flujo"]
