@@ -4,8 +4,9 @@ import { Upload, AlertCircle, CheckCircle, FileText, FileDown, Search, Download,
 import { devolucionesApi } from "@/api/devoluciones";
 import { extraerErrorBlob } from "@/utils/blobError";
 import { VerificarSerialesTab } from "./VerificarSerialesTab";
+import { CanceladosTab } from "./CanceladosTab";
 
-const ESTADOS_SUGERIDOS = ["transito", "entregado", "no_ubicado", "reasignado", "devolucion"];
+const ESTADOS_SUGERIDOS = ["transito", "entregado", "no_ubicado", "reasignado", "devolucion", "cancelado"];
 
 function formatFecha(iso: string) {
   return new Date(iso).toLocaleString("es-CO", { dateStyle: "short", timeStyle: "short" });
@@ -158,7 +159,7 @@ function NuevaDevolucionForm({ onClose, onCreated }: { onClose: () => void; onCr
   );
 }
 
-type Tab = "lista" | "verificar";
+type Tab = "lista" | "verificar" | "cancelados";
 
 export function DevolucionesPage() {
   const [tab, setTab] = useState<Tab>("lista");
@@ -310,9 +311,18 @@ export function DevolucionesPage() {
         >
           Verificar seriales
         </button>
+        <button
+          onClick={() => setTab("cancelados")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            tab === "cancelados" ? "border-primary text-primary" : "border-transparent text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          Cancelados por la app
+        </button>
       </div>
 
       {tab === "verificar" && <VerificarSerialesTab />}
+      {tab === "cancelados" && <CanceladosTab />}
 
       {tab === "lista" && (
         <>

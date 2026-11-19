@@ -1,9 +1,11 @@
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
 
 from app.auth.dependencies import require_page
 from app.schemas.imagenes import ImagenGuia, ImagenListItem
 from app.services.bases_web import buscar_histo, buscar_histo_serial_exacto
-from app.services.imagenes import construir_image_url, fetch_imagen_bytes
+from app.services.imagenes import fetch_imagen_bytes
 
 router = APIRouter(prefix="/api/imagenes", tags=["imagenes"])
 _auth = Depends(require_page("imagenes"))
@@ -46,7 +48,9 @@ async def obtener_imagen_guia(
 ):
     serial = serial.strip()
     row = await buscar_histo_serial_exacto(serial)
-    image_url = construir_image_url(serial)
+    # Se expone solo el proxy autenticado del ERP; la dirección del servidor
+    # legado nunca llega al navegador.
+    image_url = f"/api/imagenes/{quote(serial, safe='')}/foto"
 
     if row is None:
         return ImagenGuia(serial=serial, encontrado=False, image_url=image_url)

@@ -1,6 +1,8 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
+
+from app.config import settings
 
 
 class PaginaRead(BaseModel):
@@ -17,7 +19,7 @@ class UsuarioAdminBase(BaseModel):
 
 
 class UsuarioAdminCreate(UsuarioAdminBase):
-    password: str = Field(min_length=6, max_length=100)
+    password: str = Field(max_length=100)  # reglas en app/auth/claves.py
 
 
 class UsuarioAdminUpdate(BaseModel):
@@ -29,7 +31,7 @@ class UsuarioAdminUpdate(BaseModel):
 
 
 class UsuarioAdminPasswordReset(BaseModel):
-    password: str = Field(min_length=6, max_length=100)
+    password: str = Field(max_length=100)  # reglas en app/auth/claves.py
 
 
 class UsuarioAdminRead(BaseModel):
@@ -42,6 +44,15 @@ class UsuarioAdminRead(BaseModel):
     activo: bool
     fecha_creacion: datetime | None = None
     ultimo_acceso: datetime | None = None
+    clave_cambiada_en: datetime | None = None
+    debe_cambiar_clave: bool = False
+
+    @computed_field
+    @property
+    def clave_vence_en(self) -> datetime | None:
+        if self.clave_cambiada_en is None:
+            return None
+        return self.clave_cambiada_en + timedelta(days=settings.clave_vigencia_dias)
 
 
 class RolCreate(BaseModel):

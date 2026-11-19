@@ -16,6 +16,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # 001 ya la crea en una base nueva; solo se crea si falta (bases anteriores a 001 completa)
+    if sa.inspect(op.get_bind()).has_table("pagos_operativos_mensuales"):
+        return
     op.create_table(
         "pagos_operativos_mensuales",
         sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),

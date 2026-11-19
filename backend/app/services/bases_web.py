@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import date, timedelta
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import pymysql
 import pymysql.cursors
@@ -27,22 +27,41 @@ PENDIENTES_ORDEN_FIN = 128000
 
 
 def _parse_dsn() -> dict:
-    """Extrae host/port/user/password/db desde settings.bases_web_url."""
+    """Extrae los parámetros de conexión desde settings.bases_web_url.
+
+    Formato: mysql://usuario:clave@host:puerto/base[?ssl_ca=/ruta/ca.pem]
+    (también acepta mysql+pymysql:// y mysql+aiomysql://).
+
+    No hay valores por defecto: si falta host, usuario o base, la integración
+    queda deshabilitada (devuelve {}) y se registra el error. Así nunca se
+    intenta una conexión a una dirección escrita en el código. Con `ssl_ca`
+    (o `ssl=1`) la conexión va cifrada con TLS.
+    """
     url = settings.bases_web_url
     if not url:
         return {}
     # Normalizar: mysql+aiomysql:// → mysql://  o  mysql+pymysql:// → mysql://
     if "://" in url:
-        scheme, rest = url.split("://", 1)
+        _, rest = url.split("://", 1)
         url = f"mysql://{rest}"
     parsed = urlparse(url)
-    return {
-        "host":     parsed.hostname or "186.180.15.66",
-        "port":     parsed.port or 12539,
-        "user":     parsed.username or "servilla_remoto",
-        "password": parsed.password or "",
-        "database": (parsed.path or "/bases_web").lstrip("/"),
+    database = (parsed.path or "").lstrip("/")
+    if not (parsed.hostname and parsed.username and database):
+        logger.error("BASES_WEB_URL incompleto (requiere usuario, host y base): integración deshabilitada")
+        return {}
+    dsn = {
+        "host":     parsed.hostname,
+        "port":     parsed.port or 3306,
+        "user":     unquote(parsed.username),
+        "password": unquote(parsed.password or ""),
+        "database": database,
     }
+    opciones = parse_qs(parsed.query)
+    if "ssl_ca" in opciones:
+        dsn["ssl"] = {"ca": opciones["ssl_ca"][0]}
+    elif opciones.get("ssl", ["0"])[0].lower() in ("1", "true", "si", "sí"):
+        dsn["ssl"] = {}
+    return dsn
 
 
 def _fetch_ciudades_sync(planilla: str) -> list[tuple[str, str | None]]:
@@ -57,11 +76,7 @@ def _fetch_ciudades_sync(planilla: str) -> list[tuple[str, str | None]]:
 
     try:
         conn = pymysql.connect(
-            host=dsn["host"],
-            port=dsn["port"],
-            user=dsn["user"],
-            password=dsn["password"],
-            database=dsn["database"],
+            **dsn,
             cursorclass=pymysql.cursors.DictCursor,
             connect_timeout=5,
             read_timeout=10,

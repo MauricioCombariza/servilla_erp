@@ -19,7 +19,7 @@ class Tula(Base):
     __tablename__ = "tulas"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    codigo: Mapped[str | None] = mapped_column(String(80))  # NULL si es "Sin etiqueta"
+    codigo: Mapped[str | None] = mapped_column(String(255))  # NULL si es "Sin etiqueta"
     sin_etiqueta: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     total_esperado: Mapped[int | None] = mapped_column()  # lo trae iMile (2.3)
     # Seriales que trae según iMile (2.3): al cerrar se ven los que faltaron. NULL si no se sabe
@@ -29,6 +29,10 @@ class Tula(Base):
     fecha: Mapped[date] = mapped_column(nullable=False)
     fecha_apertura: Mapped[datetime] = mapped_column(_ts, server_default=text("CURRENT_TIMESTAMP"))
     fecha_cierre: Mapped[datetime | None] = mapped_column(_ts)
+    # Descarga automática en iMile (servicio Go, migración 051)
+    imile_descarga_estado: Mapped[str | None] = mapped_column(String(20))
+    imile_descarga_mensaje: Mapped[str | None] = mapped_column(Text)
+    imile_fecha: Mapped[datetime | None] = mapped_column(_ts)
 
 
 class TulaSerial(Base):

@@ -28,12 +28,22 @@ export interface PlanillaPendienteMensajero {
   valor_por_envio: number;
 }
 
+export interface PlanillaPorPrecio {
+  planilla: string | null;
+  fecha_escaner: string | null;
+  seriales_liquidables: number;
+  monto_liquidable: number;
+  seriales_no_liquidables: number;
+  monto_no_liquidable: number;
+}
+
 export interface SerialesPorPrecio {
   precio_mensajero: number;
   seriales_liquidables: number;
   monto_liquidable: number;
   seriales_no_liquidables: number;
   monto_no_liquidable: number;
+  planillas: PlanillaPorPrecio[];
 }
 
 export interface AjustePendiente {
@@ -53,6 +63,10 @@ export const liqApi = {
     api.get<PlanillaPendienteMensajero[]>(`/liquidaciones/planillas/${personalId}`, { params: { mes, anio } }),
   preciosPendientes: (personalId: number, mes: number, anio: number) =>
     api.get<SerialesPorPrecio[]>(`/liquidaciones/precios/${personalId}`, { params: { mes, anio } }),
+  cambiarPrecioPlanilla: (personalId: number, data: {
+    planilla: string; precio_actual: number; precio_nuevo: number; mes: number; anio: number;
+  }) =>
+    api.patch<{ planilla: string; seriales_actualizados: number }>(`/liquidaciones/precios/${personalId}`, data),
   ajustesPendientes: (personalId: number) =>
     api.get<AjustePendiente[]>(`/liquidaciones/ajustes-pendientes/${personalId}`),
   list: (params: object) => api.get<Liquidacion[]>("/liquidaciones/", { params }),

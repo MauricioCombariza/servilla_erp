@@ -29,9 +29,9 @@ Variables de entorno para MySQL logistica:
     MYSQL_DB_LOGISTICA        (default: logistica)
 
 Variables adicionales para bases_web.histo:
-    MYSQL_HOST_BW             (default: 186.180.15.66)
-    MYSQL_PORT_BW             (default: 12539)
-    MYSQL_USER_BW             (default: servilla_remoto)
+    MYSQL_HOST_BW             (obligatorio)
+    MYSQL_PORT_BW             (default: 3306)
+    MYSQL_USER_BW             (obligatorio)
     MYSQL_PASSWORD_BW         (requerida)
     MYSQL_DB_BW               (default: bases_web)
     HISTO_FECHA_DESDE         (default: 2026-01-01)
@@ -64,9 +64,9 @@ MYSQL_LOG = {
 }
 
 MYSQL_BW = {
-    "host":     os.environ.get("MYSQL_HOST_BW", "186.180.15.66"),
-    "port":     int(os.environ.get("MYSQL_PORT_BW", 12539)),
-    "user":     os.environ.get("MYSQL_USER_BW", "servilla_remoto"),
+    "host":     os.environ["MYSQL_HOST_BW"],
+    "port":     int(os.environ.get("MYSQL_PORT_BW", 3306)),
+    "user":     os.environ["MYSQL_USER_BW"],
     "password": os.environ.get("MYSQL_PASSWORD_BW", ""),
     "database": os.environ.get("MYSQL_DB_BW", "bases_web"),
 }

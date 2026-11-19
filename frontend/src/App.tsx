@@ -1,8 +1,11 @@
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/authStore";
 import { AppShell } from "@/components/layout/AppShell";
 import { Login } from "@/pages/Login";
+import { CambiarClavePage } from "@/pages/CambiarClavePage";
+import { AvisoClave } from "@/components/AvisoClave";
 import { Forbidden } from "@/pages/Forbidden";
 import { ClientesPage } from "@/pages/clientes/ClientesPage";
 import { ClienteDetailPage } from "@/pages/clientes/ClienteDetailPage";
@@ -28,6 +31,7 @@ import { BuscarPaquetePage } from "@/pages/buscar/BuscarPaquetePage";
 import { ImagenesPage } from "@/pages/imagenes/ImagenesPage";
 import { AjusteDireccionesPage } from "@/pages/direcciones/AjusteDireccionesPage";
 import { PendientesEntregaPage } from "@/pages/pendientes-entrega/PendientesEntregaPage";
+import { PaquetesEstancadosPage } from "@/pages/paquetes-estancados/PaquetesEstancadosPage";
 import { DevolucionesPage } from "@/pages/devoluciones/DevolucionesPage";
 import { EscaneoDevolucionesPage } from "@/pages/devoluciones/EscaneoDevolucionesPage";
 import { EscaneoCarrytPage } from "@/pages/carryt/EscaneoCarrytPage";
@@ -43,13 +47,22 @@ import { GenerarDatPage } from "@/pages/generar-dat/GenerarDatPage";
 import { Placeholder } from "@/pages/Placeholder";
 import { AlDia } from "@/components/AlDia";
 
+// Aparte del bundle principal: con esta página adentro, Safari de iPhone dejó de abrir la app
+// (pantalla en blanco desde el despliegue del PR #57). Solo se descarga al entrar a /seguimiento.
+const SeguimientoPage = lazy(() =>
+  import("@/pages/seguimiento/SeguimientoPage").then((m) => ({ default: m.SeguimientoPage })),
+);
+
 const qc = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
 });
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
-  return token ? <>{children}</> : <Navigate to="/login" replace />;
+  const debeCambiarClave = useAuthStore((s) => s.debeCambiarClave);
+  if (!token) return <Navigate to="/login" replace />;
+  if (debeCambiarClave) return <Navigate to="/cambiar-clave" replace />;
+  return <>{children}</>;
 }
 
 function PageGuard({ pageKey, children }: { pageKey: string | string[]; children: React.ReactNode }) {
@@ -70,8 +83,10 @@ export default function App() {
     <QueryClientProvider client={qc}>
       <BrowserRouter>
         <AlDia />
+        <AvisoClave />
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/cambiar-clave" element={<CambiarClavePage />} />
           {/* Paso 2.7: pública, se abre con el QR del día (sin iniciar sesión) */}
           <Route path="/ver-zonas/:token" element={<VerZonasPage />} />
           <Route
@@ -177,6 +192,8 @@ export default function App() {
             <Route path="/imagenes" element={<PageGuard pageKey="imagenes"><ImagenesPage /></PageGuard>} />
             <Route path="/direcciones" element={<PageGuard pageKey="direcciones"><AjusteDireccionesPage /></PageGuard>} />
             <Route path="/pendientes-entrega" element={<PageGuard pageKey="pendientes_entrega"><PendientesEntregaPage /></PageGuard>} />
+            <Route path="/paquetes-estancados" element={<PageGuard pageKey="paquetes_estancados"><PaquetesEstancadosPage /></PageGuard>} />
+            <Route path="/seguimiento" element={<PageGuard pageKey="seguimiento_tareas"><Suspense fallback={<p className="p-6 text-sm text-gray-500">Cargando...</p>}><SeguimientoPage /></Suspense></PageGuard>} />
             <Route path="/devoluciones" element={<PageGuard pageKey="devoluciones"><DevolucionesPage /></PageGuard>} />
             <Route path="/geocercas" element={<PageGuard pageKey="geocercas"><GeocercasPage /></PageGuard>} />
             <Route path="/generar-dat" element={<PageGuard pageKey="generar_dat"><GenerarDatPage /></PageGuard>} />

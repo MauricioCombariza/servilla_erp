@@ -1,9 +1,10 @@
+import { AvisoClavesExternas } from "@/components/AvisoClavesExternas";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   Users, UserCheck, ShoppingCart, FileText, BarChart2,
   Clock, DollarSign, Truck, Receipt, Wallet, Calculator, List, ClipboardCheck,
   LogOut, Menu, X, ArrowDownCircle, ArrowUpCircle, Search, Building2, MapPin, PackageCheck,
-  ScanLine, Radio, RotateCcw, ShieldCheck, Hexagon, Image as ImageIcon, FileCog, Upload, PackageOpen, MapPinned,
+  ScanLine, Radio, RotateCcw, ShieldCheck, Hexagon, Image as ImageIcon, FileCog, Upload, PackageOpen, MapPinned, Hourglass, ListChecks, KeyRound
 } from "lucide-react";
 import { useState } from "react";
 import { useAuthStore } from "@/store/authStore";
@@ -40,6 +41,8 @@ const navItems = [
   { to: "/subir-despacho", label: "Subir Base Despacho", icon: Upload, pageKey: "paquetes_despacho" },
   { to: "/escaneo-tulas", label: "Escaneo de Tulas", icon: PackageOpen, pageKey: "escaneo_tulas" },
   { to: "/asignacion-zonas", label: "Asignación de Zonas", icon: MapPinned, pageKey: "asignacion_zonas" },
+  { to: "/paquetes-estancados", label: "Paquetes Estancados", icon: Hourglass, pageKey: "paquetes_estancados" },
+  { to: "/seguimiento", label: "Tareas y Proyectos", icon: ListChecks, pageKey: "seguimiento_tareas" },
   { to: "/admin/usuarios-roles", label: "Administración", icon: ShieldCheck, adminOnly: true },
 ];
 
@@ -90,6 +93,13 @@ export function AppShell() {
           ))}
         </nav>
 
+        <NavLink
+          to="/cambiar-clave"
+          className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-400 hover:text-white hover:bg-white/10 border-t border-white/10"
+        >
+          <KeyRound size={16} />
+          Cambiar contraseña
+        </NavLink>
         <button
           onClick={handleLogout}
           className="flex items-center gap-3 px-4 py-3 text-sm text-gray-400 hover:text-white hover:bg-white/10 border-t border-white/10"
@@ -110,6 +120,7 @@ export function AppShell() {
           </button>
           <span className="text-sm font-medium text-gray-700">Logística</span>
         </header>
+        <AvisoClavesExternas />
 
         <main className="flex-1 overflow-y-auto p-6">
           <Outlet />
