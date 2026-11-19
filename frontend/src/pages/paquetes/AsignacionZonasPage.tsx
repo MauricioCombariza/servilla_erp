@@ -14,6 +14,7 @@ import {
 } from "@/api/asignacionZonas";
 import { alResultado, encolar, useCola } from "@/offline/cola";
 import { FlujoPaquetesNav } from "./FlujoPaquetesNav";
+import { CerrarSesionBoton } from "./CerrarSesionBoton";
 
 function leerError(e: unknown): { status?: number; detail?: unknown } {
   const r = (e as { response?: { status?: number; data?: { detail?: unknown } } })?.response;
@@ -166,6 +167,7 @@ export function AsignacionZonasPage() {
             )}
           </p>
         </div>
+        <CerrarSesionBoton />
       </header>
 
       <div className="bg-white border-b border-gray-200 px-4 py-1.5 text-sm text-gray-600 text-center">

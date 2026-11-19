@@ -5,6 +5,7 @@ import { Camera, CameraOff } from "lucide-react";
 import { paquetesDespachoApi } from "@/api/paquetesDespacho";
 import type { DestinoPaquete } from "@/api/tulas";
 import { FlujoPaquetesNav } from "./FlujoPaquetesNav";
+import { CerrarSesionBoton } from "./CerrarSesionBoton";
 
 const SCANNER_ELEMENT_ID = "consultar-qr-reader";
 const SCAN_FORMATS = [
@@ -98,9 +99,12 @@ export function ConsultarPaquetePage() {
       <div className="mx-auto w-full max-w-md space-y-4">
         <FlujoPaquetesNav />
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 space-y-3">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Consultar paquete</h1>
-            <p className="text-sm text-gray-500">Lee el QR del paquete para ver su sector, dirección y localidad.</p>
+          <div className="flex items-start gap-3">
+            <div className="min-w-0 flex-1">
+              <h1 className="text-2xl font-bold text-gray-900">Consultar paquete</h1>
+              <p className="text-sm text-gray-500">Lee el QR del paquete para ver su sector, dirección y localidad.</p>
+            </div>
+            <CerrarSesionBoton />
           </div>
 
           <form onSubmit={enviarCampo} className="flex gap-2">
