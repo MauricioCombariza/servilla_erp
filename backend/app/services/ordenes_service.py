@@ -20,6 +20,11 @@ Soporta tres formatos de origen:
       - tipo_servicio   = 'paquete' (fijo)
       - ambito          = 'bogota' (fijo)
       - cod_men         = resuelto desde DA vía tabla personal (por nombre)
+      - fecha_entrega   = 'Delivered time' (fecha y hora, hora de Bogotá) si el
+                          archivo es el informe Delivered. Se guarda aunque el
+                          serial ya esté liquidado o bloqueado, solo si estaba
+                          vacía (es una medición, no un dato financiero; ver
+                          _FECHA_ENTREGA_FIX_UPDATE)
 
   Flujo 3 — iMile histórico (dashboard.csv generado por updateDashboard.py):
     Columnas origen: orden, serial, f_esc (preferida) o f_emi (compat con
@@ -101,6 +106,8 @@ logger = logging.getLogger(__name__)
 
 DATE_CORTE = date(2026, 1, 1)
 _CLIENTE_IMILE = "imile sas"
+# Zona horaria de las horas que exporta iMile Colombia (Scan time, Delivered time).
+_TZ_IMILE = "America/Bogota"
 _COURIERS_EXCLUIDOS = {"LECTA", "PRINDEL"}
 
 # Filas por chunk de lectura y params por sentencia enviada a Postgres.
@@ -115,7 +122,7 @@ _COLUMNAS_UTILES = frozenset({
     "nombre_cliente", "no_entidad", "tipo_servicio", "ambito",
     "colum_ciudad", "ciudad1", "estado", "planilla", "lot_esc", "cod_men",
     "courrier", "courier",
-    "waybill no.", "scan time", "da",
+    "waybill no.", "scan time", "da", "delivered time",
     "cliente", "fecha", "nombre_mensajero",
 })
 
@@ -170,6 +177,13 @@ def _transformar_imile(df: pd.DataFrame) -> pd.DataFrame:
     df["tipo_servicio"]  = "paquete"
     df["ambito"]         = "bogota"
     df["_da_nombre"] = df["DA"].str.strip() if "DA" in df.columns else ""
+    # Solo el informe Delivered trae 'Delivered time'. Prefijo k_ por itertuples
+    # (ver docstring de _derivar_valores).
+    if "Delivered time" in df.columns:
+        entrega = pd.to_datetime(df["Delivered time"], errors="coerce", dayfirst=False)
+        df["k_fecha_entrega"] = entrega.dt.tz_localize(
+            _TZ_IMILE, ambiguous="NaT", nonexistent="NaT"
+        )
     return df
 
 
@@ -261,11 +275,11 @@ _SERIAL_UPSERT = text("""
     INSERT INTO seriales_gestion
         (serial, orden, planilla, f_emi, f_esc, cod_men, mensajero_id,
          cliente_id, tipo_gestion, tipo_envio, ambito,
-         precio_cliente, precio_mensajero, estado, origen)
+         precio_cliente, precio_mensajero, estado, origen, fecha_entrega)
     VALUES
         (:serial, :orden, :planilla, :f_emi, :f_esc, :cod_men, :mensajero_id,
          :cliente_id, :tipo_gestion, :tipo_envio, :ambito,
-         :precio_cli, :precio_men, :db_estado, 'manual')
+         :precio_cli, :precio_men, :db_estado, 'manual', :fecha_entrega)
     ON CONFLICT (serial) DO UPDATE SET
         orden            = EXCLUDED.orden,
         planilla         = EXCLUDED.planilla,
@@ -277,7 +291,9 @@ _SERIAL_UPSERT = text("""
         estado           = EXCLUDED.estado,
         precio_cliente   = EXCLUDED.precio_cliente,
         precio_mensajero = EXCLUDED.precio_mensajero,
-        origen           = EXCLUDED.origen
+        origen           = EXCLUDED.origen,
+        -- Un archivo sin 'Delivered time' no borra la hora ya guardada.
+        fecha_entrega    = COALESCE(EXCLUDED.fecha_entrega, seriales_gestion.fecha_entrega)
     WHERE seriales_gestion.estado = 'pendiente'
       AND seriales_gestion.editado_manualmente = FALSE
 """)
@@ -299,6 +315,17 @@ _PLANILLA_FIX_UPDATE = text("""
     SET planilla = :planilla
     WHERE serial = :serial
       AND planilla IN ('', 'nan')
+""")
+
+# Guarda la hora de entrega en seriales que _SERIAL_UPSERT no toca (ya liquidados,
+# anulados o bloqueados con editado_manualmente). Es una medición para el
+# indicador de tiempo de entrega, no un dato financiero: no reabre ni recalcula
+# nada. Solo llena el campo si estaba vacío, para no pisar una hora ya guardada.
+_FECHA_ENTREGA_FIX_UPDATE = text("""
+    UPDATE seriales_gestion
+    SET fecha_entrega = :fecha_entrega
+    WHERE serial = :serial
+      AND fecha_entrega IS NULL
 """)
 
 _ORDEN_EXISTS = (
@@ -707,7 +734,7 @@ async def _procesar_carryt_entrega(
                     "cliente_id": id_cliente, "tipo_gestion": "Entrega",
                     "tipo_envio": "paquete", "ambito": "bogota",
                     "precio_cli": precio_cli, "precio_men": precio_men,
-                    "db_estado": "pendiente",
+                    "db_estado": "pendiente", "fecha_entrega": None,
                 })
                 key = (orden_num, fila.k_fecha, cliente_txt, "paquete")
                 acum = ordenes_acum.setdefault(key, [0, 0])
@@ -897,6 +924,12 @@ async def procesar_csv(
                 planilla_val = (str(fila.k_lot_esc) if fila.k_lot_esc else "") or \
                                (str(fila.k_planilla) if fila.k_planilla else "")
 
+            fecha_entrega = getattr(fila, "k_fecha_entrega", None)
+            if fecha_entrega is not None and pd.isna(fecha_entrega):
+                fecha_entrega = None
+            elif fecha_entrega is not None:
+                fecha_entrega = fecha_entrega.to_pydatetime()
+
             params.append({
                 "serial": str(fila.serial).strip(), "orden": str(fila.k_orden),
                 "planilla": planilla_val, "f_emi": fila.k_f_emi, "f_esc": fila.k_fecha,
@@ -905,6 +938,7 @@ async def procesar_csv(
                 "tipo_envio": tipo_ser, "ambito": ambito_val,
                 "precio_cli": precio_cli, "precio_men": precio_men,
                 "db_estado": str(fila.k_db_estado),
+                "fecha_entrega": fecha_entrega,
             })
 
         # ── Upsert de seriales en lotes ───────────────────────────────────────
@@ -917,8 +951,17 @@ async def procesar_csv(
 
             a_procesar: list[dict] = []
             a_fix_planilla: list[dict] = []
+            a_fix_entrega: list[dict] = []
             for p in lote:
                 estado_actual = existing_map.get(p["serial"])
+                if estado_actual is not None and p["fecha_entrega"] is not None and not (
+                    estado_actual[0] == "pendiente" and not estado_actual[1]
+                ):
+                    # El upsert no toca este serial: la hora de entrega va aparte
+                    # (ver _FECHA_ENTREGA_FIX_UPDATE).
+                    a_fix_entrega.append(
+                        {"serial": p["serial"], "fecha_entrega": p["fecha_entrega"]}
+                    )
                 if estado_actual is None:
                     sg_nuevos += 1
                     a_procesar.append(p)
@@ -956,6 +999,17 @@ async def procesar_csv(
                     logger.error("Error en batch fix planilla: %s", e)
                     if len(errores) < MAX_ERRORES:
                         errores.append(f"Error en batch fix planilla: {e}")
+
+            if a_fix_entrega:
+                try:
+                    await db.execute(text("SAVEPOINT sp_batch_fix_entrega"))
+                    await db.execute(_FECHA_ENTREGA_FIX_UPDATE, a_fix_entrega)
+                    await db.execute(text("RELEASE SAVEPOINT sp_batch_fix_entrega"))
+                except Exception as e:
+                    await db.execute(text("ROLLBACK TO SAVEPOINT sp_batch_fix_entrega"))
+                    logger.error("Error en batch fix fecha_entrega: %s", e)
+                    if len(errores) < MAX_ERRORES:
+                        errores.append(f"Error en batch fix fecha_entrega: {e}")
 
         # ── Acumular el resumen de órdenes entre chunks ───────────────────────
         resumen = (

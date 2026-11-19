@@ -1,15 +1,20 @@
+import logging
 import os
 import tempfile
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_page
+from app.config import settings
 from app.database import get_db
 from app.models.ordenes import Orden
 from app.schemas.ordenes import CargaMasivaResult, OrdenCreate, OrdenRead, OrdenUpdate
+from app.services.imile_tracking import completar_tracking_pendiente
 from app.services.ordenes_service import procesar_csv
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ordenes", tags=["ordenes"])
 _auth = Depends(require_page("ordenes"))
@@ -95,6 +100,7 @@ async def delete_orden(orden_id: int, db: AsyncSession = Depends(get_db), _=_aut
 @router.post("/carga-masiva", response_model=CargaMasivaResult)
 async def carga_masiva(
     file: UploadFile,
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     _=_auth,
 ):
@@ -122,7 +128,19 @@ async def carga_masiva(
                 )
             tmp.write(bloque)
         tmp.close()
-        return await procesar_csv(tmp.name, db, filename=fname)
+        resultado = await procesar_csv(tmp.name, db, filename=fname)
+        # Las guías entregadas que trajo el informe Delivered quedan sin tracking: se
+        # consulta en iMile después de responder (llegada a la estación y novedades)
+        if settings.imile_tracking_activo:
+            background.add_task(_completar_tracking)
+        return resultado
     finally:
         tmp.close()
         os.unlink(tmp.name)
+
+
+async def _completar_tracking() -> None:
+    try:
+        await completar_tracking_pendiente()
+    except Exception:  # en segundo plano: que no tumbe nada, solo queda en el log
+        logger.exception("No se pudo completar el tracking de iMile")

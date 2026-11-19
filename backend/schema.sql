@@ -276,6 +276,9 @@ CREATE TABLE seriales_gestion (
     origen              VARCHAR(8) NOT NULL DEFAULT 'scanner' CHECK (origen IN ('scanner','imile','manual')),
     editado_manualmente BOOLEAN NOT NULL DEFAULT FALSE,
     observaciones       TEXT,
+    fecha_entrega       TIMESTAMPTZ,        -- hora de entrega al cliente final (iMile Delivered time)
+    fecha_llegada_ds    TIMESTAMPTZ,        -- llegada a la estación (tracking iMile, "Arrived")
+    novedades_imile     JSONB,              -- [{hora, motivo}] del tracking; NULL = sin consultar
     fecha_creacion      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     fecha_modificacion  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -283,6 +286,7 @@ CREATE TABLE seriales_gestion (
 CREATE INDEX idx_sg_planilla ON seriales_gestion(planilla);
 CREATE INDEX idx_sg_cod_men ON seriales_gestion(cod_men);
 CREATE INDEX idx_sg_f_esc ON seriales_gestion(f_esc);
+CREATE INDEX idx_sg_fecha_entrega ON seriales_gestion(fecha_entrega);
 CREATE INDEX idx_sg_f_emi ON seriales_gestion(f_emi);
 CREATE INDEX idx_sg_estado ON seriales_gestion(estado);
 CREATE INDEX idx_sg_mensajero ON seriales_gestion(mensajero_id);

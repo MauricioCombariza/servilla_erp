@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     imile_asignacion_activa: bool = True
     # Graba UNA descarga real de tula en iMile al abrir la primera tula (imile_descarga_grabacion.py)
     imile_grabar_descarga: bool = False
+    # Consulta del tracking de cada guía entregada después de cargar el informe Delivered
+    # (imile_tracking.py): hora de llegada a la estación y novedades. Solo lectura.
+    imile_tracking_activo: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

@@ -27,6 +27,18 @@ class ImileConsultaError(Exception):
     pass
 
 
+async def encabezados_api(page) -> dict[str, str]:
+    """Encabezados para llamar a los servicios de iMile con la sesión abierta. La página
+    manda el token de la cookie en Authorization; sin él iMile no responde."""
+    headers = {"content-type": "application/json"}
+    for c in await page.context.cookies():
+        if c["name"] == COOKIE_TOKEN and c["value"]:
+            token = c["value"]
+            headers["authorization"] = token if token.lower().startswith("bearer ") else f"Bearer {token}"
+            break
+    return headers
+
+
 @dataclass(frozen=True)
 class ConsultaTula:
     encontrada: bool
@@ -52,14 +64,7 @@ class ImileTula:
         return ConsultaTula(encontrada=True, total=len(seriales), seriales=tuple(seriales))
 
     async def _descargados(self, page) -> list[dict]:
-        # La página manda el token de la cookie en Authorization; sin él iMile no responde
-        headers = {"content-type": "application/json"}
-        for c in await page.context.cookies():
-            if c["name"] == COOKIE_TOKEN and c["value"]:
-                token = c["value"]
-                headers["authorization"] = token if token.lower().startswith("bearer ") else f"Bearer {token}"
-                break
-
+        headers = await encabezados_api(page)
         filas: list[dict] = []
         for pagina in range(1, _MAX_PAGINAS + 1):
             r = await page.request.post(
