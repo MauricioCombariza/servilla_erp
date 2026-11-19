@@ -34,9 +34,9 @@ class SerialGestion(Base):
     ciudad: Mapped[str | None] = mapped_column(String(150))
     editado_manualmente: Mapped[bool] = mapped_column(Boolean, default=False)
     observaciones: Mapped[str | None] = mapped_column(Text)
-    # Hora de entrega al cliente final (informe Delivered de iMile, migración 055)
+    # Hora de entrega al cliente final (informe Delivered de iMile, migración 057)
     fecha_entrega: Mapped[datetime | None] = mapped_column(_ts)
-    # Llegada a la estación según el tracking de iMile (inicio de las 48 h, migración 055)
+    # Llegada a la estación según el tracking de iMile (inicio de las 48 h, migración 057)
     fecha_llegada_ds: Mapped[datetime | None] = mapped_column(_ts)
     # Novedades del tracking: [{"hora", "motivo"}]. NULL = tracking sin consultar
     novedades_imile: Mapped[list[dict] | None] = mapped_column(JSONB)

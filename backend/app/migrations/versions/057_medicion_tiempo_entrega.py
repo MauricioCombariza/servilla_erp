@@ -7,8 +7,8 @@
 - novedades_imile: lista de novedades del tracking ([{"hora", "motivo"}], un elemento
   por cada "add a problem"). NULL = todavía no se ha consultado el tracking.
 
-Revision ID: 055
-Revises: 054
+Revision ID: 057
+Revises: 056
 Create Date: 2026-11-19
 """
 from typing import Sequence, Union
@@ -17,8 +17,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB
 
-revision: str = "055"
-down_revision: Union[str, None] = "054"
+revision: str = "057"
+down_revision: Union[str, None] = "056"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

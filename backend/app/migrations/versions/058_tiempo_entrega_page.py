@@ -1,16 +1,16 @@
 """Concede la page_key tiempo_entrega (informe de tiempo de entrega iMile) a
 administrador y logistica.
 
-Revision ID: 056
-Revises: 055
+Revision ID: 058
+Revises: 057
 Create Date: 2026-11-19
 """
 from typing import Sequence, Union
 
 from alembic import op
 
-revision: str = "056"
-down_revision: Union[str, None] = "055"
+revision: str = "058"
+down_revision: Union[str, None] = "057"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

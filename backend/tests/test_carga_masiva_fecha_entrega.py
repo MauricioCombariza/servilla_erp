@@ -1,6 +1,6 @@
 """
 Carga masiva iMile (flujo 2) con el informe Delivered: guarda 'Delivered time'
-en seriales_gestion.fecha_entrega (migración 055).
+en seriales_gestion.fecha_entrega (migración 057).
 
 Verifica que:
   1. Un serial nuevo queda con la fecha y hora de entrega (hora de Bogotá).
