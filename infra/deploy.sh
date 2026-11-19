@@ -121,6 +121,13 @@ for SERVICIO in "${SERVICIOS[@]}"; do
     echo "Aún no está (¿se está construyendo?); reintento en 30 s"
     sleep 30
   done
+  if [ "$SERVICIO" = backend ] || [ "$SERVICIO" = flujo ]; then
+    # Los dos corren como el usuario 10001 (no root) y comparten la sesión de iMile en el
+    # volumen imile_secrets. Lo que se escribió cuando corrían como root queda a nombre de
+    # root: se le pasa a 10001 antes de arrancar. No hace nada si ya está así.
+    docker compose run --rm --no-deps -T --user root --entrypoint chown "$SERVICIO" \
+      -R 10001:10001 /app/.secrets
+  fi
   if [ "$SERVICIO" = nginx ]; then
     # nginx.conf es un archivo montado: git pull lo reemplaza y el contenedor sigue leyendo el
     # viejo hasta recrearse (`up -d` lo deja como está porque la imagen no cambió)
