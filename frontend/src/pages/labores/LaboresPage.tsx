@@ -1160,8 +1160,9 @@ function RegistroHoraForm({ onClose, onSaved }: { onClose: () => void; onSaved: 
         items,
       });
       const totalH = items.reduce((s, i) => s + i.horas_trabajadas, 0);
-      const tipo = totalH >= 5 ? "Transporte Completo" : "Medio Transporte";
-      setSubsidioInfo(`${decimalToHhmm(totalH)} h totales → subsidio: ${tipo}`);
+      // Regla del backend (HORAS_MINIMAS_SUBSIDIO): el transporte se paga si el DÍA suma 2 h o más
+      // (cuenta también lo que ya estaba registrado ese día, no solo este envío).
+      setSubsidioInfo(`${decimalToHhmm(totalH)} h registradas · el transporte se paga si el día suma 2 h o más`);
       onSaved();
     } finally {
       setSaving(false);
