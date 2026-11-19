@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials
 from jose import JWTError, jwt
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import claves
@@ -43,7 +43,9 @@ def _make_tokens(user: Usuario, page_keys: list[str]) -> TokenResponse:
 
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Usuario).where(Usuario.username == body.username))
+    # Sin distinguir mayúsculas ni espacios: el teclado del celular pone "Mariela"
+    username = body.username.strip().lower()
+    result = await db.execute(select(Usuario).where(func.lower(Usuario.username) == username))
     user = result.scalar_one_or_none()
 
     if user is None or not claves.verificar_clave(body.password, user.password_hash):

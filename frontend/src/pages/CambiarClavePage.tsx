@@ -9,9 +9,9 @@ const MIN_LARGO = 12;
 
 function reglas(clave: string) {
   return [
-    { ok: clave.length >= MIN_LARGO, texto: `Al menos ${MIN_LARGO} caracteres` },
-    { ok: /\p{L}/u.test(clave), texto: "Letras" },
-    { ok: /\d/.test(clave), texto: "Números" },
+    { ok: clave.length >= MIN_LARGO, texto: `Al menos ${MIN_LARGO} caracteres (lleva ${clave.length})`, falta: `tener al menos ${MIN_LARGO} caracteres (lleva ${clave.length})` },
+    { ok: /\p{L}/u.test(clave), texto: "Letras", falta: "tener letras" },
+    { ok: /\d/.test(clave), texto: "Números", falta: "tener números" },
   ];
 }
 
@@ -31,11 +31,13 @@ export function CambiarClavePage() {
   if (!token) return <Navigate to="/login" replace />;
 
   const lista = reglas(nueva);
-  const valida = lista.every((r) => r.ok) && nueva === repite && actual.length > 0;
-
   async function enviar(e: React.FormEvent) {
     e.preventDefault();
-    if (!valida) return;
+    // El botón nunca se queda muerto: si algo falta, se dice qué
+    if (!actual) return setError("Escribe tu contraseña actual (la que usabas para entrar).");
+    const faltan = lista.filter((r) => !r.ok).map((r) => r.falta);
+    if (faltan.length) return setError(`La contraseña nueva debe ${faltan.join(" y ")}.`);
+    if (nueva !== repite) return setError("La contraseña nueva y la repetición no coinciden.");
     setEnviando(true);
     setError("");
     try {
@@ -58,7 +60,7 @@ export function CambiarClavePage() {
         <h1 className="text-lg font-semibold text-gray-900 mb-1">Cambiar contraseña</h1>
         <p className="text-sm text-gray-500 mb-6">
           {debe
-            ? "Tu contraseña venció o es temporal. Debes poner una nueva para seguir."
+            ? "Tu contraseña venció o es temporal. Escribe la que usabas y luego una nueva de al menos 12 letras y números (por ejemplo, dos palabras y un número)."
             : dias !== null
               ? `Tu contraseña vence en ${Math.max(dias, 0)} días.`
               : "Pon una contraseña nueva."}
@@ -66,7 +68,7 @@ export function CambiarClavePage() {
 
         <form onSubmit={enviar} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Contraseña actual</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Contraseña actual (la que usabas)</label>
             <input type="password" autoComplete="current-password" autoFocus value={actual}
               onChange={(e) => setActual(e.target.value)} className={campo} />
           </div>
@@ -92,7 +94,7 @@ export function CambiarClavePage() {
 
           {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
 
-          <button type="submit" disabled={!valida || enviando}
+          <button type="submit" disabled={enviando}
             className="w-full bg-primary hover:bg-primary-hover text-white font-medium py-2 rounded-lg text-sm transition-colors disabled:opacity-60">
             {enviando ? "Guardando..." : "Cambiar contraseña"}
           </button>

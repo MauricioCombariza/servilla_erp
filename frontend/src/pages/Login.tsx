@@ -23,7 +23,7 @@ export function Login() {
     setLoading(true);
     setError("");
     try {
-      const res = await authApi.login(data.username, data.password);
+      const res = await authApi.login(data.username.trim().toLowerCase(), data.password);
       guardarSesion(res.data);
       navigate(res.data.debe_cambiar_clave ? "/cambiar-clave" : "/clientes");
     } catch {
@@ -44,6 +44,10 @@ export function Login() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Usuario</label>
             <input
               {...register("username")}
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              autoComplete="username"
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary outline-none"
               autoFocus
             />
