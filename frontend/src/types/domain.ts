@@ -396,6 +396,9 @@ export interface Usuario {
   activo: boolean;
   fecha_creacion: string | null;
   ultimo_acceso: string | null;
+  clave_cambiada_en: string | null;
+  clave_vence_en: string | null;
+  debe_cambiar_clave: boolean;
 }
 
 export interface Rol {

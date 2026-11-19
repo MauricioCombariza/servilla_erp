@@ -8,7 +8,13 @@ import { X } from "lucide-react";
 
 const schema = z.object({
   username: z.string().min(3, "Mínimo 3 caracteres"),
-  password: z.string().min(6, "Mínimo 6 caracteres").optional().or(z.literal("")),
+  // Mismas reglas que app/auth/claves.py. La clave que pone el administrador es temporal:
+  // la persona debe cambiarla al entrar.
+  password: z.string()
+    .min(12, "Mínimo 12 caracteres")
+    .regex(/\p{L}/u, "Debe tener letras")
+    .regex(/\d/, "Debe tener números")
+    .optional().or(z.literal("")),
   nombre_completo: z.string().min(1, "Requerido"),
   email: z.string().email("Email inválido").optional().or(z.literal("")),
   rol: z.string().min(1, "Requerido"),
@@ -98,6 +104,7 @@ export function UsuarioForm({ initial, roles, onClose, onSaved }: Props) {
             <input {...register("password")} type="password"
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none" />
             {errors.password && <p className="text-xs text-red-600 mt-1">{errors.password.message}</p>}
+            <p className="text-xs text-gray-500 mt-1">Es temporal: el usuario deberá cambiarla al entrar.</p>
           </div>
 
           <div>

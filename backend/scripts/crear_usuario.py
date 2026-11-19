@@ -1,6 +1,7 @@
 """
-Crea un usuario del ERP (o le cambia la clave si ya existe) sin que la contraseña ni su
+Crea un usuario del ERP (o le cambia la clave si ya existe) con las reglas de app/auth/claves.py sin que la contraseña ni su
 hash pasen por el código ni por el historial de la terminal: la clave se pide por teclado.
+
 
 Sirve para el primer administrador de una base nueva (las migraciones ya no siembran
 usuarios) y para rotar la clave de un usuario cuando no se puede entrar por la pantalla
@@ -16,19 +17,16 @@ import asyncio
 import getpass
 import sys
 
-import bcrypt
+from fastapi import HTTPException
 from sqlalchemy import select
 
+from app.auth import claves
 from app.database import AsyncSessionLocal
 from app.models.usuarios import Usuario
-
-MIN_LARGO = 12
 
 
 def _pedir_clave() -> str:
     clave = getpass.getpass("Clave nueva: ")
-    if len(clave) < MIN_LARGO:
-        sys.exit(f"La clave debe tener al menos {MIN_LARGO} caracteres.")
     if getpass.getpass("Repite la clave: ") != clave:
         sys.exit("Las claves no coinciden.")
     return clave
@@ -42,14 +40,18 @@ async def main(args: argparse.Namespace) -> None:
         if usuario is None and not args.nombre:
             sys.exit("Para crear un usuario nuevo hace falta --nombre.")
 
-        hash_ = bcrypt.hashpw(_pedir_clave().encode(), bcrypt.gensalt()).decode()
         if usuario is None:
-            db.add(Usuario(username=args.username, password_hash=hash_,
-                           nombre_completo=args.nombre, rol=args.rol, activo=True))
+            usuario = Usuario(username=args.username, password_hash="",
+                              nombre_completo=args.nombre, rol=args.rol, activo=True)
             accion = "creado"
         else:
-            usuario.password_hash = hash_
             accion = "clave cambiada"
+        try:
+            # La pone la misma persona que la va a usar: no es temporal
+            await claves.poner_clave(db, usuario, _pedir_clave(), temporal=False)
+        except HTTPException as e:
+            sys.exit(e.detail)
+        db.add(usuario)
         await db.commit()
     print(f"Usuario {args.username!r}: {accion}.")
 
