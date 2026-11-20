@@ -1,0 +1,3 @@
+*.json
+!replicador.ejemplo.json
+sql/
