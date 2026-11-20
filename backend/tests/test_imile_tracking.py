@@ -241,6 +241,29 @@ async def test_no_autorizado_no_gasta_intentos(sesion, seriales, monkeypatch):
     assert intentos == 0
 
 
+async def test_guarda_por_tandas_aunque_la_corrida_se_corte(sesion, seriales, monkeypatch):
+    import app.services.imile_tracking as mod
+    monkeypatch.setattr(mod, "_TANDA_GUARDAR", 1)
+
+    class _SeCorta(_SoloPrueba):
+        tandas = 0
+
+        async def consultar(self, guias):
+            _SeCorta.tandas += 1
+            if _SeCorta.tandas > 1:
+                raise RuntimeError("se reinició el backend")
+            return await super().consultar(guias)
+
+    with pytest.raises(RuntimeError):
+        await completar_tracking_pendiente(consulta=_SeCorta(sesion=sesion, pausa_s=0))
+
+    async with AsyncSessionLocal() as db:
+        guardadas = (await db.execute(text(
+            "SELECT count(*) FROM seriales_gestion WHERE serial LIKE 'FAKE-TRK-%' AND novedades_imile IS NOT NULL"
+        ))).scalar()
+    assert guardadas == 1  # la primera tanda quedó guardada
+
+
 async def test_corrida_detenida_deja_las_guias_pendientes(sesion, seriales):
     _FakeImile.ocupado_proximas = 100
     resumen = await completar_tracking_pendiente(

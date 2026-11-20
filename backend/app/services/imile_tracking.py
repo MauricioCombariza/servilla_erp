@@ -66,6 +66,9 @@ _MAX_NO_AUTORIZADO = 5
 _MAX_POR_CORRIDA = 300
 # Una guía que iMile no encuentra o que falla se intenta en tantas cargas y luego se deja
 MAX_INTENTOS = 3
+# Se guarda (commit) cada tantas guías: con ~2,5 s por guía, 300 guías son ~12 min y antes
+# no se veía nada guardado hasta el final (2026-11-20)
+_TANDA_GUARDAR = 20
 
 _RE_MOTIVO = re.compile(r"add a problem\[(.*?)\]")
 _RE_LLEGADA_DS = re.compile(r"【[^】]*\.DS】\s*Arrived")
@@ -153,6 +156,8 @@ class ImileTracking:
         self._espera_encabezados_ms = espera_encabezados_ms
         # Por qué se detuvo la última corrida antes de terminar (None = terminó)
         self.detenida: str | None = None
+        # Encabezados de la página de seguimiento: se copian una vez y sirven para varias tandas
+        self._headers: dict[str, str] | None = None
 
     async def consultar(self, guias: list[str]) -> dict[str, Tracking | Exception]:
         """Tracking de cada guía, una cada `pausa_s`. Una guía que falla queda con su error y
@@ -162,14 +167,15 @@ class ImileTracking:
         resultados: dict[str, Tracking | Exception] = {}
         self.detenida = None
         pendientes = list(guias)
-        headers: dict[str, str] | None = None
         ocupado_seguidas = 0
         no_autorizado_seguidas = 0
         while pendientes and self.detenida is None:
             espera_s = 0.0
             async with self._sesion.usar() as page:
-                if headers is None:
-                    headers = await self._encabezados(page)
+                if self._headers is None:
+                    self._headers = await self._encabezados(page)
+                # El token se toma de nuevo: si la sesión volvió a entrar, cambió
+                headers = {**self._headers, **(await encabezados_api(page))}
                 for n in range(min(self._lote, len(pendientes))):
                     if n:
                         await asyncio.sleep(self._pausa_s)
@@ -193,6 +199,7 @@ class ImileTracking:
                         no_autorizado_seguidas += 1
                         if no_autorizado_seguidas >= self._max_no_autorizado:
                             self.detenida = f"iMile no autoriza la consulta: {res}"
+                            self._headers = None  # la próxima corrida los vuelve a copiar
                             break
                     else:
                         no_autorizado_seguidas = 0
@@ -319,30 +326,41 @@ async def completar_tracking_pendiente(
         if not guias:
             return resumen
         resumen.consultadas = len(guias)
-        resultados = await consulta.consultar(guias)
-        resumen.sin_consultar = len(guias) - len(resultados)
-        resumen.detenida = consulta.detenida
-        for guia, res in resultados.items():
-            if isinstance(res, Exception):
-                resumen.errores += 1
-                # "Unauthorized" es de la sesión, no de la guía: no gasta intentos
-                if not isinstance(res, ImileNoAutorizadoError):
-                    await db.execute(_FALLIDO, {"serial": guia})
-                # Una línea por guía llenaba el log (cientos con el mismo error): va la primera
-                resumen.primer_error = resumen.primer_error or f"{guia}: {res}"
-                logger.debug("Tracking iMile %s: %s", guia, res)
-                continue
-            if not res.encontrado:
-                # Se deja en NULL para volver a intentar en la próxima carga (hasta MAX_INTENTOS)
-                resumen.sin_tracking += 1
-                await db.execute(_FALLIDO, {"serial": guia})
-                continue
-            novedades = [{"hora": n.hora.isoformat(), "motivo": n.motivo} for n in res.novedades]
-            await db.execute(_GUARDAR, {
-                "serial": guia, "llegada_ds": res.llegada_ds,
-                "novedades": json.dumps(novedades, ensure_ascii=False),
-            })
-            resumen.guardadas += 1
-        await db.commit()
+        logger.info("Tracking iMile: %d guías entregadas por consultar", len(guias))
+        for i in range(0, len(guias), _TANDA_GUARDAR):
+            tanda = guias[i:i + _TANDA_GUARDAR]
+            resultados = await consulta.consultar(tanda)
+            await _guardar(db, resultados, resumen)
+            await db.commit()  # lo consultado queda guardado aunque la corrida se corte después
+            logger.info("Tracking iMile: %d/%d consultadas, %d guardadas",
+                        min(i + len(tanda), len(guias)), len(guias), resumen.guardadas)
+            if consulta.detenida:
+                resumen.detenida = consulta.detenida
+                resumen.sin_consultar = len(guias) - i - len(resultados)
+                break
     logger.info("Tracking iMile: %s", resumen)
     return resumen
+
+
+async def _guardar(db, resultados: dict[str, Tracking | Exception], resumen: ResumenTracking) -> None:
+    for guia, res in resultados.items():
+        if isinstance(res, Exception):
+            resumen.errores += 1
+            # "Unauthorized" es de la sesión, no de la guía: no gasta intentos
+            if not isinstance(res, ImileNoAutorizadoError):
+                await db.execute(_FALLIDO, {"serial": guia})
+            # Una línea por guía llenaba el log (cientos con el mismo error): va la primera
+            resumen.primer_error = resumen.primer_error or f"{guia}: {res}"
+            logger.debug("Tracking iMile %s: %s", guia, res)
+            continue
+        if not res.encontrado:
+            # Se deja en NULL para volver a intentar en la próxima carga (hasta MAX_INTENTOS)
+            resumen.sin_tracking += 1
+            await db.execute(_FALLIDO, {"serial": guia})
+            continue
+        novedades = [{"hora": n.hora.isoformat(), "motivo": n.motivo} for n in res.novedades]
+        await db.execute(_GUARDAR, {
+            "serial": guia, "llegada_ds": res.llegada_ds,
+            "novedades": json.dumps(novedades, ensure_ascii=False),
+        })
+        resumen.guardadas += 1
