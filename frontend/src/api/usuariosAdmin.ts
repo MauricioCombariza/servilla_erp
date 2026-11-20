@@ -16,6 +16,11 @@ export const usuariosAdminApi = {
 
   resetPassword: (id: number, password: string) =>
     api.put(`/admin/usuarios/${id}/password`, { password }),
+
+  desbloquear: (id: number) => api.post<Usuario>(`/admin/usuarios/${id}/desbloquear`),
+
+  /** Cierra todas las sesiones abiertas de la cuenta (equipo perdido, incidente). */
+  cerrarSesiones: (id: number) => api.post(`/admin/usuarios/${id}/cerrar-sesiones`),
 };
 
 export const rolesAdminApi = {

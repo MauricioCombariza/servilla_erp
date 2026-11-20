@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { useAuthStore } from "@/store/authStore";
+import { cerrarSesion } from "@/api/auth";
 
 const navItems = [
   { to: "/clientes", label: "Clientes y Precios", icon: Users, pageKey: "clientes" },
@@ -49,11 +50,11 @@ const navItems = [
 
 export function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const { nombreCompleto, role, pageKeys, logout } = useAuthStore();
+  const { nombreCompleto, role, pageKeys } = useAuthStore();
   const navigate = useNavigate();
 
   function handleLogout() {
-    logout();
+    cerrarSesion();
     navigate("/login");
   }
 

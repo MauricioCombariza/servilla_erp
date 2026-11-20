@@ -399,6 +399,8 @@ export interface Usuario {
   clave_cambiada_en: string | null;
   clave_vence_en: string | null;
   debe_cambiar_clave: boolean;
+  bloqueado_hasta?: string | null;
+  bloqueado?: boolean;
 }
 
 export interface Rol {

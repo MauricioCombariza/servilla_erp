@@ -12,8 +12,17 @@ class Settings(BaseSettings):
 
     jwt_secret: str = Field(...)
     jwt_algorithm: str = "HS256"
-    jwt_access_expire_minutes: int = 60
-    jwt_refresh_expire_days: int = 30
+    # Token de acceso corto: se renueva con el refresh mientras la sesión siga viva
+    jwt_access_expire_minutes: int = 5
+
+    # Sesión: cierre a las 2 horas sin actividad y máximo 24 horas (decisión del
+    # 2026-11-20; PR-12 dice 10 minutos, hay que ajustar la política o registrar la excepción).
+    # Cada sesión vive en la tabla sesiones; cerrarla corta el acceso de inmediato.
+    sesion_inactividad_minutos: int = 120
+    sesion_max_horas: int = 24
+    # Bloqueo de la cuenta tras N intentos fallidos seguidos (PR-12; CSI-065 control 17)
+    login_max_intentos: int = 5
+    login_bloqueo_minutos: int = 15
 
     # Cambio periódico de contraseñas del ERP (SER-MNT-PR-02 §20.3: 45 días para usuarios y
     # administradores; el banco exige entre 20 y 45). Aviso unos días antes de que venza.

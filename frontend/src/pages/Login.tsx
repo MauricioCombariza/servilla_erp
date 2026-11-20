@@ -1,7 +1,7 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useState } from "react";
 import { authApi, guardarSesion } from "@/api/auth";
 
@@ -15,7 +15,11 @@ export function Login() {
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
   });
+  const [params] = useSearchParams();
   const [error, setError] = useState("");
+  const aviso = params.get("motivo") === "inactividad"
+    ? "La sesión se cerró por inactividad. Vuelve a ingresar."
+    : "";
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
@@ -26,8 +30,13 @@ export function Login() {
       const res = await authApi.login(data.username.trim().toLowerCase(), data.password);
       guardarSesion(res.data);
       navigate(res.data.debe_cambiar_clave ? "/cambiar-clave" : "/clientes");
-    } catch {
-      setError("Usuario o contraseña incorrectos");
+    } catch (e) {
+      // 423: cuenta bloqueada por intentos fallidos (el servidor dice hasta qué hora)
+      const r = (e as { response?: { status?: number; data?: { detail?: unknown } } }).response;
+      const detalle = typeof r?.data?.detail === "string" ? r.data.detail : "";
+      setError(r?.status === 423 && detalle ? detalle
+        : r?.status === 401 ? "Usuario o contraseña incorrectos"
+        : "No se pudo ingresar. Revisa la conexión e intenta de nuevo.");
     } finally {
       setLoading(false);
     }
@@ -67,6 +76,10 @@ export function Login() {
               <p className="text-xs text-red-600 mt-1">{errors.password.message}</p>
             )}
           </div>
+
+          {aviso && !error && (
+            <p className="text-sm text-amber-800 bg-amber-50 rounded-lg px-3 py-2">{aviso}</p>
+          )}
 
           {error && (
             <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>
