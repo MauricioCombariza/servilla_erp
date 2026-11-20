@@ -10,7 +10,8 @@ class LoginRequest(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
-    refresh_token: str
+    # El refresh va en la cookie HttpOnly "servilla_refresh" (el navegador no lo ve)
+    refresh_token: str | None = None
     token_type: str = "bearer"
     role: str
     nombre_completo: str
@@ -50,11 +51,13 @@ class CambioClaveRequest(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    # Opcional: normalmente va en la cookie. Se acepta en el cuerpo para las sesiones
+    # abiertas antes de la cookie (lo guardaban en localStorage).
+    refresh_token: str | None = None
 
 
 class LogoutRequest(BaseModel):
-    refresh_token: str
+    refresh_token: str | None = None
     motivo: Literal["salida", "inactividad"] = "salida"
 
 

@@ -1,7 +1,8 @@
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from sqlalchemy import delete, func, select
@@ -41,7 +42,33 @@ def _create_token(data: dict, expira: datetime) -> str:
     return jwt.encode(data | {"exp": expira}, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
-def _make_tokens(user: Usuario, sesion: Sesion, page_keys: list[str]) -> TokenResponse:
+# Refresh token en cookie HttpOnly (S3): el JavaScript de la página no lo puede leer, así
+# que un XSS no se lleva la sesión. Solo viaja a /api/auth y nunca desde otro sitio.
+COOKIE_REFRESH = "servilla_refresh"
+_RUTA_COOKIE = "/api/auth"
+
+
+def _con_cookie(tokens: TokenResponse, expira: datetime) -> JSONResponse:
+    refresh, tokens.refresh_token = tokens.refresh_token, None
+    respuesta = JSONResponse(tokens.model_dump(mode="json"))
+    respuesta.set_cookie(COOKIE_REFRESH, refresh, expires=expira, path=_RUTA_COOKIE,
+                         httponly=True, secure=settings.cookie_segura, samesite="strict")
+    return respuesta
+
+
+def _sin_cookie(respuesta: Response) -> Response:
+    respuesta.delete_cookie(COOKIE_REFRESH, path=_RUTA_COOKIE, httponly=True,
+                            secure=settings.cookie_segura, samesite="strict")
+    return respuesta
+
+
+def _cookie_borrada() -> str:
+    """Encabezado Set-Cookie que borra la cookie (para respuestas de error)."""
+    return _sin_cookie(Response()).headers["set-cookie"]
+
+
+def _make_tokens(user: Usuario, sesion: Sesion, page_keys: list[str],
+                 codigos_respaldo: list[str] | None = None) -> JSONResponse:
     # Clave vencida o temporal: el token de acceso solo sirve para cambiarla
     # (get_current_user y el servicio flujo exigen type "access")
     cambio = claves.requiere_cambio(user)
@@ -50,7 +77,7 @@ def _make_tokens(user: Usuario, sesion: Sesion, page_keys: list[str]) -> TokenRe
                        sesion.expira_en)
     access = _create_token(base | {"type": "cambio_clave" if cambio else "access"}, acceso_vence)
     refresh = _create_token(base | {"type": "refresh"}, sesion.expira_en)
-    return TokenResponse(
+    return _con_cookie(TokenResponse(
         access_token=access,
         refresh_token=refresh,
         role=user.rol,
@@ -59,7 +86,8 @@ def _make_tokens(user: Usuario, sesion: Sesion, page_keys: list[str]) -> TokenRe
         debe_cambiar_clave=cambio,
         dias_para_vencer=claves.dias_para_vencer(user),
         inactividad_minutos=settings.sesion_inactividad_minutos,
-    )
+        codigos_respaldo=codigos_respaldo,
+    ), sesion.expira_en)
 
 
 async def _rechazar_si_bloqueada(db: AsyncSession, user: Usuario, ip: str | None) -> None:
@@ -89,16 +117,14 @@ async def _fallo(db: AsyncSession, user: Usuario, ip: str | None, detalle_401: s
 
 
 async def _abrir_sesion(db: AsyncSession, user: Usuario, request: Request,
-                        codigos_respaldo: list[str] | None = None) -> TokenResponse:
+                        codigos_respaldo: list[str] | None = None) -> JSONResponse:
     sesiones.desbloquear(user)
     user.ultimo_acceso = datetime.now(UTC)
     sesion = await sesiones.crear(db, user, request)
     await sesiones.registrar_evento(db, "login", usuario=user, ip=sesiones.ip_de(request))
     await db.commit()
     page_keys = sorted(await get_role_page_keys(db, user.rol))
-    respuesta = _make_tokens(user, sesion, page_keys)
-    respuesta.codigos_respaldo = codigos_respaldo
-    return respuesta
+    return _make_tokens(user, sesion, page_keys, codigos_respaldo)
 
 
 @router.post("/login", response_model=TokenResponse | MfaPendiente)
@@ -211,25 +237,42 @@ async def mfa_verificar(body: MfaCodigoRequest, request: Request, db: AsyncSessi
     await _fallo(db, user, ip, "Código incorrecto")
 
 
+def _refresh_de(request: Request, cuerpo: str | None) -> str | None:
+    # El del cuerpo primero: solo lo mandan las sesiones viejas (localStorage) una vez
+    return cuerpo or request.cookies.get(COOKIE_REFRESH)
+
+
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
-    _, sesion, user = await sesion_del_token(db, body.refresh_token, ("refresh",))
+async def refresh(request: Request, body: RefreshRequest | None = Body(None),
+                  db: AsyncSession = Depends(get_db)):
+    token = _refresh_de(request, body.refresh_token if body else None)
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No hay sesión")
+    try:
+        _, sesion, user = await sesion_del_token(db, token, ("refresh",))
+    except HTTPException as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail,
+                            headers={"set-cookie": _cookie_borrada()}) from None
     await sesiones.tocar(db, sesion, forzar=True)
     page_keys = sorted(await get_role_page_keys(db, user.rol))
     return _make_tokens(user, sesion, page_keys)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(body: LogoutRequest, request: Request, db: AsyncSession = Depends(get_db)):
-    """Cierra la sesión del refresh token. No falla si ya estaba cerrada o vencida."""
+async def logout(request: Request, body: LogoutRequest | None = Body(None),
+                 db: AsyncSession = Depends(get_db)):
+    """Cierra la sesión del refresh token (cookie). No falla si ya estaba cerrada o vencida."""
+    body = body or LogoutRequest()
+    listo = _sin_cookie(Response(status_code=status.HTTP_204_NO_CONTENT))
+    token = _refresh_de(request, body.refresh_token)
     try:
-        payload = jwt.decode(body.refresh_token, settings.jwt_secret,
+        payload = jwt.decode(token or "", settings.jwt_secret,
                              algorithms=[settings.jwt_algorithm], options={"verify_exp": False})
     except JWTError:
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
+        return listo
     sid, username = payload.get("sid"), payload.get("sub")
     if payload.get("type") != "refresh" or not sid or not username:
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
+        return listo
     encontrado = await sesiones.sesion_y_usuario(db, sid, username)
     if encontrado is not None:
         sesion, user = encontrado
@@ -238,7 +281,7 @@ async def logout(body: LogoutRequest, request: Request, db: AsyncSession = Depen
             await sesiones.registrar_evento(db, "logout", usuario=user, ip=sesiones.ip_de(request),
                                             detalle=body.motivo)
             await db.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return listo
 
 
 @router.post("/actividad", status_code=status.HTTP_204_NO_CONTENT)

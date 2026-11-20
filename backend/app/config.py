@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @property
+    def cookie_segura(self) -> bool:
+        """Cookie solo por HTTPS, salvo en pruebas y desarrollo local (http)."""
+        return self.environment not in ("test", "development")
+
+    @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.allowed_origins.split(",")]
 

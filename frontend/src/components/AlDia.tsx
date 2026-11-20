@@ -26,7 +26,7 @@ async function versionPublicada(): Promise<string | null> {
 }
 
 export function AlDia() {
-  const token = useAuthStore((s) => s.token);
+  const sesion = useAuthStore((s) => s.sesion);
   const [hayNueva, setHayNueva] = useState(false);
 
   useEffect(() => {
@@ -44,7 +44,7 @@ export function AlDia() {
         setHayNueva(true);
       }
       const sesion = useAuthStore.getState();
-      if (sesion.token && !sesion.debeCambiarClave) {
+      if (sesion.sesion && !sesion.debeCambiarClave) {
         try {
           const me = (await api.get<Me>("/auth/me")).data;
           if (vivo) {
@@ -68,7 +68,7 @@ export function AlDia() {
       clearInterval(t);
       document.removeEventListener("visibilitychange", alCambiar);
     };
-  }, [token]);
+  }, [sesion]);
 
   if (!hayNueva) return null;
   return (
