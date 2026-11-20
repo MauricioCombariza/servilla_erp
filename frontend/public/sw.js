@@ -12,11 +12,14 @@ const sinSenal = new Set();
 
 self.addEventListener("install", () => self.skipWaiting());
 
+// iPhone/iPad: este service worker no debe quedar instalado (Safari 27, ver index.html).
+const ES_IOS = /iPhone|iPad|iPod/.test(self.navigator.userAgent);
+
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys()
       .then((nombres) => Promise.all(nombres.filter((n) => n !== CACHE).map((n) => caches.delete(n))))
-      .then(() => self.clients.claim()),
+      .then(() => (ES_IOS ? self.registration.unregister() : self.clients.claim())),
   );
 });
 
@@ -28,6 +31,7 @@ function conLimite(promesa, ms) {
 }
 
 self.addEventListener("fetch", (event) => {
+  if (ES_IOS) return;
   const req = event.request;
   const url = new URL(req.url);
   if (req.method !== "GET" || url.origin !== self.location.origin || url.pathname.startsWith("/api/")) return;
