@@ -2,8 +2,9 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useState } from "react";
-import { authApi, guardarSesion } from "@/api/auth";
+import { useCallback, useState } from "react";
+import { authApi, esMfaPendiente, guardarSesion, type LoginResponse, type MfaPendiente } from "@/api/auth";
+import { PasoCodigo, PasoCodigosRespaldo, PasoConfigurar } from "@/pages/LoginMfa";
 
 const schema = z.object({
   username: z.string().min(1, "Requerido"),
@@ -22,14 +23,32 @@ export function Login() {
     : "";
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  // Segundo factor: después de la clave, el código del celular (o configurarlo)
+  const [pendiente, setPendiente] = useState<MfaPendiente | null>(null);
+  const [codigos, setCodigos] = useState<{ codigos: string[]; sesion: LoginResponse } | null>(null);
+
+  function entrar(d: LoginResponse) {
+    guardarSesion(d);
+    navigate(d.debe_cambiar_clave ? "/cambiar-clave" : "/clientes");
+  }
+
+  function alTerminarMfa(d: LoginResponse) {
+    if (d.codigos_respaldo?.length) setCodigos({ codigos: d.codigos_respaldo, sesion: d });
+    else entrar(d);
+  }
+
+  const volver = useCallback((avisoVolver?: string) => {
+    setPendiente(null);
+    setError(avisoVolver ?? "");
+  }, []);
 
   async function onSubmit(data: FormData) {
     setLoading(true);
     setError("");
     try {
       const res = await authApi.login(data.username.trim().toLowerCase(), data.password);
-      guardarSesion(res.data);
-      navigate(res.data.debe_cambiar_clave ? "/cambiar-clave" : "/clientes");
+      if (esMfaPendiente(res.data)) setPendiente(res.data);
+      else entrar(res.data);
     } catch (e) {
       // 423: cuenta bloqueada por intentos fallidos (el servidor dice hasta qué hora)
       const r = (e as { response?: { status?: number; data?: { detail?: unknown } } }).response;
@@ -47,6 +66,14 @@ export function Login() {
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 border-t-4 border-t-brand-gold p-8 w-full max-w-sm">
         <img src="/brand/logo-color.svg" alt="AgriVision" className="h-9 w-auto mb-2" />
         <p className="text-sm text-gray-500 mb-6">Módulo Logística</p>
+
+        {codigos ? (
+          <PasoCodigosRespaldo codigos={codigos.codigos} onSeguir={() => entrar(codigos.sesion)} />
+        ) : pendiente?.mfa_paso === "verificar" ? (
+          <PasoCodigo pendiente={pendiente} onListo={alTerminarMfa} onVolver={volver} />
+        ) : pendiente?.mfa_paso === "configurar" ? (
+          <PasoConfigurar pendiente={pendiente} onListo={alTerminarMfa} onVolver={volver} />
+        ) : (
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div>
@@ -93,6 +120,7 @@ export function Login() {
             {loading ? "Ingresando..." : "Ingresar"}
           </button>
         </form>
+        )}
       </div>
     </div>
   );

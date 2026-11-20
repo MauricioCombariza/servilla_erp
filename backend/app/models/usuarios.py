@@ -29,6 +29,10 @@ class Usuario(Base):
     # Bloqueo por intentos fallidos (app/auth/sesiones.py, PR-12)
     intentos_fallidos: Mapped[int] = mapped_column(Integer, server_default="0", default=0)
     bloqueado_hasta: Mapped[datetime | None] = mapped_column(_ts, default=None)
+    # Segundo factor (app/auth/mfa.py): secreto cifrado; activo cuando se confirmó
+    mfa_secreto: Mapped[str | None] = mapped_column(String(255), default=None)
+    mfa_activo: Mapped[bool] = mapped_column(Boolean, server_default=false(), default=False)
+    mfa_ultimo_paso: Mapped[int | None] = mapped_column(BigInteger, default=None)
 
 
 class UsuarioClaveAnterior(Base):
@@ -67,3 +71,13 @@ class EventoSeguridad(Base):
     tipo: Mapped[str] = mapped_column(String(30))
     ip: Mapped[str | None] = mapped_column(String(45))
     detalle: Mapped[str | None] = mapped_column(String(300))
+
+
+class UsuarioMfaRespaldo(Base):
+    """Códigos de respaldo del segundo factor (un solo uso, guardados como hash)."""
+    __tablename__ = "usuarios_mfa_respaldo"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"))
+    codigo_hash: Mapped[str] = mapped_column(String(255))
+    usado_en: Mapped[datetime | None] = mapped_column(_ts, default=None)

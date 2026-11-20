@@ -15,6 +15,15 @@ ADMIN_PRUEBA = ("admin", "admin123")
 
 
 @pytest.fixture(scope="session", autouse=True)
+def sin_mfa_obligatorio():
+    """Las pruebas entran con usuario y clave; las de MFA (test_mfa.py) lo encienden."""
+    antes = settings.mfa_obligatorio
+    settings.mfa_obligatorio = False
+    yield
+    settings.mfa_obligatorio = antes
+
+
+@pytest.fixture(scope="session", autouse=True)
 async def admin_de_pruebas():
     if settings.environment != "test":
         return  # en otra base no se crea nada; las pruebas que usan admin fallarán solas

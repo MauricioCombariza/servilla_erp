@@ -10,7 +10,7 @@ from app.auth.dependencies import require_role
 from app.auth.pages import PAGE_CATALOG, PAGE_KEYS
 from app.database import get_db
 from app.models.roles import Rol, RolPagina
-from app.models.usuarios import Usuario
+from app.models.usuarios import Usuario, UsuarioMfaRespaldo
 from app.schemas.usuarios_admin import (
     PaginaRead,
     RolCreate,
@@ -145,6 +145,25 @@ async def desbloquear_usuario(
     usuario = await _usuario_o_404(db, usuario_id)
     sesiones.desbloquear(usuario)
     await sesiones.registrar_evento(db, "desbloqueo", usuario=usuario, ip=sesiones.ip_de(request),
+                                    detalle=f"por {current_user['username']}")
+    await db.commit()
+    await db.refresh(usuario)
+    return usuario
+
+
+@router.post("/usuarios/{usuario_id}/reiniciar-mfa", response_model=UsuarioAdminRead)
+async def reiniciar_mfa_usuario(
+    usuario_id: int, request: Request, db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_role("administrador")),
+):
+    """Celular perdido o cambiado: borra el segundo factor; lo configura al volver a entrar."""
+    usuario = await _usuario_o_404(db, usuario_id)
+    usuario.mfa_secreto = None
+    usuario.mfa_activo = False
+    usuario.mfa_ultimo_paso = None
+    await db.execute(delete(UsuarioMfaRespaldo).where(UsuarioMfaRespaldo.usuario_id == usuario.id))
+    await sesiones.cerrar_todas(db, usuario.id, "mfa_reiniciado")
+    await sesiones.registrar_evento(db, "mfa_reiniciado", usuario=usuario, ip=sesiones.ip_de(request),
                                     detalle=f"por {current_user['username']}")
     await db.commit()
     await db.refresh(usuario)

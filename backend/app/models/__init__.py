@@ -1,4 +1,4 @@
-from app.models.usuarios import EventoSeguridad, Sesion, Usuario  # noqa: F401
+from app.models.usuarios import EventoSeguridad, Sesion, Usuario, UsuarioMfaRespaldo  # noqa: F401
 from app.models.roles import Rol, RolPagina  # noqa: F401
 from app.models.ciudades import Ciudad  # noqa: F401
 from app.models.clientes import Cliente, PrecioCliente  # noqa: F401

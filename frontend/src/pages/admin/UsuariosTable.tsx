@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { usuariosAdminApi, rolesAdminApi } from "@/api/usuariosAdmin";
 import { Badge } from "@/components/ui/Badge";
 import { useState } from "react";
-import { Plus, Pencil, Lock, LogOut } from "lucide-react";
+import { Plus, Pencil, Lock, LogOut, Smartphone } from "lucide-react";
 import { UsuarioForm } from "./UsuarioForm";
 import type { Usuario } from "@/types/domain";
 
@@ -36,6 +36,11 @@ export function UsuariosTable() {
 
   const desbloquear = useMutation({
     mutationFn: (u: Usuario) => usuariosAdminApi.desbloquear(u.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin", "usuarios"] }),
+  });
+
+  const reiniciarMfa = useMutation({
+    mutationFn: (u: Usuario) => usuariosAdminApi.reiniciarMfa(u.id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin", "usuarios"] }),
   });
 
@@ -101,6 +106,12 @@ export function UsuariosTable() {
                       <button onClick={() => toggleActivo.mutate(u)}>
                         <Badge active={u.activo} />
                       </button>
+                      <span
+                        title={u.mfa_activo ? "Tiene configurado el código del celular" : "Configura el código del celular la próxima vez que entre"}
+                        className={`text-xs px-2 py-0.5 rounded-full ${u.mfa_activo ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-500"}`}
+                      >
+                        {u.mfa_activo ? "MFA" : "Sin MFA"}
+                      </span>
                       {u.bloqueado && (
                         <button
                           type="button"
@@ -122,6 +133,20 @@ export function UsuariosTable() {
                       >
                         <Pencil size={15} />
                       </button>
+                      {u.mfa_activo && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (window.confirm(`¿Reiniciar el código del celular de ${u.nombre_completo}? Úsalo si perdió o cambió el celular: se cierran sus sesiones y lo configura de nuevo al entrar.`)) {
+                              reiniciarMfa.mutate(u);
+                            }
+                          }}
+                          title="Reiniciar el código del celular (MFA)"
+                          className="text-gray-400 hover:text-amber-600 transition-colors"
+                        >
+                          <Smartphone size={15} />
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => {

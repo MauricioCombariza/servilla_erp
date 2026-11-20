@@ -47,6 +47,7 @@ class UsuarioAdminRead(BaseModel):
     clave_cambiada_en: datetime | None = None
     debe_cambiar_clave: bool = False
     bloqueado_hasta: datetime | None = None
+    mfa_activo: bool = False
 
     @computed_field
     @property

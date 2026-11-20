@@ -19,6 +19,9 @@ export const usuariosAdminApi = {
 
   desbloquear: (id: number) => api.post<Usuario>(`/admin/usuarios/${id}/desbloquear`),
 
+  /** Celular perdido o cambiado: borra el segundo factor; lo configura al volver a entrar. */
+  reiniciarMfa: (id: number) => api.post<Usuario>(`/admin/usuarios/${id}/reiniciar-mfa`),
+
   /** Cierra todas las sesiones abiertas de la cuenta (equipo perdido, incidente). */
   cerrarSesiones: (id: number) => api.post(`/admin/usuarios/${id}/cerrar-sesiones`),
 };

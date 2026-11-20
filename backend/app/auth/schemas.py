@@ -19,6 +19,29 @@ class TokenResponse(BaseModel):
     dias_para_vencer: int | None = None
     # El navegador cierra la sesión tras estos minutos sin que la persona haga nada
     inactividad_minutos: int = 120
+    # Solo al terminar de configurar el segundo factor: se muestran una única vez
+    codigos_respaldo: list[str] | None = None
+
+
+class MfaPendiente(BaseModel):
+    """La clave es correcta; falta el código del celular (o configurarlo)."""
+    mfa_paso: Literal["verificar", "configurar"]
+    mfa_token: str
+    nombre_completo: str
+
+
+class MfaTokenRequest(BaseModel):
+    mfa_token: str
+
+
+class MfaCodigoRequest(BaseModel):
+    mfa_token: str
+    codigo: str = Field(max_length=20)
+
+
+class MfaConfiguracion(BaseModel):
+    secreto: str
+    uri: str
 
 
 class CambioClaveRequest(BaseModel):
