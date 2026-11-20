@@ -279,6 +279,7 @@ CREATE TABLE seriales_gestion (
     fecha_entrega       TIMESTAMPTZ,        -- hora de entrega al cliente final (iMile Delivered time)
     fecha_llegada_ds    TIMESTAMPTZ,        -- llegada a la estación (tracking iMile, "Arrived")
     novedades_imile     JSONB,              -- [{hora, motivo}] del tracking; NULL = sin consultar
+    tracking_intentos   SMALLINT NOT NULL DEFAULT 0, -- consultas fallidas del tracking; a las 3 se deja
     fecha_creacion      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     fecha_modificacion  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

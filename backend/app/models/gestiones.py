@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, ForeignKey, Numeric, String, Text
+from sqlalchemy import Boolean, ForeignKey, Numeric, SmallInteger, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import TIMESTAMP
@@ -40,6 +40,8 @@ class SerialGestion(Base):
     fecha_llegada_ds: Mapped[datetime | None] = mapped_column(_ts)
     # Novedades del tracking: [{"hora", "motivo"}]. NULL = tracking sin consultar
     novedades_imile: Mapped[list[dict] | None] = mapped_column(JSONB)
+    # Intentos fallidos de consultar el tracking (no encontrada o error); a los 3 se deja (migración 060)
+    tracking_intentos: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default="0")
     fecha_creacion: Mapped[datetime | None] = mapped_column(_ts)
     fecha_modificacion: Mapped[datetime | None] = mapped_column(_ts)
 

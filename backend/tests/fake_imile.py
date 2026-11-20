@@ -20,7 +20,12 @@ necesita de ds.imile.com, sin tocar el iMile real.
   Confirmar en la ventana "bloquear" reenvía con forceOperate=true (como iMile real).
 - POST /saastms/v1/biz/track/query (tracking de una guía, mejora continua): devuelve los
   eventos de TRACKING con el mismo formato que iMile real (2026-11-19). Guía que no está
-  → trackInfo vacío. Cada consulta queda en `consultas_tracking`.
+  → trackInfo vacío. Cada consulta queda en `consultas_tracking` y sus encabezados en
+  `encabezados_tracking`. Como iMile real (2026-11-20), sin resource-code: dsTrackQuery
+  y el front-sec del usuario responde "Unauthorized data access"; con `ocupado_proximas`
+  > 0, las siguientes consultas responden "The system is busy".
+- #/DSOperation/WaybillManagement/dsTrackQuery: al abrirse, la página hace un pedido
+  con front-sec / hubcode (como las páginas de iMile real).
 """
 import json
 import threading
@@ -29,6 +34,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import ClassVar
 
 USUARIO, CLAVE = "operador", "clave-secreta"
+# Encabezados que la página de iMile pone en cada pedido (valores inventados)
+FRONT_SEC = '{"orgId":10,"entId":10,"userCode":"0000000000","moduleId":10007,"client":"pc"}'
+HUBCODE = "S000000001"
+NO_AUTORIZADO = "Unauthorized data access. Please refresh the page and try again."
+OCUPADO = "The system is busy,please try again later"
 BLOQUEO_NO_EXISTE = ("1119", "Sin información de pedido()")
 BLOQUEO_PROBLEMA = ("1121", "No registrar Motivo Problema")
 # Paso 3.3: mensajeros del selector DA ("Nombre | código"); "Ana Ruiz" está dos veces
@@ -103,7 +113,8 @@ HOME_HTML = """<!doctype html><html><body>
 if (!document.cookie.includes("sesion=1")) location.href = "/login";
 const idioma = document.cookie.includes("LANG=es") ? "Español" : "English";
 </script>
-<header><script>const MENSAJEROS = __MENSAJEROS__; const DEMORA_BUSQUEDA_MS = __DEMORA__;</script><span id="idioma"></span><ul id="menu" style="display:none">
+<header><script>const MENSAJEROS = __MENSAJEROS__; const DEMORA_BUSQUEDA_MS = __DEMORA__;
+const FRONT_SEC = __FRONT_SEC__; const HUBCODE = __HUBCODE__;</script><span id="idioma"></span><ul id="menu" style="display:none">
   <li>English</li><li>简体中文</li><li>Español</li><li>German</li></ul></header>
 <main id="contenido">Inicio</main>
 <script>
@@ -190,6 +201,13 @@ function renderDescarga(c) {
 }
 function render() {
   const c = document.getElementById("contenido");
+  if (location.hash.includes("dsTrackQuery")) {
+    c.innerHTML = '<h2>Consulta de seguimiento</h2>';
+    fetch("/saastms/v1/base/menu/list", {method: "POST", body: "{}", headers: {
+      "Content-Type": "application/json", "front-sec": FRONT_SEC, "hubcode": HUBCODE,
+      "lang": "es_MX", "sys-name": "DS", "sys-portal": "DS", "resource-code": "dsTrackQuery"}});
+    return;
+  }
   if (location.hash.includes("dsOffloadingScan")) { renderDescarga(c); return; }
   if (location.hash.includes("assignDA")) { renderAsignar(c); return; }
   if (!location.hash.includes("arrivalScanAWB")) { c.textContent = "Inicio"; return; }
@@ -218,10 +236,13 @@ class _FakeImile(BaseHTTPRequestHandler):
     asignaciones: ClassVar[list[dict]] = []  # Paso 3.3: cada POST a .../bizAssignDaScan/submit
     descargas: ClassVar[list[dict]] = []
     consultas_tracking: ClassVar[list[str]] = []  # guías consultadas en .../track/query
+    encabezados_tracking: ClassVar[list[dict]] = []
+    ocupado_proximas: ClassVar[int] = 0  # tantas consultas de tracking responden "busy"
 
     def do_GET(self):  # nombre fijo de http.server
         cuerpo = LOGIN_HTML if self.path.startswith("/login") else HOME_HTML.replace(
-            "__MENSAJEROS__", json.dumps(MENSAJEROS_IMILE)).replace("__DEMORA__", str(DEMORA_BUSQUEDA_MS))
+            "__MENSAJEROS__", json.dumps(MENSAJEROS_IMILE)).replace("__DEMORA__", str(DEMORA_BUSQUEDA_MS)
+        ).replace("__FRONT_SEC__", json.dumps(FRONT_SEC)).replace("__HUBCODE__", json.dumps(HUBCODE))
         self._responder(cuerpo.encode(), "text/html; charset=utf-8")
 
     def do_POST(self):  # nombre fijo de http.server
@@ -249,9 +270,17 @@ class _FakeImile(BaseHTTPRequestHandler):
                 "results": pagina, "pagination": {"currentPage": num, "pageSize": tam, "totalResult": len(filas)}}})
         if "/bizAssignDaScan/submit" in self.path:
             return self._asignar(datos)
+        if "/saastms/v1/base/menu/list" in self.path:
+            return self._json({"status": "success", "resultObject": []})
         if "/saastms/v1/biz/track/query" in self.path:
             guia = datos.get("searchValue", "")
             self.consultas_tracking.append(guia)
+            self.encabezados_tracking.append({k.lower(): v for k, v in self.headers.items()})
+            if _FakeImile.ocupado_proximas > 0:
+                _FakeImile.ocupado_proximas -= 1
+                return self._json({"status": "fail", "resultCode": "", "message": OCUPADO})
+            if self.headers.get("resource-code") != "dsTrackQuery" or self.headers.get("front-sec") != FRONT_SEC:
+                return self._json({"status": "fail", "resultCode": "", "message": NO_AUTORIZADO})
             eventos = TRACKING.get(guia, [])
             return self._json({"status": "success", "resultCode": "", "message": "Successful operation!",
                                "resultObject": {"baseInfo": {"waybillNo": guia} if eventos else None,

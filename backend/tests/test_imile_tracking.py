@@ -7,6 +7,10 @@ Verifica que:
   3. Una guía que iMile no tiene queda como no encontrada.
   4. completar_tracking_pendiente guarda llegada y novedades solo en guías entregadas
      sin tracking, y deja en NULL las que iMile no encontró.
+  5. Se mandan los encabezados de la página de seguimiento (resource-code, front-sec y
+     hubcode copiados de la página): sin ellos iMile real responde "Unauthorized".
+  6. Si iMile está ocupado se espera y se reintenta; si sigue, se detiene la corrida y las
+     guías sin consultar quedan pendientes. Varios "Unauthorized" seguidos la detienen.
 """
 import json
 from datetime import datetime, timedelta, timezone
@@ -17,8 +21,25 @@ from sqlalchemy import text
 from app.config import settings
 from app.database import AsyncSessionLocal
 from app.services.imile_sesion import ImileSesion
-from app.services.imile_tracking import ImileTracking, completar_tracking_pendiente, leer_tracking
-from tests.fake_imile import CLAVE, TRACKING, USUARIO, _FakeImile, servidor_fake_imile
+from app.services.imile_tracking import (
+    ImileNoAutorizadoError,
+    ImileOcupadoError,
+    ImileTracking,
+    completar_tracking_pendiente,
+    leer_tracking,
+)
+from app.services.imile_tula import ImileConsultaError
+from tests.fake_imile import (
+    CLAVE,
+    FRONT_SEC,
+    HUBCODE,
+    NO_AUTORIZADO,
+    OCUPADO,
+    TRACKING,
+    USUARIO,
+    _FakeImile,
+    servidor_fake_imile,
+)
 
 _BOGOTA = timezone(timedelta(hours=-5))
 
@@ -36,8 +57,18 @@ async def sesion(fake_imile_url, tmp_path, monkeypatch):
     s = ImileSesion(base_url=fake_imile_url, state_path=tmp_path / "sesion.json",
                     login_timeout_ms=3_000, espera_carga_ms=200,
                     recorrido_quieto_ms=1_000, recorrido_max_ms=5_000)
+    _FakeImile.consultas_tracking.clear()
+    _FakeImile.encabezados_tracking.clear()
+    _FakeImile.ocupado_proximas = 0
     yield s
+    _FakeImile.ocupado_proximas = 0
     await s.cerrar()
+
+
+def _rapido(sesion, **kw) -> ImileTracking:
+    """Sin pausas ni esperas reales (en producción: 1,5 s entre guías y 10/30/60 s si está ocupado)."""
+    return ImileTracking(sesion=sesion, **{"pausa_s": 0, "esperas_ocupado_s": (0, 0, 0),
+                                            "espera_encabezados_ms": 3_000, **kw})
 
 
 def test_lee_novedades_y_llegada_a_la_estacion():
@@ -53,8 +84,7 @@ def test_lee_novedades_y_llegada_a_la_estacion():
 
 
 async def test_consulta_varias_guias_en_imile(sesion):
-    _FakeImile.consultas_tracking.clear()
-    res = await ImileTracking(sesion=sesion, lote=2).consultar(
+    res = await _rapido(sesion, lote=2).consultar(
         ["FAKE-TRK-2NOV", "FAKE-TRK-0NOV", "FAKE-TRK-NOEXISTE"]
     )
 
@@ -64,6 +94,63 @@ async def test_consulta_varias_guias_en_imile(sesion):
     assert sin_novedades.llegada_ds == datetime(2026, 11, 18, 7, 6, 35, tzinfo=_BOGOTA)
     assert not res["FAKE-TRK-NOEXISTE"].encontrado
     assert _FakeImile.consultas_tracking == ["FAKE-TRK-2NOV", "FAKE-TRK-0NOV", "FAKE-TRK-NOEXISTE"]
+
+
+async def test_manda_los_encabezados_de_la_pagina_de_seguimiento(sesion):
+    await _rapido(sesion).consultar(["FAKE-TRK-0NOV"])
+
+    h = _FakeImile.encabezados_tracking[0]
+    assert h["resource-code"] == "dsTrackQuery"
+    assert h["front-sec"] == FRONT_SEC
+    assert h["hubcode"] == HUBCODE
+    assert h["path"] == "/DSOperation/WaybillManagement/dsTrackQuery"
+    assert h["x-page-path"].endswith("/#/DSOperation/WaybillManagement/dsTrackQuery")
+    assert (h["timezone"], h["lang"], h["sys-name"]) == ("-5", "es_MX", "DS")
+
+
+def test_clasifica_los_errores_de_imile():
+    with pytest.raises(ImileOcupadoError):
+        leer_tracking({"status": "fail", "message": OCUPADO}, "G")
+    with pytest.raises(ImileNoAutorizadoError):
+        leer_tracking({"status": "fail", "message": NO_AUTORIZADO}, "G")
+    with pytest.raises(ImileConsultaError):
+        leer_tracking({"status": "fail", "message": "otra cosa"}, "G")
+
+
+async def test_ocupado_espera_y_reintenta(sesion):
+    _FakeImile.ocupado_proximas = 2
+    consulta = _rapido(sesion)
+    res = await consulta.consultar(["FAKE-TRK-2NOV", "FAKE-TRK-0NOV"])
+
+    assert consulta.detenida is None
+    assert len(res["FAKE-TRK-2NOV"].novedades) == 2 and res["FAKE-TRK-0NOV"].encontrado
+    # Dos "busy" y luego la misma guía otra vez
+    assert _FakeImile.consultas_tracking == ["FAKE-TRK-2NOV"] * 3 + ["FAKE-TRK-0NOV"]
+
+
+async def test_sigue_ocupado_se_detiene_y_deja_el_resto_pendiente(sesion):
+    _FakeImile.ocupado_proximas = 100
+    consulta = _rapido(sesion, esperas_ocupado_s=(0, 0))
+    res = await consulta.consultar(["FAKE-TRK-2NOV", "FAKE-TRK-0NOV"])
+
+    assert res == {}
+    assert "ocupado" in consulta.detenida
+    assert len(_FakeImile.consultas_tracking) == 3  # 1 + 2 reintentos
+
+
+async def test_varios_no_autorizados_seguidos_detienen_la_corrida(sesion, monkeypatch):
+    # Sin los encabezados de la página (como la primera versión): iMile no autoriza
+    async def solo_token(self, page):
+        from app.services.imile_tula import encabezados_api
+        return await encabezados_api(page)
+    monkeypatch.setattr(ImileTracking, "_encabezados", solo_token)
+
+    consulta = _rapido(sesion, max_no_autorizado=2)
+    res = await consulta.consultar(["FAKE-TRK-2NOV", "FAKE-TRK-0NOV", "FAKE-TRK-NOEXISTE"])
+
+    assert set(res) == {"FAKE-TRK-2NOV", "FAKE-TRK-0NOV"}
+    assert all(isinstance(r, ImileNoAutorizadoError) for r in res.values())
+    assert "no autoriza" in consulta.detenida
 
 
 # ── Guardar en seriales_gestion ───────────────────────────────────────────────
@@ -103,8 +190,7 @@ class _SoloPrueba(ImileTracking):
 
 
 async def test_completar_guarda_llegada_y_novedades(sesion, seriales):
-    _FakeImile.consultas_tracking.clear()
-    resumen = await completar_tracking_pendiente(consulta=_SoloPrueba(sesion=sesion))
+    resumen = await completar_tracking_pendiente(consulta=_SoloPrueba(sesion=sesion, pausa_s=0))
 
     assert resumen.guardadas == 2
     assert resumen.sin_tracking == 1
@@ -127,8 +213,47 @@ async def test_completar_guarda_llegada_y_novedades(sesion, seriales):
 
     # Segunda corrida: solo se reintenta la que iMile no encontró
     _FakeImile.consultas_tracking.clear()
-    await completar_tracking_pendiente(consulta=_SoloPrueba(sesion=sesion))
+    await completar_tracking_pendiente(consulta=_SoloPrueba(sesion=sesion, pausa_s=0))
     assert _FakeImile.consultas_tracking == ["FAKE-TRK-NOEXISTE"]
+
+
+async def test_con_tracking_no_se_repite_y_no_encontrada_se_deja_a_los_3_intentos(sesion, seriales):
+    for _ in range(5):
+        await completar_tracking_pendiente(consulta=_SoloPrueba(sesion=sesion, pausa_s=0))
+
+    # Las encontradas: una sola consulta. La que iMile no tiene: 3 y se deja.
+    c = _FakeImile.consultas_tracking
+    assert (c.count("FAKE-TRK-2NOV"), c.count("FAKE-TRK-0NOV"), c.count("FAKE-TRK-NOEXISTE")) == (1, 1, 3)
+    assert "FAKE-TRK-SINENTREGA" not in c
+
+
+async def test_no_autorizado_no_gasta_intentos(sesion, seriales, monkeypatch):
+    async def solo_token(self, page):
+        from app.services.imile_tula import encabezados_api
+        return await encabezados_api(page)
+    monkeypatch.setattr(ImileTracking, "_encabezados", solo_token)
+
+    await completar_tracking_pendiente(consulta=_SoloPrueba(sesion=sesion, pausa_s=0))
+    async with AsyncSessionLocal() as db:
+        intentos = (await db.execute(text(
+            "SELECT max(tracking_intentos) FROM seriales_gestion WHERE serial LIKE 'FAKE-TRK-%'"
+        ))).scalar()
+    assert intentos == 0
+
+
+async def test_corrida_detenida_deja_las_guias_pendientes(sesion, seriales):
+    _FakeImile.ocupado_proximas = 100
+    resumen = await completar_tracking_pendiente(
+        consulta=_SoloPrueba(sesion=sesion, pausa_s=0, esperas_ocupado_s=(0,)))
+
+    assert resumen.guardadas == 0
+    assert resumen.sin_consultar == 3
+    assert "ocupado" in resumen.detenida
+    async with AsyncSessionLocal() as db:
+        nulos = (await db.execute(text(
+            "SELECT count(*) FROM seriales_gestion WHERE serial LIKE 'FAKE-TRK-%' AND novedades_imile IS NULL"
+        ))).scalar()
+    assert nulos == 4
 
 
 def test_novedades_se_guardan_como_json_legible():
