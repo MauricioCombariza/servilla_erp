@@ -5,8 +5,8 @@ Las que iMile no encuentra o que fallan se reintentaban en cada carga para siemp
 ahora se cuentan y después de 3 intentos se dejan de consultar. No cuentan "busy" ni
 "Unauthorized" (son de iMile o de la sesión, no de la guía).
 
-Revision ID: 059
-Revises: 058
+Revision ID: 060
+Revises: 059
 Create Date: 2026-11-20
 """
 from typing import Sequence, Union
@@ -14,8 +14,8 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "059"
-down_revision: Union[str, None] = "058"
+revision: str = "060"
+down_revision: Union[str, None] = "059"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
