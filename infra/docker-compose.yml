@@ -44,6 +44,9 @@ services:
       IMILE_CONSULTA_TULA_ACTIVA: ${IMILE_CONSULTA_TULA_ACTIVA:-true}
       # Una sola vez: la primera tula leída se descarga en iMile y se graba la respuesta
       IMILE_GRABAR_DESCARGA: ${IMILE_GRABAR_DESCARGA:-false}
+      # Mejora continua: tras cargar el informe Delivered, consulta en iMile (solo lectura)
+      # el tracking de las guías entregadas (llegada a la estación y novedades)
+      IMILE_TRACKING_ACTIVO: ${IMILE_TRACKING_ACTIVO:-false}
     volumes:
       # Sesión de iMile (app/services/imile_sesion.py): sobrevive a reinicios del
       # contenedor, así no hay que volver a iniciar sesión (~30 s) cada vez
