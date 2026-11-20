@@ -10,6 +10,16 @@ lista de eventos, del más nuevo al más viejo, cada uno con content, time y tra
     con "Primera hora de llegada en DS" del informe de guías.
 Las horas vienen en hora de Bogotá (la página manda el encabezado timezone: -5).
 
+Lo aprendido en la primera corrida real (2026-11-20, ~700 guías seguidas, ninguna salió):
+  - Solo con el token, iMile responde "Unauthorized data access. Please refresh the page":
+    esta consulta revisa permisos de la página. Hay que mandar lo mismo que el navegador
+    (resource-code, path, x-page-path, front-sec, hubcode, lang, sys-name...). front-sec y
+    hubcode son del usuario y la estación: se copian de los pedidos que hace la propia
+    página de iMile al abrir la consulta de seguimiento, en vez de dejarlos fijos.
+  - Muchas consultas seguidas → "The system is busy, please try again later". Se consulta
+    una guía cada ~1,5 s; si iMile está ocupado se espera y se reintenta, y si sigue, se
+    detiene la corrida (el resto queda para la próxima carga).
+
 Después de cada carga masiva del informe Delivered se consultan las guías entregadas que
 aún no tienen tracking (completar_tracking_pendiente). Se apaga con
 IMILE_TRACKING_ACTIVO=false (por defecto).
@@ -34,16 +44,40 @@ RUTA_TRACKING = "/saastms/v1/biz/track/query"
 TIPO_NOVEDAD = "Problem"
 
 _ZONA = ZoneInfo("America/Bogota")
+RUTA_PAGINA = "/DSOperation/WaybillManagement/dsTrackQuery"
+RECURSO_PAGINA = "dsTrackQuery"
+# Encabezados que la página de iMile pone en cada pedido y que se copian tal cual
+_ENCABEZADOS_PAGINA = ("front-sec", "hubcode", "lang", "sys-name", "sys-portal")
+
 _ESPERA_MS = 20_000
+_NAV_MS = 30_000
+# Cuánto se espera a que la página de iMile haga un pedido del que copiar los encabezados
+_ESPERA_ENCABEZADOS_MS = 10_000
 # Guías por cada uso de la sesión: entre lote y lote se suelta el navegador para que el
-# ingreso y la asignación de paquetes no esperen a que termine todo el tracking.
-_LOTE = 20
-# Tope por corrida: si quedan más, siguen en la próxima carga.
-_MAX_POR_CORRIDA = 2_000
+# ingreso y la asignación de paquetes no esperen a que termine el tracking (~8 s por lote).
+_LOTE = 5
+# Pausa entre una consulta y la siguiente, para no saturar a iMile
+_PAUSA_S = 1.5
+# Esperas (s) antes de reintentar cuando iMile dice que está ocupado; agotadas, se detiene
+_ESPERAS_OCUPADO_S = (10.0, 30.0, 60.0)
+# Tantos "Unauthorized" seguidos = faltan permisos o encabezados: no tiene sentido seguir
+_MAX_NO_AUTORIZADO = 5
+# Tope por corrida: si quedan más, siguen en la próxima carga (300 guías ≈ 8 min).
+_MAX_POR_CORRIDA = 300
+# Una guía que iMile no encuentra o que falla se intenta en tantas cargas y luego se deja
+MAX_INTENTOS = 3
 
 _RE_MOTIVO = re.compile(r"add a problem\[(.*?)\]")
 _RE_LLEGADA_DS = re.compile(r"【[^】]*\.DS】\s*Arrived")
 _RE_HTML = re.compile(r"<[^>]+>")
+
+
+class ImileOcupadoError(ImileConsultaError):
+    """iMile pide esperar ("The system is busy"): se reintenta más tarde."""
+
+
+class ImileNoAutorizadoError(ImileConsultaError):
+    """iMile rechaza la consulta por permisos ("Unauthorized data access")."""
 
 
 @dataclass(frozen=True)
@@ -69,7 +103,12 @@ def _hora(valor: str | None) -> datetime | None:
 def leer_tracking(body: dict | None, guia: str) -> Tracking:
     """Respuesta de .../track/query → llegada a la estación y novedades."""
     if not body or body.get("status") != "success":
-        raise ImileConsultaError((body or {}).get("message") or "iMile no devolvió el tracking")
+        mensaje = (body or {}).get("message") or "iMile no devolvió el tracking"
+        if "busy" in mensaje.lower():
+            raise ImileOcupadoError(mensaje)
+        if "unauthorized" in mensaje.lower():
+            raise ImileNoAutorizadoError(mensaje)
+        raise ImileConsultaError(mensaje)
     eventos = ((body.get("resultObject") or {}).get("trackInfo") or {}).get(guia) or []
     if not eventos:
         return Tracking(encontrado=False)
@@ -97,23 +136,119 @@ def leer_tracking(body: dict | None, guia: str) -> Tracking:
 
 
 class ImileTracking:
-    def __init__(self, sesion: ImileSesion = imile_sesion, lote: int = _LOTE):
+    def __init__(
+        self,
+        sesion: ImileSesion = imile_sesion,
+        lote: int = _LOTE,
+        pausa_s: float = _PAUSA_S,
+        esperas_ocupado_s: tuple[float, ...] = _ESPERAS_OCUPADO_S,
+        max_no_autorizado: int = _MAX_NO_AUTORIZADO,
+        espera_encabezados_ms: int = _ESPERA_ENCABEZADOS_MS,
+    ):
         self._sesion = sesion
         self._lote = lote
+        self._pausa_s = pausa_s
+        self._esperas_ocupado_s = esperas_ocupado_s
+        self._max_no_autorizado = max_no_autorizado
+        self._espera_encabezados_ms = espera_encabezados_ms
+        # Por qué se detuvo la última corrida antes de terminar (None = terminó)
+        self.detenida: str | None = None
 
     async def consultar(self, guias: list[str]) -> dict[str, Tracking | Exception]:
-        """Tracking de cada guía. Una guía que falla queda con su error y se sigue con el resto."""
+        """Tracking de cada guía, una cada `pausa_s`. Una guía que falla queda con su error y
+        se sigue con el resto. Si iMile sigue ocupado tras los reintentos, o rechaza por
+        permisos varias seguidas, se detiene: las guías sin consultar no quedan en el
+        resultado (siguen pendientes para la próxima carga) y `detenida` dice por qué."""
         resultados: dict[str, Tracking | Exception] = {}
-        for i in range(0, len(guias), self._lote):
+        self.detenida = None
+        pendientes = list(guias)
+        headers: dict[str, str] | None = None
+        ocupado_seguidas = 0
+        no_autorizado_seguidas = 0
+        while pendientes and self.detenida is None:
+            espera_s = 0.0
             async with self._sesion.usar() as page:
-                headers = await encabezados_api(page)
-                headers["timezone"] = "-5"
-                for guia in guias[i:i + self._lote]:
+                if headers is None:
+                    headers = await self._encabezados(page)
+                for n in range(min(self._lote, len(pendientes))):
+                    if n:
+                        await asyncio.sleep(self._pausa_s)
+                    guia = pendientes[0]
                     try:
-                        resultados[guia] = await self._una(page, headers, guia)
+                        res: Tracking | Exception = await self._una(page, headers, guia)
+                    except ImileOcupadoError as exc:
+                        # La guía no se da por consultada: se reintenta después de esperar
+                        if ocupado_seguidas >= len(self._esperas_ocupado_s):
+                            self.detenida = f"iMile sigue ocupado: {exc}"
+                        else:
+                            espera_s = self._esperas_ocupado_s[ocupado_seguidas]
+                        ocupado_seguidas += 1
+                        break
                     except ImileConsultaError as exc:
-                        resultados[guia] = exc
+                        res = exc
+                    pendientes.pop(0)
+                    resultados[guia] = res
+                    ocupado_seguidas = 0
+                    if isinstance(res, ImileNoAutorizadoError):
+                        no_autorizado_seguidas += 1
+                        if no_autorizado_seguidas >= self._max_no_autorizado:
+                            self.detenida = f"iMile no autoriza la consulta: {res}"
+                            break
+                    else:
+                        no_autorizado_seguidas = 0
+            # La espera va fuera de la sesión: el ingreso y la asignación siguen mientras tanto
+            if espera_s:
+                logger.info("iMile ocupado: se reintenta el tracking en %.0f s", espera_s)
+                await asyncio.sleep(espera_s)
+            elif pendientes and self.detenida is None:
+                await asyncio.sleep(self._pausa_s)
+        if self.detenida:
+            logger.warning("Tracking iMile detenido (%d guías sin consultar): %s",
+                           len(pendientes), self.detenida)
         return resultados
+
+    async def _encabezados(self, page) -> dict[str, str]:
+        """Encabezados como los que manda la página "Consulta de seguimiento". front-sec y
+        hubcode se copian del primer pedido que hace la página al abrirse."""
+        vistos: dict[str, str] = {}
+
+        def copiar(request) -> None:
+            h = request.headers
+            if not vistos and "front-sec" in h:
+                vistos.update({k: h[k] for k in _ENCABEZADOS_PAGINA if k in h})
+
+        url_pagina = f"{self._sesion.base_url}/#{RUTA_PAGINA}"
+        page.on("request", copiar)
+        try:
+            await page.goto(url_pagina, timeout=_NAV_MS)
+            if not await self._esperar(lambda: bool(vistos)):
+                # Cambiar solo el #... puede no disparar pedidos: se recarga la página
+                await page.reload(timeout=_NAV_MS)
+                await self._esperar(lambda: bool(vistos))
+        finally:
+            page.remove_listener("request", copiar)
+        if not vistos:
+            logger.warning("Tracking iMile: la página no hizo pedidos con front-sec; se consulta sin él")
+
+        headers = await encabezados_api(page)
+        headers.update({"lang": "es_MX", "sys-name": "DS", "sys-portal": "DS"})
+        headers.update(vistos)
+        headers.update({
+            "accept": "application/json, text/plain, */*",
+            "resource-code": RECURSO_PAGINA,
+            "path": RUTA_PAGINA,
+            "x-page-path": url_pagina,
+            "timezone": "-5",
+        })
+        return headers
+
+    async def _esperar(self, listo) -> bool:
+        fin = asyncio.get_running_loop().time() + self._espera_encabezados_ms / 1000
+        while not listo():
+            if asyncio.get_running_loop().time() >= fin:
+                return False
+            await asyncio.sleep(0.1)
+        return True
 
     async def _una(self, page, headers: dict, guia: str) -> Tracking:
         r = await page.request.post(
@@ -137,7 +272,8 @@ imile_tracking = ImileTracking()
 _PENDIENTES = text("""
     SELECT serial FROM seriales_gestion
     WHERE fecha_entrega IS NOT NULL AND novedades_imile IS NULL
-    ORDER BY fecha_entrega DESC
+      AND tracking_intentos < :max_intentos
+    ORDER BY tracking_intentos, fecha_entrega DESC
     LIMIT :limite
 """)
 
@@ -146,6 +282,10 @@ _GUARDAR = text("""
     SET fecha_llegada_ds = :llegada_ds,
         novedades_imile  = CAST(:novedades AS JSONB)
     WHERE serial = :serial
+""")
+
+_FALLIDO = text("""
+    UPDATE seriales_gestion SET tracking_intentos = tracking_intentos + 1 WHERE serial = :serial
 """)
 
 _en_curso = asyncio.Lock()
@@ -157,6 +297,10 @@ class ResumenTracking:
     guardadas: int = 0
     sin_tracking: int = 0
     errores: int = 0
+    # No se alcanzaron a consultar (corrida detenida): siguen pendientes
+    sin_consultar: int = 0
+    detenida: str | None = None
+    primer_error: str | None = None
 
 
 async def completar_tracking_pendiente(
@@ -168,18 +312,30 @@ async def completar_tracking_pendiente(
     if _en_curso.locked():
         return resumen
     async with _en_curso, AsyncSessionLocal() as db:
-        guias = list((await db.execute(_PENDIENTES, {"limite": limite})).scalars())
+        # Solo guías entregadas (tracking final) y sin tracking guardado: una vez guardado,
+        # nunca se vuelve a consultar
+        guias = list((await db.execute(
+            _PENDIENTES, {"limite": limite, "max_intentos": MAX_INTENTOS})).scalars())
         if not guias:
             return resumen
         resumen.consultadas = len(guias)
-        for guia, res in (await consulta.consultar(guias)).items():
+        resultados = await consulta.consultar(guias)
+        resumen.sin_consultar = len(guias) - len(resultados)
+        resumen.detenida = consulta.detenida
+        for guia, res in resultados.items():
             if isinstance(res, Exception):
                 resumen.errores += 1
-                logger.warning("Tracking iMile %s: %s", guia, res)
+                # "Unauthorized" es de la sesión, no de la guía: no gasta intentos
+                if not isinstance(res, ImileNoAutorizadoError):
+                    await db.execute(_FALLIDO, {"serial": guia})
+                # Una línea por guía llenaba el log (cientos con el mismo error): va la primera
+                resumen.primer_error = resumen.primer_error or f"{guia}: {res}"
+                logger.debug("Tracking iMile %s: %s", guia, res)
                 continue
             if not res.encontrado:
-                # Se deja en NULL para volver a intentar en la próxima carga
+                # Se deja en NULL para volver a intentar en la próxima carga (hasta MAX_INTENTOS)
                 resumen.sin_tracking += 1
+                await db.execute(_FALLIDO, {"serial": guia})
                 continue
             novedades = [{"hora": n.hora.isoformat(), "motivo": n.motivo} for n in res.novedades]
             await db.execute(_GUARDAR, {
