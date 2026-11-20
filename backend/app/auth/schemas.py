@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -15,6 +17,8 @@ class TokenResponse(BaseModel):
     page_keys: list[str] = []
     debe_cambiar_clave: bool = False
     dias_para_vencer: int | None = None
+    # El navegador cierra la sesión tras estos minutos sin que la persona haga nada
+    inactividad_minutos: int = 10
 
 
 class CambioClaveRequest(BaseModel):
@@ -24,6 +28,11 @@ class CambioClaveRequest(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str
+    motivo: Literal["salida", "inactividad"] = "salida"
 
 
 class UserMe(BaseModel):

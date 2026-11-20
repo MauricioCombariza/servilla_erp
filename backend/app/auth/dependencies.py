@@ -10,29 +10,49 @@ from app.database import get_db
 bearer_scheme = HTTPBearer()
 
 
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    token = credentials.credentials
+async def sesion_del_token(
+    db: AsyncSession, token: str, tipos: tuple[str, ...],
+):
+    """(payload, sesión, usuario) del token, o 401. La sesión debe seguir viva y el usuario activo."""
+    from app.auth import sesiones
+
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
         username: str | None = payload.get("sub")
-        token_type: str | None = payload.get("type")
-        if username is None or token_type != "access":
+        sid: str | None = payload.get("sid")
+        if username is None or sid is None or payload.get("type") not in tipos:
             raise ValueError
     except (JWTError, ValueError):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
 
-    from app.models.usuarios import Usuario
-    result = await db.execute(select(Usuario).where(Usuario.username == username))
-    user = result.scalar_one_or_none()
-
-    if user is None or not user.activo:
+    encontrado = await sesiones.sesion_y_usuario(db, sid, username)
+    if encontrado is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sesión no válida")
+    sesion, user = encontrado
+    if not user.activo:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario inactivo o no existe")
+    motivo = sesiones.motivo_vencida(sesion)
+    if motivo is not None:
+        if sesion.cerrada_en is None:
+            await sesiones.cerrar(db, sesion, motivo)
+            await db.commit()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="La sesión se cerró por inactividad" if motivo == "inactividad"
+                            else "La sesión terminó")
+    return payload, sesion, user
 
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.auth import sesiones
+
+    _, sesion, user = await sesion_del_token(db, credentials.credentials, ("access",))
+    await sesiones.tocar(db, sesion)
     return {"id": user.id, "username": user.username, "rol": user.rol,
-            "nombre_completo": user.nombre_completo, "email": user.email, "activo": user.activo}
+            "nombre_completo": user.nombre_completo, "email": user.email, "activo": user.activo,
+            "sid": sesion.id}
 
 
 def require_role(*roles: str):

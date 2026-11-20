@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import api from "@/api/client";
+import { marcarActividad } from "@/utils/actividad";
 import { colaAgregar, colaQuitar, colaReemplazar, colaTodas, type EnCola } from "./idb";
 
 /**
@@ -73,6 +74,8 @@ async function contar() {
 }
 
 export async function encolar(op: Omit<Op, "op_id" | "hora">): Promise<Op> {
+  // Escanear sin señal también es trabajar: la sesión no se cierra por inactividad
+  marcarActividad();
   const completa: Op = { ...op, op_id: nuevoId(), hora: new Date().toISOString() };
   await colaAgregar(completa);
   await contar();

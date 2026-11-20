@@ -109,7 +109,7 @@ services:
     image: nginx:1.27-alpine
     container_name: servilla_nginx
     ports:
-      - "8080:80"       # Caddy hace el TLS y proxea a este puerto
+      - "127.0.0.1:8080:80"  # solo Caddy (TLS, en el mismo host) entra por aquí
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:

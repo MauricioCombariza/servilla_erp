@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { usuariosAdminApi, rolesAdminApi } from "@/api/usuariosAdmin";
 import { Badge } from "@/components/ui/Badge";
 import { useState } from "react";
-import { Plus, Pencil } from "lucide-react";
+import { Plus, Pencil, Lock, LogOut } from "lucide-react";
 import { UsuarioForm } from "./UsuarioForm";
 import type { Usuario } from "@/types/domain";
 
@@ -32,6 +32,16 @@ export function UsuariosTable() {
   const { data: roles = [] } = useQuery({
     queryKey: ["admin", "roles"],
     queryFn: () => rolesAdminApi.list().then((r) => r.data),
+  });
+
+  const desbloquear = useMutation({
+    mutationFn: (u: Usuario) => usuariosAdminApi.desbloquear(u.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin", "usuarios"] }),
+  });
+
+  const cerrarSesiones = useMutation({
+    mutationFn: (u: Usuario) => usuariosAdminApi.cerrarSesiones(u.id),
+    onSuccess: (_, u) => window.alert(`Se cerraron las sesiones de ${u.nombre_completo}.`),
   });
 
   const toggleActivo = useMutation({
@@ -87,17 +97,44 @@ export function UsuariosTable() {
                     <EstadoClave u={u} />
                   </td>
                   <td className="px-4 py-3">
-                    <button onClick={() => toggleActivo.mutate(u)}>
-                      <Badge active={u.activo} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => toggleActivo.mutate(u)}>
+                        <Badge active={u.activo} />
+                      </button>
+                      {u.bloqueado && (
+                        <button
+                          type="button"
+                          onClick={() => desbloquear.mutate(u)}
+                          title={`Bloqueada por intentos fallidos hasta ${u.bloqueado_hasta ? new Date(u.bloqueado_hasta).toLocaleTimeString("es-CO") : ""}. Clic para desbloquear.`}
+                          className="inline-flex items-center gap-1 bg-red-50 text-red-700 text-xs px-2 py-0.5 rounded-full"
+                        >
+                          <Lock size={12} /> Bloqueada
+                        </button>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3">
-                    <button
-                      onClick={() => { setEditing(u); setShowForm(true); }}
-                      className="text-gray-400 hover:text-primary transition-colors"
-                    >
-                      <Pencil size={15} />
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => { setEditing(u); setShowForm(true); }}
+                        title="Editar"
+                        className="text-gray-400 hover:text-primary transition-colors"
+                      >
+                        <Pencil size={15} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (window.confirm(`¿Cerrar todas las sesiones abiertas de ${u.nombre_completo}? Tendrá que volver a ingresar.`)) {
+                            cerrarSesiones.mutate(u);
+                          }
+                        }}
+                        title="Cerrar todas sus sesiones"
+                        className="text-gray-400 hover:text-red-600 transition-colors"
+                      >
+                        <LogOut size={15} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

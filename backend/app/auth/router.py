@@ -1,35 +1,49 @@
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials
 from jose import JWTError, jwt
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import claves
-from app.auth.dependencies import bearer_scheme, get_current_user, get_role_page_keys
-from app.auth.schemas import CambioClaveRequest, LoginRequest, RefreshRequest, TokenResponse, UserMe
+from app.auth import claves, sesiones
+from app.auth.dependencies import (
+    bearer_scheme,
+    get_current_user,
+    get_role_page_keys,
+    sesion_del_token,
+)
+from app.auth.schemas import (
+    CambioClaveRequest,
+    LoginRequest,
+    LogoutRequest,
+    RefreshRequest,
+    TokenResponse,
+    UserMe,
+)
 from app.config import settings
 from app.database import get_db
-from app.models.usuarios import Usuario
+from app.models.usuarios import Sesion, Usuario
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-
-def _create_token(data: dict, expires_delta: timedelta) -> str:
-    payload = data | {"exp": datetime.now(UTC) + expires_delta}
-    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+_BOGOTA = ZoneInfo("America/Bogota")
 
 
-def _make_tokens(user: Usuario, page_keys: list[str]) -> TokenResponse:
+def _create_token(data: dict, expira: datetime) -> str:
+    return jwt.encode(data | {"exp": expira}, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+
+def _make_tokens(user: Usuario, sesion: Sesion, page_keys: list[str]) -> TokenResponse:
     # Clave vencida o temporal: el token de acceso solo sirve para cambiarla
     # (get_current_user y el servicio flujo exigen type "access")
     cambio = claves.requiere_cambio(user)
-    base = {"sub": user.username, "rol": user.rol}
-    access = _create_token(base | {"type": "cambio_clave" if cambio else "access"},
-                           timedelta(minutes=settings.jwt_access_expire_minutes))
-    refresh = _create_token(base | {"type": "refresh"},
-                            timedelta(days=settings.jwt_refresh_expire_days))
+    base = {"sub": user.username, "rol": user.rol, "sid": sesion.id}
+    acceso_vence = min(datetime.now(UTC) + timedelta(minutes=settings.jwt_access_expire_minutes),
+                       sesion.expira_en)
+    access = _create_token(base | {"type": "cambio_clave" if cambio else "access"}, acceso_vence)
+    refresh = _create_token(base | {"type": "refresh"}, sesion.expira_en)
     return TokenResponse(
         access_token=access,
         refresh_token=refresh,
@@ -38,52 +52,92 @@ def _make_tokens(user: Usuario, page_keys: list[str]) -> TokenResponse:
         page_keys=[] if cambio else page_keys,
         debe_cambiar_clave=cambio,
         dias_para_vencer=claves.dias_para_vencer(user),
+        inactividad_minutos=settings.sesion_inactividad_minutos,
     )
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     # Sin distinguir mayúsculas ni espacios: el teclado del celular pone "Mariela"
     username = body.username.strip().lower()
-    result = await db.execute(select(Usuario).where(func.lower(Usuario.username) == username))
-    user = result.scalar_one_or_none()
+    ip = sesiones.ip_de(request)
+    user = await db.scalar(select(Usuario).where(func.lower(Usuario.username) == username))
+
+    if user is not None and sesiones.bloqueada(user):
+        await sesiones.registrar_evento(db, "login_bloqueado", usuario=user, ip=ip)
+        await db.commit()
+        hora = user.bloqueado_hasta.astimezone(_BOGOTA).strftime("%I:%M %p").lstrip("0")
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail=f"Cuenta bloqueada por intentos fallidos. Intenta de nuevo después de las {hora}.",
+        )
 
     if user is None or not claves.verificar_clave(body.password, user.password_hash):
+        if user is None:
+            await sesiones.registrar_evento(db, "login_fallido", username=username, ip=ip,
+                                            detalle="usuario no existe")
+            await db.commit()
+        elif await sesiones.intento_fallido(db, user, ip):
+            await sesiones.cerrar_todas(db, user.id, "bloqueo")
+            await db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_423_LOCKED,
+                detail=f"Cuenta bloqueada por {settings.login_max_intentos} intentos fallidos. "
+                       f"Intenta de nuevo en {settings.login_bloqueo_minutos} minutos.",
+            )
+        else:
+            await db.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                             detail="Usuario o contraseña incorrectos")
     if not user.activo:
+        await sesiones.registrar_evento(db, "login_fallido", usuario=user, ip=ip, detalle="usuario inactivo")
+        await db.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario inactivo")
 
-    await db.execute(
-        update(Usuario).where(Usuario.id == user.id)
-        .values(ultimo_acceso=datetime.now(UTC))
-    )
+    sesiones.desbloquear(user)
+    user.ultimo_acceso = datetime.now(UTC)
+    sesion = await sesiones.crear(db, user, request)
+    await sesiones.registrar_evento(db, "login", usuario=user, ip=ip)
     await db.commit()
 
     page_keys = sorted(await get_role_page_keys(db, user.rol))
-    return _make_tokens(user, page_keys)
+    return _make_tokens(user, sesion, page_keys)
 
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
+    _, sesion, user = await sesion_del_token(db, body.refresh_token, ("refresh",))
+    await sesiones.tocar(db, sesion, forzar=True)
+    page_keys = sorted(await get_role_page_keys(db, user.rol))
+    return _make_tokens(user, sesion, page_keys)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(body: LogoutRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    """Cierra la sesión del refresh token. No falla si ya estaba cerrada o vencida."""
     try:
         payload = jwt.decode(body.refresh_token, settings.jwt_secret,
-                             algorithms=[settings.jwt_algorithm])
-        username: str | None = payload.get("sub")
-        token_type: str | None = payload.get("type")
-        if username is None or token_type != "refresh":
-            raise ValueError
-    except (JWTError, ValueError):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token inválido")
+                             algorithms=[settings.jwt_algorithm], options={"verify_exp": False})
+    except JWTError:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    sid, username = payload.get("sid"), payload.get("sub")
+    if payload.get("type") != "refresh" or not sid or not username:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    encontrado = await sesiones.sesion_y_usuario(db, sid, username)
+    if encontrado is not None:
+        sesion, user = encontrado
+        if sesion.cerrada_en is None:
+            await sesiones.cerrar(db, sesion, body.motivo)
+            await sesiones.registrar_evento(db, "logout", usuario=user, ip=sesiones.ip_de(request),
+                                            detalle=body.motivo)
+            await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    result = await db.execute(select(Usuario).where(Usuario.username == username))
-    user = result.scalar_one_or_none()
 
-    if user is None or not user.activo:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario inactivo")
-
-    page_keys = sorted(await get_role_page_keys(db, user.rol))
-    return _make_tokens(user, page_keys)
+@router.post("/actividad", status_code=status.HTTP_204_NO_CONTENT)
+async def actividad(_: dict = Depends(get_current_user)):
+    """La persona sigue trabajando (escribe o toca la pantalla sin pedir nada al servidor)."""
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/me", response_model=UserMe)
@@ -96,32 +150,28 @@ async def me(current_user: dict = Depends(get_current_user), db: AsyncSession = 
 async def _usuario_para_cambio(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db),
-) -> Usuario:
+) -> tuple[Usuario, Sesion]:
     """Acepta el token normal y también el de "cambio_clave" (clave vencida o temporal)."""
-    try:
-        payload = jwt.decode(credentials.credentials, settings.jwt_secret,
-                             algorithms=[settings.jwt_algorithm])
-        username = payload.get("sub")
-        if username is None or payload.get("type") not in ("access", "cambio_clave"):
-            raise ValueError
-    except (JWTError, ValueError):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
-    user = await db.scalar(select(Usuario).where(Usuario.username == username))
-    if user is None or not user.activo:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario inactivo")
-    return user
+    _, sesion, user = await sesion_del_token(db, credentials.credentials, ("access", "cambio_clave"))
+    await sesiones.tocar(db, sesion)
+    return user, sesion
 
 
 @router.post("/cambiar-clave", response_model=TokenResponse)
 async def cambiar_clave(
     body: CambioClaveRequest,
-    user: Usuario = Depends(_usuario_para_cambio),
+    request: Request,
+    datos: tuple[Usuario, Sesion] = Depends(_usuario_para_cambio),
     db: AsyncSession = Depends(get_db),
 ):
+    user, sesion = datos
     if not claves.verificar_clave(body.clave_actual, user.password_hash):
         raise HTTPException(status_code=400, detail="La contraseña actual no es correcta")
     await claves.poner_clave(db, user, body.clave_nueva, temporal=False)
+    # Las demás sesiones (otro equipo, alguien que conocía la clave vieja) se cierran
+    await sesiones.cerrar_todas(db, user.id, "cambio_clave", excepto=sesion.id)
+    await sesiones.registrar_evento(db, "cambio_clave", usuario=user, ip=sesiones.ip_de(request))
     await db.commit()
     await db.refresh(user)
     page_keys = sorted(await get_role_page_keys(db, user.rol))
-    return _make_tokens(user, page_keys)
+    return _make_tokens(user, sesion, page_keys)

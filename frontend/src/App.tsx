@@ -6,6 +6,7 @@ import { AppShell } from "@/components/layout/AppShell";
 import { Login } from "@/pages/Login";
 import { CambiarClavePage } from "@/pages/CambiarClavePage";
 import { AvisoClave } from "@/components/AvisoClave";
+import { Inactividad } from "@/components/Inactividad";
 import { Forbidden } from "@/pages/Forbidden";
 import { ClientesPage } from "@/pages/clientes/ClientesPage";
 import { ClienteDetailPage } from "@/pages/clientes/ClienteDetailPage";
@@ -85,6 +86,7 @@ export default function App() {
       <BrowserRouter>
         <AlDia />
         <AvisoClave />
+        <Inactividad />
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/cambiar-clave" element={<CambiarClavePage />} />
