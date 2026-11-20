@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -41,6 +42,16 @@ from app.config import settings
 from app.database import engine
 from app.services.imile_automation import imile_automation
 from app.services.imile_sesion import imile_sesion
+
+# Sin configurar, Python solo muestra WARNING o más: el avance del tracking de iMile (INFO)
+# no se veía en `docker logs` y no había cómo saber si estaba corriendo (2026-11-20).
+_log_tracking = logging.getLogger("app.services.imile_tracking")
+if not _log_tracking.handlers:
+    _manejador = logging.StreamHandler()
+    _manejador.setFormatter(logging.Formatter("%(levelname)s:     %(name)s: %(message)s"))
+    _log_tracking.addHandler(_manejador)
+    _log_tracking.setLevel(logging.INFO)
+    _log_tracking.propagate = False
 
 
 @asynccontextmanager
