@@ -1,11 +1,14 @@
 /*
  * Service worker: que la app abra sin señal (bodega con internet inestable).
  * - Páginas: primero la red (máx. 4 s); si no hay, la última copia guardada de la app.
- * - /assets/*: llevan hash en el nombre, no cambian: se sirven de la caché.
+ * - /assets/*: llevan hash en el nombre, no cambian. Con señal los baja el navegador (no
+ *   se interceptan, por Safari 27) y se guarda una copia; sin señal se sirve la copia.
  * - /api/*: nunca se tocan (lo que se hace sin señal lo guarda la cola del celular).
  */
-const CACHE = "servilla-app-v1";
+const CACHE = "servilla-app-v1"; // mismo nombre: conserva lo ya guardado en los celulares
 const ESPERA_RED_MS = 4000;
+// Pestañas cuya página salió de la copia guardada (no había red): sus archivos también
+const sinSenal = new Set();
 
 self.addEventListener("install", () => self.skipWaiting());
 
@@ -37,20 +40,29 @@ self.addEventListener("fetch", (event) => {
           caches.open(CACHE).then((c) => c.put("/", copia));
           return r;
         })
-        .catch(() => caches.match("/").then((r) => r || Response.error())),
+        .catch(() => {
+          if (event.resultingClientId) sinSenal.add(event.resultingClientId);
+          return caches.match("/").then((r) => r || Response.error());
+        }),
     );
     return;
   }
 
   if (url.pathname.startsWith("/assets/")) {
-    event.respondWith(
-      caches.match(req).then((guardada) => guardada || fetch(req).then((r) => {
-        if (r.ok) {
-          const copia = r.clone();
-          caches.open(CACHE).then((c) => c.put(req, copia));
-        }
-        return r;
-      })),
-    );
+    // Si la página llegó por la red NO se intercepta: Safari 27 (iOS 27.2) no carga un
+    // script de módulo que pase por respondWith (falla sin detalle y la app queda en
+    // blanco; WebKit 322883). El navegador lo baja solo (cabecera immutable) y aquí se
+    // guarda una copia aparte. Si la página salió de la copia (sin red), sus archivos
+    // también salen de la copia.
+    const offline = sinSenal.has(event.clientId) || self.navigator.onLine === false;
+    if (!offline) {
+      event.waitUntil(
+        caches.open(CACHE)
+          .then((c) => c.match(url.pathname).then((guardada) => guardada || c.add(url.pathname)))
+          .catch(() => {}),
+      );
+      return;
+    }
+    event.respondWith(caches.match(url.pathname).then((guardada) => guardada || fetch(req)));
   }
 });
