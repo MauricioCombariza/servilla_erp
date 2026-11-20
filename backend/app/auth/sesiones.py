@@ -1,7 +1,7 @@
 """Sesiones en el servidor, bloqueo por intentos fallidos y eventos de seguridad (PR-12).
 
 - Cada inicio de sesión crea una fila en `sesiones`; los tokens llevan su id (`sid`).
-- La sesión muere a los SESION_INACTIVIDAD_MINUTOS sin peticiones, a las SESION_MAX_HORAS
+- La sesión muere a los SESION_INACTIVIDAD_MINUTOS sin peticiones (2 h), a las SESION_MAX_HORAS
   de creada, o cuando se cierra (salida, administrador, cambio o reinicio de clave).
 - La inactividad que cuenta es la de la persona: el navegador la mide (teclado, toque,
   lecturas de pistola) y llama a /api/auth/logout al cumplirse. Lo de aquí es el respaldo

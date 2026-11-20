@@ -29,7 +29,7 @@ export const useAuthStore = create<AuthState>()(
       pageKeys: [],
       debeCambiarClave: false,
       diasParaVencer: null,
-      inactividadMinutos: 10,
+      inactividadMinutos: 120,
       setTokens: (token, refreshToken) => set({ token, refreshToken }),
       setUser: (role, nombreCompleto, pageKeys) => set({ role, nombreCompleto, pageKeys }),
       setClave: (debeCambiarClave, diasParaVencer) => set({ debeCambiarClave, diasParaVencer }),

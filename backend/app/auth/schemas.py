@@ -18,7 +18,7 @@ class TokenResponse(BaseModel):
     debe_cambiar_clave: bool = False
     dias_para_vencer: int | None = None
     # El navegador cierra la sesión tras estos minutos sin que la persona haga nada
-    inactividad_minutos: int = 10
+    inactividad_minutos: int = 120
 
 
 class CambioClaveRequest(BaseModel):

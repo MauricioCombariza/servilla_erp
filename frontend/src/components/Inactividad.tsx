@@ -6,7 +6,7 @@ import { useAuthStore } from "@/store/authStore";
 import { marcarActividad, ultimaActividad } from "@/utils/actividad";
 
 /**
- * Cierre de sesión por inactividad (PR-12: 10 minutos).
+ * Cierre de sesión por inactividad (el servidor dice cuántos minutos; hoy 2 horas).
  *  - Cuenta como actividad: teclado (incluida la pistola lectora), toques, clics, rueda y
  *    lo que la persona envía al servidor (escaneos, guardar). Las consultas automáticas
  *    de cada pantalla NO cuentan.
