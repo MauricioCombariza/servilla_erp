@@ -11,7 +11,8 @@ services:
       POSTGRES_USER:     servilla
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "${PG_PORT:-5440}:5432"
+      # Solo desde el mismo servidor (o por túnel SSH): la base no se publica en internet
+      - "127.0.0.1:${PG_PORT:-5440}:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:

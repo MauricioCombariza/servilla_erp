@@ -4,7 +4,6 @@ import { useAuthStore } from "@/store/authStore";
 
 export interface LoginResponse {
   access_token: string;
-  refresh_token: string;
   role: string;
   nombre_completo: string;
   page_keys: string[];
@@ -42,7 +41,7 @@ export const authApi = {
 /** Guarda en el store la sesión que devuelven login, refresh y cambiar-clave. */
 export function guardarSesion(d: LoginResponse) {
   const s = useAuthStore.getState();
-  s.setTokens(d.access_token, d.refresh_token);
+  s.setToken(d.access_token);
   s.setUser(d.role, d.nombre_completo, d.page_keys ?? []);
   s.setClave(d.debe_cambiar_clave ?? false, d.dias_para_vencer ?? null);
   if (d.inactividad_minutos) s.setInactividad(d.inactividad_minutos);
@@ -54,8 +53,7 @@ export function guardarSesion(d: LoginResponse) {
  */
 export function cerrarSesion(motivo: "salida" | "inactividad" = "salida") {
   const s = useAuthStore.getState();
-  if (s.refreshToken) {
-    void axios.post("/api/auth/logout", { refresh_token: s.refreshToken, motivo }).catch(() => {});
-  }
+  // La cookie HttpOnly viaja sola; el servidor la borra
+  void axios.post("/api/auth/logout", { motivo, refresh_token: s.legadoRefresh ?? undefined }).catch(() => {});
   s.logout();
 }

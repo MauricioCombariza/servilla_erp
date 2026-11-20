@@ -27,11 +27,13 @@ let renovando: Promise<string> | null = null;
 function renovar(): Promise<string> {
   if (renovando) return renovando;
   renovando = (async () => {
-    const { refreshToken, logout, setTokens, setUser, setClave, role, nombreCompleto } = useAuthStore.getState();
-    if (!refreshToken) throw new SesionTerminada();
+    const { sesion, legadoRefresh, logout, setToken, setUser, setClave, role, nombreCompleto } = useAuthStore.getState();
+    if (!sesion) throw new SesionTerminada();
     try {
-      const res = await axios.post("/api/auth/refresh", { refresh_token: refreshToken });
-      setTokens(res.data.access_token, res.data.refresh_token);
+      // El refresh va en la cookie HttpOnly; legadoRefresh solo existe una vez, para las
+      // sesiones abiertas antes de la cookie (el servidor la pone en la respuesta)
+      const res = await axios.post("/api/auth/refresh", legadoRefresh ? { refresh_token: legadoRefresh } : {});
+      setToken(res.data.access_token);
       setUser(res.data.role ?? role, res.data.nombre_completo ?? nombreCompleto, res.data.page_keys ?? []);
       setClave(res.data.debe_cambiar_clave ?? false, res.data.dias_para_vencer ?? null);
       // La clave venció: el token nuevo solo sirve para cambiarla. Lo pendiente del
@@ -64,9 +66,9 @@ api.interceptors.request.use(async (config) => {
     marcarActividad();
   }
   let token = useAuthStore.getState().token;
-  // El token de acceso dura pocos minutos: se renueva antes de que venza, así una carga
-  // de archivo no choca con un 401 a mitad de camino.
-  if (token && segundosRestantes(token) < 30 && useAuthStore.getState().refreshToken) {
+  // El token de acceso vive en memoria y dura pocos minutos: se pide al recargar la página
+  // y se renueva antes de que venza, así una carga de archivo no choca con un 401.
+  if (useAuthStore.getState().sesion && (!token || segundosRestantes(token) < 30)) {
     try {
       token = await renovar();
     } catch {
@@ -81,8 +83,8 @@ api.interceptors.response.use(
   (res) => res,
   async (error) => {
     if (error.response?.status !== 401) return Promise.reject(error);
-    const { refreshToken, logout } = useAuthStore.getState();
-    if (!refreshToken || error.config?._retry) {
+    const { sesion, logout } = useAuthStore.getState();
+    if (!sesion || error.config?._retry) {
       logout();
       return Promise.reject(error);
     }

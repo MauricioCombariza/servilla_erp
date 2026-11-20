@@ -19,14 +19,14 @@ const AVISO_MS = 60_000;
 const LATIDO_MS = 2 * 60_000;
 
 export function Inactividad() {
-  const token = useAuthStore((s) => s.token);
+  const sesion = useAuthStore((s) => s.sesion);
   const minutos = useAuthStore((s) => s.inactividadMinutos);
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [quedan, setQuedan] = useState<number | null>(null);
   const ultimoLatido = useRef(Date.now());
 
-  const activa = Boolean(token) && pathname !== "/login";
+  const activa = sesion && pathname !== "/login";
 
   useEffect(() => {
     if (!activa) return;

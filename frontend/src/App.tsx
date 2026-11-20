@@ -60,9 +60,9 @@ const qc = new QueryClient({
 });
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const token = useAuthStore((s) => s.token);
+  const sesion = useAuthStore((s) => s.sesion);
   const debeCambiarClave = useAuthStore((s) => s.debeCambiarClave);
-  if (!token) return <Navigate to="/login" replace />;
+  if (!sesion) return <Navigate to="/login" replace />;
   if (debeCambiarClave) return <Navigate to="/cambiar-clave" replace />;
   return <>{children}</>;
 }

@@ -70,7 +70,7 @@ async def test_clave_vencida_solo_deja_cambiarla(client):
     assert me.status_code == 401
 
     # El refresh tampoco lo saca del cambio obligatorio
-    rf = await client.post("/api/auth/refresh", json={"refresh_token": body["refresh_token"]})
+    rf = await client.post("/api/auth/refresh", json={"refresh_token": r.cookies["servilla_refresh"]})
     assert rf.json()["debe_cambiar_clave"] is True
 
     r = await _cambiar(client, token, CLAVE, NUEVA)

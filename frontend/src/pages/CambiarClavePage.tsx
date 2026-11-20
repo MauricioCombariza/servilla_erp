@@ -17,7 +17,7 @@ function reglas(clave: string) {
 
 /** Cambio de clave: obligatorio cuando venció (cada 45 días) o es temporal; voluntario si no. */
 export function CambiarClavePage() {
-  const token = useAuthStore((s) => s.token);
+  const sesion = useAuthStore((s) => s.sesion);
   const debe = useAuthStore((s) => s.debeCambiarClave);
   const dias = useAuthStore((s) => s.diasParaVencer);
   const navigate = useNavigate();
@@ -27,7 +27,7 @@ export function CambiarClavePage() {
   const [error, setError] = useState("");
   const [enviando, setEnviando] = useState(false);
 
-  if (!token) return <Navigate to="/login" replace />;
+  if (!sesion) return <Navigate to="/login" replace />;
 
   const lista = reglas(nueva);
   async function enviar(e: React.FormEvent) {

@@ -39,6 +39,11 @@ async def _login(client, clave=CLAVE, headers=None):
                              headers=headers or {})
 
 
+def _cuerpo(r):
+    """Respuesta del login con el refresh (que ahora llega en la cookie HttpOnly)."""
+    return r.json() | {"refresh_token": r.cookies.get("servilla_refresh")}
+
+
 def _h(token):
     return {"Authorization": f"Bearer {token}"}
 
@@ -63,7 +68,7 @@ async def _eventos(tipo):
 async def test_login_crea_sesion_y_el_token_la_lleva(client):
     r = await _login(client, headers={"X-Real-IP": "190.1.2.3"})
     assert r.status_code == 200
-    body = r.json()
+    body = _cuerpo(r)
     assert body["inactividad_minutos"] == settings.sesion_inactividad_minutos
     sid = jwt.get_unverified_claims(body["access_token"])["sid"]
     assert jwt.get_unverified_claims(body["refresh_token"])["sid"] == sid
@@ -121,7 +126,7 @@ async def test_un_login_correcto_reinicia_el_contador(client):
 
 
 async def test_inactividad_cierra_la_sesion(client):
-    body = (await _login(client)).json()
+    body = _cuerpo(await _login(client))
     sid = jwt.get_unverified_claims(body["access_token"])["sid"]
     async with AsyncSessionLocal() as db:
         await db.execute(update(Sesion).where(Sesion.id == sid).values(
@@ -137,7 +142,7 @@ async def test_inactividad_cierra_la_sesion(client):
 
 
 async def test_refresh_mantiene_viva_la_sesion(client):
-    body = (await _login(client)).json()
+    body = _cuerpo(await _login(client))
     sid = jwt.get_unverified_claims(body["access_token"])["sid"]
     hace = datetime.now(UTC) - timedelta(minutes=settings.sesion_inactividad_minutos - 1)
     async with AsyncSessionLocal() as db:
@@ -151,7 +156,7 @@ async def test_refresh_mantiene_viva_la_sesion(client):
 
 
 async def test_duracion_maxima(client):
-    body = (await _login(client)).json()
+    body = _cuerpo(await _login(client))
     sid = jwt.get_unverified_claims(body["access_token"])["sid"]
     async with AsyncSessionLocal() as db:
         await db.execute(update(Sesion).where(Sesion.id == sid)
@@ -161,7 +166,7 @@ async def test_duracion_maxima(client):
 
 
 async def test_logout_cierra_la_sesion(client):
-    body = (await _login(client)).json()
+    body = _cuerpo(await _login(client))
     r = await client.post("/api/auth/logout", json={"refresh_token": body["refresh_token"],
                                                      "motivo": "inactividad"})
     assert r.status_code == 204
@@ -177,8 +182,8 @@ async def test_logout_con_token_invalido_no_falla(client):
 
 
 async def test_admin_cierra_todas_las_sesiones(client):
-    a = (await _login(client)).json()
-    b = (await _login(client)).json()
+    a = _cuerpo(await _login(client))
+    b = _cuerpo(await _login(client))
     admin = await _admin(client)
     r = await client.post(f"/api/admin/usuarios/{await _id_usuario()}/cerrar-sesiones", headers=_h(admin))
     assert r.status_code == 204
@@ -189,7 +194,7 @@ async def test_admin_cierra_todas_las_sesiones(client):
 
 
 async def test_desactivar_cierra_las_sesiones(client):
-    a = (await _login(client)).json()
+    a = _cuerpo(await _login(client))
     admin = await _admin(client)
     uid = await _id_usuario()
     assert (await client.put(f"/api/admin/usuarios/{uid}", headers=_h(admin), json={"activo": False})).status_code == 200
@@ -201,8 +206,8 @@ async def test_desactivar_cierra_las_sesiones(client):
 
 
 async def test_cambiar_clave_cierra_las_otras_sesiones(client):
-    otra = (await _login(client)).json()
-    actual = (await _login(client)).json()
+    otra = _cuerpo(await _login(client))
+    actual = _cuerpo(await _login(client))
     r = await client.post("/api/auth/cambiar-clave", headers=_h(actual["access_token"]),
                           json={"clave_actual": CLAVE, "clave_nueva": NUEVA})
     assert r.status_code == 200
@@ -211,7 +216,7 @@ async def test_cambiar_clave_cierra_las_otras_sesiones(client):
 
 
 async def test_restablecer_clave_cierra_sesiones_y_desbloquea(client):
-    a = (await _login(client)).json()
+    a = _cuerpo(await _login(client))
     async with AsyncSessionLocal() as db:
         await db.execute(update(Usuario).where(Usuario.username == USUARIO)
                          .values(bloqueado_hasta=datetime.now(UTC) + timedelta(minutes=10)))
@@ -227,5 +232,5 @@ async def test_restablecer_clave_cierra_sesiones_y_desbloquea(client):
 
 
 async def test_actividad(client):
-    body = (await _login(client)).json()
+    body = _cuerpo(await _login(client))
     assert (await client.post("/api/auth/actividad", headers=_h(body["access_token"]))).status_code == 204
