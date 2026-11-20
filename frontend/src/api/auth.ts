@@ -11,11 +11,30 @@ export interface LoginResponse {
   debe_cambiar_clave: boolean;
   dias_para_vencer: number | null;
   inactividad_minutos?: number;
+  /** Solo al terminar de configurar el segundo factor (se muestran una vez) */
+  codigos_respaldo?: string[] | null;
+}
+
+/** Clave correcta; falta el código del celular ("verificar") o configurarlo ("configurar"). */
+export interface MfaPendiente {
+  mfa_paso: "verificar" | "configurar";
+  mfa_token: string;
+  nombre_completo: string;
+}
+
+export function esMfaPendiente(d: LoginResponse | MfaPendiente): d is MfaPendiente {
+  return "mfa_paso" in d;
 }
 
 export const authApi = {
   login: (username: string, password: string) =>
-    axios.post<LoginResponse>("/api/auth/login", { username, password }),
+    axios.post<LoginResponse | MfaPendiente>("/api/auth/login", { username, password }),
+  mfaConfigurar: (mfa_token: string) =>
+    axios.post<{ secreto: string; uri: string }>("/api/auth/mfa/configurar", { mfa_token }),
+  mfaActivar: (mfa_token: string, codigo: string) =>
+    axios.post<LoginResponse>("/api/auth/mfa/activar", { mfa_token, codigo }),
+  mfaVerificar: (mfa_token: string, codigo: string) =>
+    axios.post<LoginResponse>("/api/auth/mfa/verificar", { mfa_token, codigo }),
   cambiarClave: (clave_actual: string, clave_nueva: string) =>
     api.post<LoginResponse>("/auth/cambiar-clave", { clave_actual, clave_nueva }),
 };

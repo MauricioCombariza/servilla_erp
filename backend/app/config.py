@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     # Bloqueo de la cuenta tras N intentos fallidos seguidos (PR-12; CSI-065 control 17)
     login_max_intentos: int = 5
     login_bloqueo_minutos: int = 15
+    # Segundo factor (código del celular) obligatorio para todos (FGS 21/66). Quien no lo
+    # tenga configurado lo configura al entrar. MFA_CLAVE_CIFRADO: llave Fernet para el
+    # secreto; vacía = derivada de JWT_SECRET.
+    mfa_obligatorio: bool = True
+    mfa_clave_cifrado: str = ""
 
     # Cambio periódico de contraseñas del ERP (SER-MNT-PR-02 §20.3: 45 días para usuarios y
     # administradores; el banco exige entre 20 y 45). Aviso unos días antes de que venza.

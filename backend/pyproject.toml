@@ -11,6 +11,7 @@ dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.2",
     "python-jose[cryptography]>=3.3",
+    "cryptography>=42",  # cifrado del secreto MFA (app/auth/mfa.py)
     "passlib[bcrypt]>=1.7",
     "pandas>=2.2",
     "openpyxl>=3.1",

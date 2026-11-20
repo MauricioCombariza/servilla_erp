@@ -401,6 +401,7 @@ export interface Usuario {
   debe_cambiar_clave: boolean;
   bloqueado_hasta?: string | null;
   bloqueado?: boolean;
+  mfa_activo?: boolean;
 }
 
 export interface Rol {
