@@ -14,6 +14,27 @@
     />
     <title>AgriVision · ERP</title>
     <script>
+      // iPhone/iPad: SIN service worker. En Safari 27 (iOS 27.2) basta con que un service
+      // worker controle la página para que el script principal no cargue y la app quede en
+      // blanco (WebKit 322883). Se quita el que haya quedado instalado y se recarga una vez.
+      // Lo que se escanea sin señal sigue en la cola del celular (no depende de esto).
+      (function () {
+        var ua = navigator.userAgent;
+        var ios = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+        window.__sinServiceWorker = ios;
+        if (!ios || !("serviceWorker" in navigator) || !navigator.serviceWorker.getRegistrations) return;
+        navigator.serviceWorker.getRegistrations().then(function (regs) {
+          if (!regs.length) return;
+          Promise.all(regs.map(function (r) { return r.unregister(); })).then(function () {
+            if (window.caches) caches.keys().then(function (k) { k.forEach(function (n) { caches.delete(n); }); });
+            var ya = false;
+            try { ya = sessionStorage.getItem("sw-quitado") === "1"; sessionStorage.setItem("sw-quitado", "1"); } catch (x) {}
+            if (navigator.serviceWorker.controller && !ya) location.reload();
+          });
+        })["catch"](function () {});
+      })();
+    </script>
+    <script>
       // Celulares viejos (iOS <= 13, Safari o Chrome): si la app no se dibuja, se carga la versión
       // compatible (-legacy) y, si tampoco abre, se muestra el error en pantalla en vez de blanco.
       // Los errores se mandan a /__diag (queda en el log de nginx) para poder revisarlos.
