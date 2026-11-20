@@ -2,7 +2,7 @@ import { AvisoClavesExternas } from "@/components/AvisoClavesExternas";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   Users, UserCheck, ShoppingCart, FileText, BarChart2,
-  Clock, DollarSign, Truck, Receipt, Wallet, Calculator, List, ClipboardCheck,
+  Clock, Timer, DollarSign, Truck, Receipt, Wallet, Calculator, List, ClipboardCheck,
   LogOut, Menu, X, ArrowDownCircle, ArrowUpCircle, Search, Building2, MapPin, PackageCheck,
   ScanLine, Radio, RotateCcw, ShieldCheck, Hexagon, Image as ImageIcon, FileCog, Upload, PackageOpen, MapPinned, Hourglass, ListChecks, KeyRound
 } from "lucide-react";
@@ -42,6 +42,7 @@ const navItems = [
   { to: "/escaneo-tulas", label: "Escaneo de Tulas", icon: PackageOpen, pageKey: "escaneo_tulas" },
   { to: "/asignacion-zonas", label: "Asignación de Zonas", icon: MapPinned, pageKey: "asignacion_zonas" },
   { to: "/paquetes-estancados", label: "Paquetes Estancados", icon: Hourglass, pageKey: "paquetes_estancados" },
+  { to: "/tiempo-entrega", label: "Tiempo de Entrega", icon: Timer, pageKey: "tiempo_entrega" },
   { to: "/seguimiento", label: "Tareas y Proyectos", icon: ListChecks, pageKey: "seguimiento_tareas" },
   { to: "/admin/usuarios-roles", label: "Administración", icon: ShieldCheck, adminOnly: true },
 ];

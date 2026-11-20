@@ -36,6 +36,7 @@ from app.routers.imagenes import router as imagenes_router
 from app.routers.generar_dat import router as generar_dat_router
 from app.routers.paquetes_estancados import router as paquetes_estancados_router
 from app.routers.seguimiento import router as seguimiento_router
+from app.routers.tiempo_entrega import router as tiempo_entrega_router
 from app.config import settings
 from app.database import engine
 from app.services.imile_automation import imile_automation
@@ -97,6 +98,7 @@ app.include_router(imagenes_router)
 app.include_router(generar_dat_router)
 app.include_router(paquetes_estancados_router)
 app.include_router(seguimiento_router)
+app.include_router(tiempo_entrega_router)
 
 
 @app.get("/health")

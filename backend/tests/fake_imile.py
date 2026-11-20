@@ -18,6 +18,9 @@ necesita de ds.imile.com, sin tocar el iMile real.
   escanear hace POST a .../bizAssignDaScan/submit con daCode / daName / forceOperate; el
   servidor guarda cada asignación en `asignaciones` y responde bloqueo 1119 a NOEXISTE…
   Confirmar en la ventana "bloquear" reenvía con forceOperate=true (como iMile real).
+- POST /saastms/v1/biz/track/query (tracking de una guía, mejora continua): devuelve los
+  eventos de TRACKING con el mismo formato que iMile real (2026-11-19). Guía que no está
+  → trackInfo vacío. Cada consulta queda en `consultas_tracking`.
 """
 import json
 import threading
@@ -44,6 +47,43 @@ DESCARGADOS = {
 # (unloading/submit) pasan a DESCARGADOS y ya aparecen en la consulta
 SIN_DESCARGAR = {
     "2611063528401": ["FAKE-T3-01", "FAKE-T3-02", "FAKE-T3-03"],
+}
+
+
+def _evento(content: str, time: str, track_type: str = "", stage: int | None = 1003) -> dict:
+    return {"content": content, "trackStage": stage, "trackStageTx": "En Proceso de Reparto",
+            "time": time, "trackType": track_type}
+
+
+_PRUEBA = "<div class='viewPic' data-pic='lms/app/re_driver/img/problem/x.png,'>【View Proof】</div>"
+# Tracking de guías (copiado de iMile real, guía 6110626411459, sin nombres ni teléfonos).
+# Del más nuevo al más viejo, como lo manda iMile.
+TRACKING = {
+    "FAKE-TRK-2NOV": [
+        _evento("【BOG-Doce de Octubre.DS】add a problem[Need after 7 days], The Operator is 【DA Prueba】."
+                + _PRUEBA, "2026-11-18 17:10:55", "Problem"),
+        _evento("【BOG-Doce de Octubre.DS】Has dispatched(DA: DA Prueba,ID: D0) ,The Operator is 【DA Prueba】",
+                "2026-11-18 16:03:48", "Delivery"),
+        _evento("【BOG-Doce de Octubre.DS】add a problem[Uncontactable-No Answer/Switched off], "
+                "The Operator is 【DA Prueba】." + _PRUEBA, "2026-11-17 17:34:07", "Problem"),
+        _evento("【BOG-Doce de Octubre.DS】Has dispatched(DA: DA Prueba,ID: D0) ,The Operator is 【DA Prueba】",
+                "2026-11-17 13:54:35", "Delivery"),
+        _evento(" 【BOG-Doce de Octubre.DS】Dispatch assigned to DA (DA：DA Prueba)，Pending on DA confirmed ,"
+                "The Operator is 【Operador】 ", "2026-11-16 10:26:14"),
+        _evento("【BOG-Doce de Octubre.DS】Arrived ,The Operator is 【Operador】.", "2026-11-16 08:44:34"),
+        _evento("【BOG-Doce de Octubre.DS】Bag/Pallet[2611147559501]is offloaded.Trunk UUID【BGNB202611150014】."
+                "The Operator is 【Operador】", "2026-11-16 08:09:32", stage=1002),
+        _evento("【BOG-BOG NORTE.HUB】Arrived ,The Operator is 【Operador】.", "2026-11-14 21:21:36", stage=1002),
+        _evento("【COL Center】Arrived，the package weight is【0.0kg】 ,The Operator is 【sorter】",
+                "2026-11-14 13:39:51", stage=1002),
+        _evento("Order Submited through [OpenApi] ", "2026-11-06 05:48:35", stage=1001),
+    ],
+    "FAKE-TRK-0NOV": [
+        _evento("【BOG-Doce de Octubre.DS】Has dispatched(DA: DA Prueba,ID: D0) ,The Operator is 【DA Prueba】",
+                "2026-11-18 08:18:44", "Delivery"),
+        _evento("【BOG-Doce de Octubre.DS】Arrived ,The Operator is 【Operador】.", "2026-11-18 07:06:35"),
+        _evento("【BOG-BOG NORTE.HUB】Arrived ,The Operator is 【Operador】.", "2026-11-17 21:00:00", stage=1002),
+    ],
 }
 
 LOGIN_HTML = f"""<!doctype html><html><body>
@@ -177,6 +217,7 @@ class _FakeImile(BaseHTTPRequestHandler):
     ingresados: ClassVar[set[str]] = set()
     asignaciones: ClassVar[list[dict]] = []  # Paso 3.3: cada POST a .../bizAssignDaScan/submit
     descargas: ClassVar[list[dict]] = []
+    consultas_tracking: ClassVar[list[str]] = []  # guías consultadas en .../track/query
 
     def do_GET(self):  # nombre fijo de http.server
         cuerpo = LOGIN_HTML if self.path.startswith("/login") else HOME_HTML.replace(
@@ -208,6 +249,13 @@ class _FakeImile(BaseHTTPRequestHandler):
                 "results": pagina, "pagination": {"currentPage": num, "pageSize": tam, "totalResult": len(filas)}}})
         if "/bizAssignDaScan/submit" in self.path:
             return self._asignar(datos)
+        if "/saastms/v1/biz/track/query" in self.path:
+            guia = datos.get("searchValue", "")
+            self.consultas_tracking.append(guia)
+            eventos = TRACKING.get(guia, [])
+            return self._json({"status": "success", "resultCode": "", "message": "Successful operation!",
+                               "resultObject": {"baseInfo": {"waybillNo": guia} if eventos else None,
+                                                "trackInfo": {guia: eventos} if eventos else {}}})
         serial = datos.get("scanNumber", "")
         ro = {"scanNumber": serial, "scanTypeDesc": "Llegar", "status": 2, "popup": True,
               "repeat": False, "voiceType": "success"}
