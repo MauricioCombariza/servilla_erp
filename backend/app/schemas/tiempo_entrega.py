@@ -10,6 +10,7 @@ class GuiaTiempoEntregaRow(BaseModel):
     cod_men: str | None
     mensajero: str | None
     devoluciones: int | None  # None = tracking sin consultar
+    reprogramaciones: int | None  # incluidas en devoluciones; descuentan 5 días
     fecha_inicial: datetime | None  # llegada a la estación (tracking iMile)
     fecha_entrega: datetime
     horas_reales: float | None
@@ -35,5 +36,6 @@ class TiempoEntregaResponse(BaseModel):
     hasta: date
     ans_horas: int
     descuento_horas: int
+    descuento_reprogramacion_horas: int
     resumen: ResumenTiempoEntrega
     guias: list[GuiaTiempoEntregaRow]

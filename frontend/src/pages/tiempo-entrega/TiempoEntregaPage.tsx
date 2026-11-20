@@ -102,7 +102,8 @@ export function TiempoEntregaPage() {
           <p className="text-sm text-gray-500">
             Guías entregadas en el rango (por fecha de entrega). Tiempo real = horas seguidas desde la llegada
             a la estación hasta la entrega. Cumple si el tiempo real menos {data?.descuento_horas ?? 24} h por
-            cada devolución es de {data?.ans_horas ?? 48} h o menos.
+            cada devolución ({(data?.descuento_reprogramacion_horas ?? 120) / 24} días si es una reprogramación),
+            sin bajar de 0, es de {data?.ans_horas ?? 48} h o menos.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -187,7 +188,14 @@ export function TiempoEntregaPage() {
                       <td className="px-3 py-1.5">
                         {g.mensajero ?? "—"} {g.cod_men && <span className="text-xs text-gray-400">{g.cod_men}</span>}
                       </td>
-                      <td className="px-3 py-1.5 text-right">{g.devoluciones ?? "—"}</td>
+                      <td className="px-3 py-1.5 text-right">
+                        {g.devoluciones ?? "—"}
+                        {!!g.reprogramaciones && (
+                          <span className="ml-1 text-xs text-amber-600" title="Reprogramaciones: descuentan 5 días">
+                            ({g.reprogramaciones} reprog.)
+                          </span>
+                        )}
+                      </td>
                       <td className="px-3 py-1.5 whitespace-nowrap">{formatoFechaHora(g.fecha_inicial)}</td>
                       <td className="px-3 py-1.5 whitespace-nowrap">{formatoFechaHora(g.fecha_entrega)}</td>
                       <td className="px-3 py-1.5 text-right">{horas(g.horas_reales)}</td>
