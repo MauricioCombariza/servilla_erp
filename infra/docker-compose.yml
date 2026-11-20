@@ -47,6 +47,11 @@ services:
       # Mejora continua: tras cargar el informe Delivered, consulta en iMile (solo lectura)
       # el tracking de las guías entregadas (llegada a la estación y novedades)
       IMILE_TRACKING_ACTIVO: ${IMILE_TRACKING_ACTIVO:-false}
+      # Código del celular (MFA) para todos. Apagado hasta que el equipo instale la app:
+      # se enciende con MFA_OBLIGATORIO=true en infra/.env y `docker compose up -d backend`.
+      # Apagado, solo se le pide a quien ya lo configuró.
+      MFA_OBLIGATORIO:   ${MFA_OBLIGATORIO:-false}
+      MFA_CLAVE_CIFRADO: ${MFA_CLAVE_CIFRADO:-}
     volumes:
       # Sesión de iMile (app/services/imile_sesion.py): sobrevive a reinicios del
       # contenedor, así no hay que volver a iniciar sesión (~30 s) cada vez
