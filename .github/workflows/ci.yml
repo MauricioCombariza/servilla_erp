@@ -79,6 +79,36 @@ jobs:
       - run: go vet ./...
       - run: go test ./...
 
+  replicador:
+    name: Replicador Go (vet + test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: replicador_ci
+          POSTGRES_USER: servilla
+          POSTGRES_PASSWORD: solo-ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U servilla -d replicador_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # Prueba de integración contra Postgres (esquema propio, base vacía; nunca datos reales)
+      REPLICADOR_TEST_DB: postgres://servilla:solo-ci@localhost:5432/replicador_ci
+    defaults:
+      run:
+        working-directory: replicador
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: replicador/go.mod
+          cache-dependency-path: replicador/go.sum
+      - run: go vet ./...
+      - run: go test ./...
+
   frontend:
     name: Frontend (tipos + build)
     runs-on: ubuntu-latest

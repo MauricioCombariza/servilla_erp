@@ -1,0 +1,21 @@
+# Equipo del replicador en la LAN de la oficina (no en el servidor de producción).
+#   1. replicador.json  ← copia de replicador.ejemplo.json
+#   2. smb_auth          ← "username = replica" / "password = …" / "domain = WORKGROUP" (chmod 600)
+#   3. .env              ← REPLICADOR_DB_URL=postgres://replicador:<clave>@10.20.0.1:5432/servilla_erp
+#   docker compose up -d && docker compose logs -f
+services:
+  replicador:
+    # Se construye en el mismo equipo (git pull && docker compose build). Más adelante: imagen de GHCR.
+    build: .
+    image: servilla-replicador:local
+    container_name: servilla_replicador
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./replicador.json:/etc/replicador/replicador.json:ro
+      - ./smb_auth:/run/secrets/smb_auth:ro
+    # Red del host: llega al SCO (192.160.30.11:139) y al servidor por el túnel WireGuard
+    network_mode: host
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "5"}
