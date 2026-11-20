@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, ForeignKey, String, false, func
+from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, false, func
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import TIMESTAMP
 
@@ -26,6 +26,9 @@ class Usuario(Base):
     # Vencimiento de la clave (app/auth/claves.py, SER-MNT-PR-02 §20.3)
     clave_cambiada_en: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
     debe_cambiar_clave: Mapped[bool] = mapped_column(Boolean, server_default=false(), default=False)
+    # Bloqueo por intentos fallidos (app/auth/sesiones.py, PR-12)
+    intentos_fallidos: Mapped[int] = mapped_column(Integer, server_default="0", default=0)
+    bloqueado_hasta: Mapped[datetime | None] = mapped_column(_ts, default=None)
 
 
 class UsuarioClaveAnterior(Base):
@@ -36,3 +39,31 @@ class UsuarioClaveAnterior(Base):
     usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"))
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     fecha: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+
+class Sesion(Base):
+    """Un inicio de sesión. Los tokens llevan su id (sid); cerrada = tokens sin valor."""
+    __tablename__ = "sesiones"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"))
+    creada_en: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+    ultima_actividad: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+    expira_en: Mapped[datetime] = mapped_column(_ts)
+    cerrada_en: Mapped[datetime | None] = mapped_column(_ts, default=None)
+    motivo_cierre: Mapped[str | None] = mapped_column(String(30), default=None)
+    ip: Mapped[str | None] = mapped_column(String(45), default=None)
+    user_agent: Mapped[str | None] = mapped_column(String(200), default=None)
+
+
+class EventoSeguridad(Base):
+    """Login correcto o fallido, bloqueos, cierres de sesión y cambios de clave."""
+    __tablename__ = "eventos_seguridad"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    fecha: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+    usuario_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id", ondelete="SET NULL"))
+    username: Mapped[str | None] = mapped_column(String(50))
+    tipo: Mapped[str] = mapped_column(String(30))
+    ip: Mapped[str | None] = mapped_column(String(45))
+    detalle: Mapped[str | None] = mapped_column(String(300))

@@ -1,11 +1,11 @@
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import claves
+from app.auth import claves, sesiones
 from app.auth.dependencies import require_role
 from app.auth.pages import PAGE_CATALOG, PAGE_KEYS
 from app.database import get_db
@@ -94,6 +94,10 @@ async def update_usuario(
 
     for field, value in data.items():
         setattr(usuario, field, value)
+    if data.get("activo") is False:
+        await sesiones.cerrar_todas(db, usuario.id, "desactivado")
+        await sesiones.registrar_evento(db, "usuario_desactivado", usuario=usuario,
+                                        detalle=f"por {current_user['username']}")
 
     try:
         await db.commit()
@@ -109,17 +113,56 @@ async def update_usuario(
     return usuario
 
 
-@router.put("/usuarios/{usuario_id}/password", status_code=status.HTTP_204_NO_CONTENT)
-async def reset_password(
-    usuario_id: int, body: UsuarioAdminPasswordReset, db: AsyncSession = Depends(get_db), _=_auth
-):
-    result = await db.execute(select(Usuario).where(Usuario.id == usuario_id))
-    usuario = result.scalar_one_or_none()
+async def _usuario_o_404(db: AsyncSession, usuario_id: int) -> Usuario:
+    usuario = await db.get(Usuario, usuario_id)
     if usuario is None:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    # Clave temporal: la persona la cambia al entrar
+    return usuario
+
+
+@router.put("/usuarios/{usuario_id}/password", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_password(
+    usuario_id: int, body: UsuarioAdminPasswordReset, request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_role("administrador")),
+):
+    usuario = await _usuario_o_404(db, usuario_id)
+    # Clave temporal: la persona la cambia al entrar. Lo que estuviera abierto se cierra
+    # y la cuenta se desbloquea (es lo que se hace cuando alguien olvidó la clave).
     await claves.poner_clave(db, usuario, body.password, temporal=True)
+    sesiones.desbloquear(usuario)
+    await sesiones.cerrar_todas(db, usuario.id, "clave_restablecida")
+    await sesiones.registrar_evento(db, "clave_restablecida", usuario=usuario, ip=sesiones.ip_de(request),
+                                    detalle=f"por {current_user['username']}")
     await db.commit()
+
+
+@router.post("/usuarios/{usuario_id}/desbloquear", response_model=UsuarioAdminRead)
+async def desbloquear_usuario(
+    usuario_id: int, request: Request, db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_role("administrador")),
+):
+    usuario = await _usuario_o_404(db, usuario_id)
+    sesiones.desbloquear(usuario)
+    await sesiones.registrar_evento(db, "desbloqueo", usuario=usuario, ip=sesiones.ip_de(request),
+                                    detalle=f"por {current_user['username']}")
+    await db.commit()
+    await db.refresh(usuario)
+    return usuario
+
+
+@router.post("/usuarios/{usuario_id}/cerrar-sesiones", status_code=status.HTTP_204_NO_CONTENT)
+async def cerrar_sesiones_usuario(
+    usuario_id: int, request: Request, db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_role("administrador")),
+):
+    """Cierra en un paso todas las sesiones abiertas de la cuenta (incidente, equipo perdido)."""
+    usuario = await _usuario_o_404(db, usuario_id)
+    cerradas = await sesiones.cerrar_todas(db, usuario.id, "administrador")
+    await sesiones.registrar_evento(db, "sesiones_cerradas", usuario=usuario, ip=sesiones.ip_de(request),
+                                    detalle=f"{cerradas} por {current_user['username']}")
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ── Roles ────────────────────────────────────────────────────────────────────

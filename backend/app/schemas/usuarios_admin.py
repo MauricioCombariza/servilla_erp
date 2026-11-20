@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -46,6 +46,12 @@ class UsuarioAdminRead(BaseModel):
     ultimo_acceso: datetime | None = None
     clave_cambiada_en: datetime | None = None
     debe_cambiar_clave: bool = False
+    bloqueado_hasta: datetime | None = None
+
+    @computed_field
+    @property
+    def bloqueado(self) -> bool:
+        return self.bloqueado_hasta is not None and self.bloqueado_hasta > datetime.now(UTC)
 
     @computed_field
     @property

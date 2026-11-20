@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { Check, X } from "lucide-react";
-import { authApi, guardarSesion } from "@/api/auth";
+import { authApi, cerrarSesion, guardarSesion } from "@/api/auth";
 import { useAuthStore } from "@/store/authStore";
 
 // Mismas reglas que el backend (app/auth/claves.py); el backend tiene la última palabra
@@ -20,7 +20,6 @@ export function CambiarClavePage() {
   const token = useAuthStore((s) => s.token);
   const debe = useAuthStore((s) => s.debeCambiarClave);
   const dias = useAuthStore((s) => s.diasParaVencer);
-  const logout = useAuthStore((s) => s.logout);
   const navigate = useNavigate();
   const [actual, setActual] = useState("");
   const [nueva, setNueva] = useState("");
@@ -99,7 +98,7 @@ export function CambiarClavePage() {
             {enviando ? "Guardando..." : "Cambiar contraseña"}
           </button>
           <button type="button"
-            onClick={() => { if (debe) { logout(); navigate("/login"); } else { navigate(-1); } }}
+            onClick={() => { if (debe) { cerrarSesion(); navigate("/login"); } else { navigate(-1); } }}
             className="w-full text-sm text-gray-500 hover:text-gray-700">
             {debe ? "Cerrar sesión" : "Cancelar"}
           </button>

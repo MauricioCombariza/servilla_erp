@@ -1,17 +1,17 @@
 import { useNavigate } from "react-router-dom";
 import { LogOut } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
+import { cerrarSesion as cerrarEnServidor } from "@/api/auth";
 
 /** Cerrar sesión desde las pantallas del flujo de paquetes, que no tienen el menú lateral. */
 export function CerrarSesionBoton({ className = "" }: { className?: string }) {
-  const logout = useAuthStore((s) => s.logout);
   const nombreCompleto = useAuthStore((s) => s.nombreCompleto);
   const navigate = useNavigate();
 
   function cerrarSesion() {
     // En el celular es fácil tocarlo sin querer en medio del escaneo
     if (!window.confirm(`¿Cerrar la sesión${nombreCompleto ? ` de ${nombreCompleto}` : ""}?`)) return;
-    logout();
+    cerrarEnServidor();
     navigate("/login", { replace: true });
   }
 
