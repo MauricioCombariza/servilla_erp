@@ -34,6 +34,7 @@ async def listar(
     guias = await svc.listar(db, desde, hasta)
     return TiempoEntregaResponse(
         desde=desde, hasta=hasta, ans_horas=svc.ANS_HORAS, descuento_horas=svc.DESCUENTO_HORAS,
+        descuento_reprogramacion_horas=svc.DESCUENTO_REPROGRAMACION_HORAS,
         resumen=svc.resumir(guias), guias=guias,
     )
 

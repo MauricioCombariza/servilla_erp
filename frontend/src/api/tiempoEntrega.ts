@@ -5,6 +5,7 @@ export interface GuiaTiempoEntrega {
   cod_men: string | null;
   mensajero: string | null;
   devoluciones: number | null; // null = tracking sin consultar
+  reprogramaciones: number | null; // incluidas en devoluciones; descuentan 5 días
   fecha_inicial: string | null; // llegada a la estación (tracking iMile)
   fecha_entrega: string;
   horas_reales: number | null;
@@ -28,6 +29,7 @@ export interface TiempoEntregaResponse {
   hasta: string;
   ans_horas: number;
   descuento_horas: number;
+  descuento_reprogramacion_horas: number;
   resumen: ResumenTiempoEntrega;
   guias: GuiaTiempoEntrega[];
 }

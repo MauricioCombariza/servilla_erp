@@ -2,7 +2,8 @@
 
 Verifica que:
   1. Tiempo real = horas seguidas entre la llegada a la estación y la entrega.
-  2. Se descuentan 24 h por devolución y cumple si queda en 48 h o menos.
+  2. Se descuentan 24 h por devolución (5 días si es reprogramación "Need after N days"),
+     el tiempo ajustado no baja de 0, y cumple si queda en 48 h o menos.
   3. El rango filtra por el día de entrega en hora de Bogotá.
   4. Una guía sin tracking sale en el listado, pero no cuenta para el % ni los promedios.
   5. El Excel se descarga.
@@ -18,6 +19,7 @@ from app.services.tiempo_entrega_service import calcular
 
 _BOG = timezone(timedelta(hours=-5))
 _NOV = [{"hora": "2026-11-17T12:54:00-05:00", "motivo": "Uncontactable-No Answer/Switched off"}]
+_REPROG = [{"hora": "2026-11-12T17:10:55-05:00", "motivo": "Need after 7 days"}]
 
 # serial: (llegada a la estación, entrega, novedades)
 _GUIAS = {
@@ -31,6 +33,10 @@ _GUIAS = {
     "TE-TEST-SINTRK": (None, datetime(2026, 11, 18, 10, 0, tzinfo=_BOG), None),
     # Entregada el 19 a las 23:30 de Bogotá (ya es 20 en UTC): está dentro de un rango hasta el 19
     "TE-TEST-NOCHE": (datetime(2026, 11, 19, 20, 0, tzinfo=_BOG), datetime(2026, 11, 19, 23, 30, tzinfo=_BOG), []),
+    # 146 h con 1 reprogramación → 146 − 120 = 26 h → cumple (con 24 h no cumpliría)
+    "TE-TEST-REPROG": (datetime(2026, 11, 12, 8, 0, tzinfo=_BOG), datetime(2026, 11, 18, 10, 0, tzinfo=_BOG), _REPROG),
+    # 9,7 h con 1 devolución → ajustado 0, no negativo
+    "TE-TEST-MISMODIA": (datetime(2026, 11, 19, 6, 33, tzinfo=_BOG), datetime(2026, 11, 19, 16, 15, tzinfo=_BOG), _NOV),
     # Entregada fuera del rango
     "TE-TEST-FUERA": (datetime(2026, 11, 1, 8, 0, tzinfo=_BOG), datetime(2026, 11, 2, 8, 0, tzinfo=_BOG), []),
 }
@@ -41,6 +47,10 @@ def test_calcular():
     assert calcular(llegada, llegada + timedelta(hours=72), 1) == (72.0, 48.0, True)
     assert calcular(llegada, llegada + timedelta(hours=72.5), 1) == (72.5, 48.5, False)
     assert calcular(None, llegada, 0) == (None, None, None)
+    # Reprogramación: 5 días en vez de 24 h; 2 devoluciones, 1 de ellas reprogramación
+    assert calcular(llegada, llegada + timedelta(hours=170), 2, 1) == (170.0, 26.0, True)
+    # Nunca negativo
+    assert calcular(llegada, llegada + timedelta(hours=9.5), 1) == (9.5, 0.0, True)
     assert calcular(llegada, llegada, None) == (None, None, None)
 
 
@@ -89,21 +99,27 @@ async def test_informe_por_rango(client, auth_headers, guias):
     data = r.json()
     por_guia = {g["serial"]: g for g in data["guias"] if g["serial"].startswith("TE-TEST-")}
 
-    assert set(por_guia) == {"TE-TEST-RAPIDA", "TE-TEST-1DEV", "TE-TEST-LENTA", "TE-TEST-SINTRK", "TE-TEST-NOCHE"}
+    assert set(por_guia) == {"TE-TEST-RAPIDA", "TE-TEST-1DEV", "TE-TEST-LENTA", "TE-TEST-SINTRK", "TE-TEST-NOCHE",
+                             "TE-TEST-REPROG", "TE-TEST-MISMODIA"}
 
     dev = por_guia["TE-TEST-1DEV"]
     assert (dev["devoluciones"], dev["horas_reales"], dev["horas_ajustadas"], dev["cumple"]) == (1, 60.0, 36.0, True)
     assert por_guia["TE-TEST-RAPIDA"]["horas_reales"] == 2.0
     assert por_guia["TE-TEST-LENTA"]["cumple"] is False
+    rep = por_guia["TE-TEST-REPROG"]
+    assert (rep["devoluciones"], rep["reprogramaciones"], rep["horas_reales"], rep["horas_ajustadas"], rep["cumple"]) \
+        == (1, 1, 146.0, 26.0, True)
+    assert por_guia["TE-TEST-1DEV"]["reprogramaciones"] == 0
+    assert por_guia["TE-TEST-MISMODIA"]["horas_ajustadas"] == 0.0
     sin = por_guia["TE-TEST-SINTRK"]
     assert (sin["devoluciones"], sin["fecha_inicial"], sin["cumple"]) == (None, None, None)
 
     # La base de pruebas puede tener otras guías: el resumen se revisa solo si están las de la prueba
     if len(data["guias"]) == len(por_guia):
         res = data["resumen"]
-        assert (res["total"], res["con_tracking"], res["sin_tracking"], res["cumplen"]) == (5, 4, 1, 3)
-        assert res["porcentaje_cumple"] == 75.0
-        assert res["con_devoluciones"] == 1
+        assert (res["total"], res["con_tracking"], res["sin_tracking"], res["cumplen"]) == (7, 6, 1, 5)
+        assert res["porcentaje_cumple"] == 83.3
+        assert res["con_devoluciones"] == 3
 
 
 async def test_rango_invertido(client, auth_headers):
