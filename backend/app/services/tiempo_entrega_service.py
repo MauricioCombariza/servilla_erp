@@ -12,6 +12,10 @@
 - Solo entran guías entregadas: las devoluciones totales nunca tienen fecha de entrega.
 - El rango de fechas filtra por el día de entrega, en hora de Bogotá.
 - Una guía sin tracking todavía sale en el listado, pero no cuenta para el % ni los promedios.
+- Calidad de datos (DMAIC 2.5): cada guía lleva alertas. `negativo` (la llegada a la
+  estación es posterior a la entrega) es un dato imposible y sale del % y de los promedios;
+  `mas_7_dias` (tiempo ajustado > 7 días) y `ajuste_al_piso` (los descuentos superan el
+  tiempo real) solo se marcan para revisarlas: sacarlas inflaría el cumplimiento.
 """
 from __future__ import annotations
 
@@ -28,6 +32,19 @@ TZ = ZoneInfo("America/Bogota")
 ANS_HORAS = 48
 DESCUENTO_HORAS = 24
 DESCUENTO_REPROGRAMACION_HORAS = 5 * 24
+MAX_HORAS_AJUSTADAS = 7 * 24
+
+ALERTA_SIN_TRACKING = "sin_tracking"
+ALERTA_NEGATIVO = "negativo"
+ALERTA_MAS_7_DIAS = "mas_7_dias"
+ALERTA_PISO = "ajuste_al_piso"
+ALERTAS = {
+    ALERTA_SIN_TRACKING: "Sin tracking",
+    ALERTA_NEGATIVO: "Llegada posterior a la entrega",
+    ALERTA_MAS_7_DIAS: "Más de 7 días ajustados",
+    ALERTA_PISO: "Descuentos mayores al tiempo real",
+}
+ALERTAS_QUE_EXCLUYEN = {ALERTA_SIN_TRACKING, ALERTA_NEGATIVO}
 
 _SQL = text("""
     SELECT sg.serial, sg.cod_men, p.nombre_completo AS mensajero,
@@ -57,6 +74,12 @@ class GuiaTiempoEntrega:
     horas_reales: float | None
     horas_ajustadas: float | None
     cumple: bool | None
+    alertas: tuple[str, ...] = ()
+
+    @property
+    def medida(self) -> bool:
+        """Cuenta para el % y los promedios: tiene tracking y el dato es posible."""
+        return self.cumple is not None and not ALERTAS_QUE_EXCLUYEN.intersection(self.alertas)
 
 
 @dataclass(frozen=True)
@@ -64,11 +87,25 @@ class Resumen:
     total: int
     con_tracking: int
     sin_tracking: int
+    medidas: int  # con tracking y sin datos imposibles: la base del %
     cumplen: int
     porcentaje_cumple: float | None
     promedio_horas_reales: float | None
     promedio_horas_ajustadas: float | None
+    mediana_horas_reales: float | None
+    mediana_horas_ajustadas: float | None
+    p90_horas_reales: float | None
+    p90_horas_ajustadas: float | None
     con_devoluciones: int
+    porcentaje_con_devoluciones: float | None
+    cumplen_sin_descuento: int  # tiempo real ≤ 48 h, sin descontar devoluciones
+    porcentaje_cumple_sin_descuento: float | None
+    alertas: dict[str, int]  # guías por alerta (una guía puede tener varias)
+
+
+def _descuento(devoluciones: int, reprogramaciones: int) -> int:
+    return (DESCUENTO_HORAS * (devoluciones - reprogramaciones)
+            + DESCUENTO_REPROGRAMACION_HORAS * reprogramaciones)
 
 
 def calcular(fecha_inicial: datetime | None, fecha_entrega: datetime,
@@ -79,24 +116,39 @@ def calcular(fecha_inicial: datetime | None, fecha_entrega: datetime,
     if fecha_inicial is None or devoluciones is None:
         return None, None, None
     reales = round((fecha_entrega - fecha_inicial).total_seconds() / 3600, 2)
-    descuento = (DESCUENTO_HORAS * (devoluciones - reprogramaciones)
-                 + DESCUENTO_REPROGRAMACION_HORAS * reprogramaciones)
-    ajustadas = max(0.0, round(reales - descuento, 2))
+    ajustadas = max(0.0, round(reales - _descuento(devoluciones, reprogramaciones), 2))
     return reales, ajustadas, ajustadas <= ANS_HORAS
+
+
+def detectar_alertas(horas_reales: float | None, horas_ajustadas: float | None,
+                     devoluciones: int | None, reprogramaciones: int = 0) -> tuple[str, ...]:
+    """Reglas automáticas de calidad de datos (DMAIC 2.5)."""
+    if horas_reales is None or horas_ajustadas is None or devoluciones is None:
+        return (ALERTA_SIN_TRACKING,)
+    if horas_reales < 0:
+        return (ALERTA_NEGATIVO,)
+    alertas = []
+    if horas_ajustadas > MAX_HORAS_AJUSTADAS:
+        alertas.append(ALERTA_MAS_7_DIAS)
+    if horas_reales - _descuento(devoluciones, reprogramaciones) < 0:
+        alertas.append(ALERTA_PISO)
+    return tuple(alertas)
 
 
 async def listar(db: AsyncSession, desde: date, hasta: date) -> list[GuiaTiempoEntrega]:
     filas = (await db.execute(_SQL, {"desde": desde, "hasta": hasta})).all()
     guias = []
     for r in filas:
+        reprog = r.reprogramaciones or 0
         reales, ajustadas, cumple = calcular(r.fecha_llegada_ds, r.fecha_entrega, r.devoluciones,
-                                             r.reprogramaciones or 0)
+                                             reprog)
         guias.append(GuiaTiempoEntrega(
             serial=r.serial, cod_men=(r.cod_men or "").strip() or None, mensajero=r.mensajero,
             devoluciones=r.devoluciones, reprogramaciones=r.reprogramaciones,
             fecha_inicial=r.fecha_llegada_ds,
             fecha_entrega=r.fecha_entrega, horas_reales=reales, horas_ajustadas=ajustadas,
             cumple=cumple,
+            alertas=detectar_alertas(reales, ajustadas, r.devoluciones, reprog),
         ))
     return guias
 
@@ -105,18 +157,47 @@ def _promedio(valores: list[float]) -> float | None:
     return round(sum(valores) / len(valores), 2) if valores else None
 
 
+def _percentil(valores: list[float], p: float) -> float | None:
+    """Percentil con interpolación lineal (igual que PERCENTIL.INCLUIR de Excel)."""
+    if not valores:
+        return None
+    v = sorted(valores)
+    k = (len(v) - 1) * p
+    i = int(k)
+    siguiente = v[min(i + 1, len(v) - 1)]
+    return round(v[i] + (siguiente - v[i]) * (k - i), 2)
+
+
+def _porcentaje(parte: int, total: int) -> float | None:
+    return round(100 * parte / total, 1) if total else None
+
+
 def resumir(guias: list[GuiaTiempoEntrega]) -> Resumen:
-    medidas = [g for g in guias if g.cumple is not None]
+    con_tracking = sum(1 for g in guias if g.cumple is not None)
+    medidas = [g for g in guias if g.medida]
     cumplen = sum(1 for g in medidas if g.cumple)
+    reales = [g.horas_reales for g in medidas]
+    ajustadas = [g.horas_ajustadas for g in medidas]
+    con_devoluciones = sum(1 for g in medidas if g.devoluciones)
+    sin_descuento = sum(1 for h in reales if h <= ANS_HORAS)
     return Resumen(
         total=len(guias),
-        con_tracking=len(medidas),
-        sin_tracking=len(guias) - len(medidas),
+        con_tracking=con_tracking,
+        sin_tracking=len(guias) - con_tracking,
+        medidas=len(medidas),
         cumplen=cumplen,
-        porcentaje_cumple=round(100 * cumplen / len(medidas), 1) if medidas else None,
-        promedio_horas_reales=_promedio([g.horas_reales for g in medidas]),
-        promedio_horas_ajustadas=_promedio([g.horas_ajustadas for g in medidas]),
-        con_devoluciones=sum(1 for g in medidas if g.devoluciones),
+        porcentaje_cumple=_porcentaje(cumplen, len(medidas)),
+        promedio_horas_reales=_promedio(reales),
+        promedio_horas_ajustadas=_promedio(ajustadas),
+        mediana_horas_reales=_percentil(reales, 0.5),
+        mediana_horas_ajustadas=_percentil(ajustadas, 0.5),
+        p90_horas_reales=_percentil(reales, 0.9),
+        p90_horas_ajustadas=_percentil(ajustadas, 0.9),
+        con_devoluciones=con_devoluciones,
+        porcentaje_con_devoluciones=_porcentaje(con_devoluciones, len(medidas)),
+        cumplen_sin_descuento=sin_descuento,
+        porcentaje_cumple_sin_descuento=_porcentaje(sin_descuento, len(medidas)),
+        alertas={a: sum(1 for g in guias if a in g.alertas) for a in ALERTAS},
     )
 
 
@@ -126,8 +207,8 @@ def _fecha(v: datetime | None) -> str | None:
 
 _COLUMNAS = ["Guía", "Código", "Mensajero", "Devoluciones", "Reprogramaciones",
              "Fecha inicial (llegada DS)", "Fecha de entrega", "Tiempo real (h)",
-             "Tiempo ajustado (h)", "Cumple ANS 48 h"]
-_WIDTHS = [20, 8, 30, 13, 17, 22, 18, 15, 18, 16]
+             "Tiempo ajustado (h)", "Cumple ANS 48 h", "Alertas"]
+_WIDTHS = [20, 8, 30, 13, 17, 22, 18, 15, 18, 16, 34]
 
 
 def construir_excel(guias: list[GuiaTiempoEntrega], desde: date, hasta: date) -> bytes:
@@ -145,17 +226,27 @@ def construir_excel(guias: list[GuiaTiempoEntrega], desde: date, hasta: date) ->
         "Tiempo real (h)": g.horas_reales,
         "Tiempo ajustado (h)": g.horas_ajustadas,
         "Cumple ANS 48 h": cumple(g),
+        "Alertas": ", ".join(ALERTAS[a] for a in g.alertas if a != ALERTA_SIN_TRACKING),
     } for g in guias]
     r = resumir(guias)
     resumen = [
         {"Indicador": "Guías entregadas", "Valor": r.total},
-        {"Indicador": "Con tracking (se miden)", "Valor": r.con_tracking},
+        {"Indicador": "Con tracking", "Valor": r.con_tracking},
         {"Indicador": "Sin tracking todavía", "Valor": r.sin_tracking},
+        {"Indicador": "Medidas (con tracking y datos posibles)", "Valor": r.medidas},
         {"Indicador": "Cumplen el ANS", "Valor": r.cumplen},
         {"Indicador": "% que cumple", "Valor": r.porcentaje_cumple},
+        {"Indicador": "% que cumple sin descuento (real ≤ 48 h)", "Valor": r.porcentaje_cumple_sin_descuento},
         {"Indicador": "Promedio tiempo real (h)", "Valor": r.promedio_horas_reales},
+        {"Indicador": "Mediana tiempo real (h)", "Valor": r.mediana_horas_reales},
+        {"Indicador": "Percentil 90 tiempo real (h)", "Valor": r.p90_horas_reales},
         {"Indicador": "Promedio tiempo ajustado (h)", "Valor": r.promedio_horas_ajustadas},
+        {"Indicador": "Mediana tiempo ajustado (h)", "Valor": r.mediana_horas_ajustadas},
+        {"Indicador": "Percentil 90 tiempo ajustado (h)", "Valor": r.p90_horas_ajustadas},
         {"Indicador": "Guías con devoluciones", "Valor": r.con_devoluciones},
+        {"Indicador": "% con devoluciones", "Valor": r.porcentaje_con_devoluciones},
+        *({"Indicador": f"Alerta: {ALERTAS[a]}", "Valor": n} for a, n in r.alertas.items()
+          if a != ALERTA_SIN_TRACKING),
     ]
     titulo = (f"Tiempo de entrega iMile — entregas del {desde.isoformat()} al {hasta.isoformat()} "
               f"(ANS {ANS_HORAS} h, −{DESCUENTO_HORAS} h por devolución, "
@@ -163,7 +254,7 @@ def construir_excel(guias: list[GuiaTiempoEntrega], desde: date, hasta: date) ->
     return construir_excel_multi(
         [
             ("Detalle", titulo, _COLUMNAS, filas, _WIDTHS),
-            ("Resumen", titulo, ["Indicador", "Valor"], resumen, [32, 12]),
+            ("Resumen", titulo, ["Indicador", "Valor"], resumen, [42, 12]),
         ],
         formatos={"Tiempo real (h)": "0.00", "Tiempo ajustado (h)": "0.00"},
     )

@@ -16,6 +16,7 @@ class GuiaTiempoEntregaRow(BaseModel):
     horas_reales: float | None
     horas_ajustadas: float | None
     cumple: bool | None  # None = falta el tracking para calcularlo
+    alertas: list[str]  # calidad de datos: sin_tracking, negativo, mas_7_dias, ajuste_al_piso
 
 
 class ResumenTiempoEntrega(BaseModel):
@@ -24,11 +25,20 @@ class ResumenTiempoEntrega(BaseModel):
     total: int
     con_tracking: int
     sin_tracking: int
+    medidas: int  # con tracking y sin datos imposibles: la base del %
     cumplen: int
     porcentaje_cumple: float | None
     promedio_horas_reales: float | None
     promedio_horas_ajustadas: float | None
+    mediana_horas_reales: float | None
+    mediana_horas_ajustadas: float | None
+    p90_horas_reales: float | None
+    p90_horas_ajustadas: float | None
     con_devoluciones: int
+    porcentaje_con_devoluciones: float | None
+    cumplen_sin_descuento: int
+    porcentaje_cumple_sin_descuento: float | None
+    alertas: dict[str, int]
 
 
 class TiempoEntregaResponse(BaseModel):

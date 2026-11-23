@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlertCircle, Download } from "lucide-react";
-import { tiempoEntregaApi, type GuiaTiempoEntrega } from "@/api/tiempoEntrega";
+import { ETIQUETA_ALERTA, tiempoEntregaApi, type GuiaTiempoEntrega } from "@/api/tiempoEntrega";
 
-type FiltroCumple = "todas" | "cumple" | "no_cumple" | "sin_tracking";
+type FiltroCumple = "todas" | "cumple" | "no_cumple" | "sin_tracking" | "con_alerta";
 
 function hoyBogota(): string {
   // en-CA da AAAA-MM-DD
@@ -40,7 +40,18 @@ function Tarjeta({ titulo, valor, detalle, tono = "" }: {
   );
 }
 
+// Las alertas que se revisan (sin tracking ya tiene su propia etiqueta en "Cumple")
+function alertasRevisar(g: GuiaTiempoEntrega) {
+  return g.alertas.filter((a) => a !== "sin_tracking");
+}
+
+function porcentaje(v: number | null) {
+  return v === null ? "—" : `${v.toLocaleString("es-CO")} %`;
+}
+
 function EtiquetaCumple({ g }: { g: GuiaTiempoEntrega }) {
+  if (g.alertas.includes("negativo"))
+    return <span className="rounded px-1.5 text-xs bg-gray-100 text-gray-500">No se mide</span>;
   if (g.cumple === null) return <span className="rounded px-1.5 text-xs bg-gray-100 text-gray-500">Sin tracking</span>;
   return g.cumple
     ? <span className="rounded px-1.5 text-xs bg-green-100 text-green-800">Sí</span>
@@ -69,7 +80,8 @@ export function TiempoEntregaPage() {
       (filtro === "todas" ||
         (filtro === "cumple" && g.cumple === true) ||
         (filtro === "no_cumple" && g.cumple === false) ||
-        (filtro === "sin_tracking" && g.cumple === null)) &&
+        (filtro === "sin_tracking" && g.cumple === null) ||
+        (filtro === "con_alerta" && alertasRevisar(g).length > 0)) &&
       (!q || g.serial.toUpperCase().includes(q) || (g.mensajero ?? "").toUpperCase().includes(q)),
     );
   }, [data, filtro, busqueda]);
@@ -138,20 +150,34 @@ export function TiempoEntregaPage() {
 
       {data && r && (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
             <Tarjeta
               titulo={`Cumplen el ANS (${data.ans_horas} h)`}
-              valor={r.porcentaje_cumple === null ? "—" : `${r.porcentaje_cumple.toLocaleString("es-CO")} %`}
-              detalle={`${r.cumplen} de ${r.con_tracking} medidas`}
+              valor={porcentaje(r.porcentaje_cumple)}
+              detalle={`${r.cumplen} de ${r.medidas} medidas · sin descuento: ${porcentaje(r.porcentaje_cumple_sin_descuento)}`}
               tono={r.porcentaje_cumple !== null && r.porcentaje_cumple < 95 ? "text-red-700" : "text-green-700"}
             />
             <Tarjeta titulo="Tiempo real promedio" valor={`${horas(r.promedio_horas_reales)} h`}
-                     detalle={`Ajustado: ${horas(r.promedio_horas_ajustadas)} h`} />
+                     detalle={`Mediana ${horas(r.mediana_horas_reales)} h · P90 ${horas(r.p90_horas_reales)} h`} />
+            <Tarjeta titulo="Tiempo ajustado promedio" valor={`${horas(r.promedio_horas_ajustadas)} h`}
+                     detalle={`Mediana ${horas(r.mediana_horas_ajustadas)} h · P90 ${horas(r.p90_horas_ajustadas)} h`} />
             <Tarjeta titulo="Guías entregadas" valor={r.total.toLocaleString("es-CO")}
                      detalle={r.sin_tracking ? `${r.sin_tracking} sin tracking todavía` : "Todas con tracking"} />
             <Tarjeta titulo="Con devoluciones" valor={r.con_devoluciones.toLocaleString("es-CO")}
+                     detalle={`${porcentaje(r.porcentaje_con_devoluciones)} de las medidas`}
                      tono="text-amber-700" />
           </div>
+
+          {(r.alertas.negativo > 0 || r.alertas.mas_7_dias > 0 || r.alertas.ajuste_al_piso > 0) && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <AlertCircle size={16} />
+              <span className="font-medium">Datos para revisar:</span>
+              {(["negativo", "mas_7_dias", "ajuste_al_piso"] as const)
+                .filter((a) => r.alertas[a] > 0)
+                .map((a) => <span key={a}>{ETIQUETA_ALERTA[a]}: {r.alertas[a]}</span>)}
+              {r.alertas.negativo > 0 && <span className="text-xs">(las de llegada posterior no se miden)</span>}
+            </div>
+          )}
 
           <div className="rounded-lg border bg-white overflow-hidden">
             <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-b bg-gray-50">
@@ -162,6 +188,7 @@ export function TiempoEntregaPage() {
                 <option value="cumple">Cumplen</option>
                 <option value="no_cumple">No cumplen</option>
                 <option value="sin_tracking">Sin tracking</option>
+                <option value="con_alerta">Con alertas</option>
               </select>
               <input value={busqueda} onChange={(e) => setBusqueda(e.target.value)}
                      placeholder="Buscar guía o mensajero"
@@ -179,6 +206,7 @@ export function TiempoEntregaPage() {
                     <th className="text-right px-3 py-2 font-medium">Tiempo real (h)</th>
                     <th className="text-right px-3 py-2 font-medium">Ajustado (h)</th>
                     <th className="text-left px-3 py-2 font-medium">Cumple</th>
+                    <th className="text-left px-3 py-2 font-medium">Alertas</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -201,10 +229,13 @@ export function TiempoEntregaPage() {
                       <td className="px-3 py-1.5 text-right">{horas(g.horas_reales)}</td>
                       <td className="px-3 py-1.5 text-right">{horas(g.horas_ajustadas)}</td>
                       <td className="px-3 py-1.5"><EtiquetaCumple g={g} /></td>
+                      <td className="px-3 py-1.5 text-xs text-amber-700">
+                        {alertasRevisar(g).map((a) => ETIQUETA_ALERTA[a]).join(", ")}
+                      </td>
                     </tr>
                   ))}
                   {filtradas.length === 0 && (
-                    <tr><td colSpan={8} className="px-3 py-6 text-center text-gray-400">
+                    <tr><td colSpan={9} className="px-3 py-6 text-center text-gray-400">
                       No hay guías entregadas en este rango.
                     </td></tr>
                   )}
