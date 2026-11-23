@@ -62,6 +62,9 @@ _PAUSA_S = 1.5
 _ESPERAS_OCUPADO_S = (10.0, 30.0, 60.0)
 # Tantos "Unauthorized" seguidos = faltan permisos o encabezados: no tiene sentido seguir
 _MAX_NO_AUTORIZADO = 5
+# Veces que se vuelve a entrar a iMile por token vencido en cada llamada a consultar(); si
+# el token sigue vencido después de entrar de nuevo, se detiene la corrida
+_MAX_RECONEXIONES = 1
 # Tope por corrida: si quedan más, siguen en la próxima carga (300 guías ≈ 8 min).
 _MAX_POR_CORRIDA = 300
 # Una guía que iMile no encuentra o que falla se intenta en tantas cargas y luego se deja
@@ -81,6 +84,13 @@ class ImileOcupadoError(ImileConsultaError):
 
 class ImileNoAutorizadoError(ImileConsultaError):
     """iMile rechaza la consulta por permisos ("Unauthorized data access")."""
+
+
+class ImileTokenVencidoError(ImileNoAutorizadoError):
+    """El token de la sesión venció a mitad de la corrida ("Invalid access token: …").
+    La página de iMile no vuelve al login, así que `usar()` no lo nota: hay que volver a
+    entrar a la fuerza. Es de la sesión, no de la guía: no gasta intentos (2026-11-23,
+    224 de 300 guías fallaron así y se quedaron sin tracking)."""
 
 
 @dataclass(frozen=True)
@@ -107,9 +117,12 @@ def leer_tracking(body: dict | None, guia: str) -> Tracking:
     """Respuesta de .../track/query → llegada a la estación y novedades."""
     if not body or body.get("status") != "success":
         mensaje = (body or {}).get("message") or "iMile no devolvió el tracking"
-        if "busy" in mensaje.lower():
+        bajo = mensaje.lower()
+        if "busy" in bajo:
             raise ImileOcupadoError(mensaje)
-        if "unauthorized" in mensaje.lower():
+        if "token" in bajo and ("invalid" in bajo or "expired" in bajo):
+            raise ImileTokenVencidoError(mensaje)
+        if "unauthorized" in bajo:
             raise ImileNoAutorizadoError(mensaje)
         raise ImileConsultaError(mensaje)
     eventos = ((body.get("resultObject") or {}).get("trackInfo") or {}).get(guia) or []
@@ -147,8 +160,10 @@ class ImileTracking:
         esperas_ocupado_s: tuple[float, ...] = _ESPERAS_OCUPADO_S,
         max_no_autorizado: int = _MAX_NO_AUTORIZADO,
         espera_encabezados_ms: int = _ESPERA_ENCABEZADOS_MS,
+        max_reconexiones: int = _MAX_RECONEXIONES,
     ):
         self._sesion = sesion
+        self._max_reconexiones = max_reconexiones
         self._lote = lote
         self._pausa_s = pausa_s
         self._esperas_ocupado_s = esperas_ocupado_s
@@ -169,8 +184,10 @@ class ImileTracking:
         pendientes = list(guias)
         ocupado_seguidas = 0
         no_autorizado_seguidas = 0
+        reconexiones = 0
         while pendientes and self.detenida is None:
             espera_s = 0.0
+            reconectar = False
             async with self._sesion.usar() as page:
                 if self._headers is None:
                     self._headers = await self._encabezados(page)
@@ -190,6 +207,13 @@ class ImileTracking:
                             espera_s = self._esperas_ocupado_s[ocupado_seguidas]
                         ocupado_seguidas += 1
                         break
+                    except ImileTokenVencidoError as exc:
+                        # La guía tampoco se da por consultada: se reintenta con sesión nueva
+                        if reconexiones >= self._max_reconexiones:
+                            self.detenida = f"El token de iMile sigue vencido tras volver a entrar: {exc}"
+                        else:
+                            reconectar = True
+                        break
                     except ImileConsultaError as exc:
                         res = exc
                     pendientes.pop(0)
@@ -203,6 +227,16 @@ class ImileTracking:
                             break
                     else:
                         no_autorizado_seguidas = 0
+            if reconectar:
+                # Fuera de usar(): conectar() toma el mismo candado de la sesión
+                reconexiones += 1
+                logger.warning("Tracking iMile: token vencido, se vuelve a entrar a iMile")
+                try:
+                    await self._sesion.conectar(forzar=True)
+                except Exception as exc:  # noqa: BLE001 — cualquier falla del login detiene la corrida
+                    self.detenida = f"No se pudo volver a entrar a iMile: {exc}"
+                self._headers = None  # front-sec y demás se copian de la sesión nueva
+                continue
             # La espera va fuera de la sesión: el ingreso y la asignación siguen mientras tanto
             if espera_s:
                 logger.info("iMile ocupado: se reintenta el tracking en %.0f s", espera_s)

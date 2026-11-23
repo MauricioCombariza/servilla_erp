@@ -23,7 +23,8 @@ necesita de ds.imile.com, sin tocar el iMile real.
   → trackInfo vacío. Cada consulta queda en `consultas_tracking` y sus encabezados en
   `encabezados_tracking`. Como iMile real (2026-11-20), sin resource-code: dsTrackQuery
   y el front-sec del usuario responde "Unauthorized data access"; con `ocupado_proximas`
-  > 0, las siguientes consultas responden "The system is busy".
+  > 0, las siguientes consultas responden "The system is busy"; con `token_vencido_proximas`
+  > 0, responden "Invalid access token" mientras no se vuelva a iniciar sesión.
 - #/DSOperation/WaybillManagement/dsTrackQuery: al abrirse, la página hace un pedido
   con front-sec / hubcode (como las páginas de iMile real).
 """
@@ -38,6 +39,8 @@ USUARIO, CLAVE = "operador", "clave-secreta"
 FRONT_SEC = '{"orgId":10,"entId":10,"userCode":"0000000000","moduleId":10007,"client":"pc"}'
 HUBCODE = "S000000001"
 NO_AUTORIZADO = "Unauthorized data access. Please refresh the page and try again."
+# Como iMile real (2026-11-23) cuando el token de la sesión vence a mitad de una corrida
+TOKEN_VENCIDO = "Invalid access token: 00000000-0000-0000-0000-000000000000"
 OCUPADO = "The system is busy,please try again later"
 BLOQUEO_NO_EXISTE = ("1119", "Sin información de pedido()")
 BLOQUEO_PROBLEMA = ("1121", "No registrar Motivo Problema")
@@ -238,6 +241,7 @@ class _FakeImile(BaseHTTPRequestHandler):
     consultas_tracking: ClassVar[list[str]] = []  # guías consultadas en .../track/query
     encabezados_tracking: ClassVar[list[dict]] = []
     ocupado_proximas: ClassVar[int] = 0  # tantas consultas de tracking responden "busy"
+    token_vencido_proximas: ClassVar[int] = 0  # tantas responden "Invalid access token"
 
     def do_GET(self):  # nombre fijo de http.server
         cuerpo = LOGIN_HTML if self.path.startswith("/login") else HOME_HTML.replace(
@@ -279,6 +283,9 @@ class _FakeImile(BaseHTTPRequestHandler):
             if _FakeImile.ocupado_proximas > 0:
                 _FakeImile.ocupado_proximas -= 1
                 return self._json({"status": "fail", "resultCode": "", "message": OCUPADO})
+            if _FakeImile.token_vencido_proximas > 0:
+                _FakeImile.token_vencido_proximas -= 1
+                return self._json({"status": "fail", "resultCode": "", "message": TOKEN_VENCIDO})
             if self.headers.get("resource-code") != "dsTrackQuery" or self.headers.get("front-sec") != FRONT_SEC:
                 return self._json({"status": "fail", "resultCode": "", "message": NO_AUTORIZADO})
             eventos = TRACKING.get(guia, [])

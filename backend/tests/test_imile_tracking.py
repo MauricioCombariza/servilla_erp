@@ -11,6 +11,8 @@ Verifica que:
      hubcode copiados de la página): sin ellos iMile real responde "Unauthorized".
   6. Si iMile está ocupado se espera y se reintenta; si sigue, se detiene la corrida y las
      guías sin consultar quedan pendientes. Varios "Unauthorized" seguidos la detienen.
+  7. Si el token vence ("Invalid access token"), se vuelve a entrar a iMile y se reintenta
+     la misma guía; si sigue vencido, se detiene sin gastar intentos de las guías.
 """
 import json
 from datetime import datetime, timedelta, timezone
@@ -24,6 +26,7 @@ from app.services.imile_sesion import ImileSesion
 from app.services.imile_tracking import (
     ImileNoAutorizadoError,
     ImileOcupadoError,
+    ImileTokenVencidoError,
     ImileTracking,
     completar_tracking_pendiente,
     leer_tracking,
@@ -35,6 +38,7 @@ from tests.fake_imile import (
     HUBCODE,
     NO_AUTORIZADO,
     OCUPADO,
+    TOKEN_VENCIDO,
     TRACKING,
     USUARIO,
     _FakeImile,
@@ -60,8 +64,10 @@ async def sesion(fake_imile_url, tmp_path, monkeypatch):
     _FakeImile.consultas_tracking.clear()
     _FakeImile.encabezados_tracking.clear()
     _FakeImile.ocupado_proximas = 0
+    _FakeImile.token_vencido_proximas = 0
     yield s
     _FakeImile.ocupado_proximas = 0
+    _FakeImile.token_vencido_proximas = 0
     await s.cerrar()
 
 
@@ -113,8 +119,31 @@ def test_clasifica_los_errores_de_imile():
         leer_tracking({"status": "fail", "message": OCUPADO}, "G")
     with pytest.raises(ImileNoAutorizadoError):
         leer_tracking({"status": "fail", "message": NO_AUTORIZADO}, "G")
+    with pytest.raises(ImileTokenVencidoError):
+        leer_tracking({"status": "fail", "message": TOKEN_VENCIDO}, "G")
     with pytest.raises(ImileConsultaError):
         leer_tracking({"status": "fail", "message": "otra cosa"}, "G")
+
+
+async def test_token_vencido_vuelve_a_entrar_y_reintenta(sesion):
+    _FakeImile.token_vencido_proximas = 1
+    consulta = _rapido(sesion)
+    res = await consulta.consultar(["FAKE-TRK-2NOV", "FAKE-TRK-0NOV"])
+
+    assert consulta.detenida is None
+    assert len(res["FAKE-TRK-2NOV"].novedades) == 2 and res["FAKE-TRK-0NOV"].encontrado
+    # Token vencido, se vuelve a entrar y la misma guía otra vez
+    assert _FakeImile.consultas_tracking == ["FAKE-TRK-2NOV"] * 2 + ["FAKE-TRK-0NOV"]
+
+
+async def test_token_sigue_vencido_se_detiene_y_deja_el_resto_pendiente(sesion):
+    _FakeImile.token_vencido_proximas = 100
+    consulta = _rapido(sesion)
+    res = await consulta.consultar(["FAKE-TRK-2NOV", "FAKE-TRK-0NOV"])
+
+    assert res == {}  # ninguna guía queda con error: siguen pendientes
+    assert "vencido" in consulta.detenida
+    assert _FakeImile.consultas_tracking == ["FAKE-TRK-2NOV"] * 2  # 1 + 1 tras volver a entrar
 
 
 async def test_ocupado_espera_y_reintenta(sesion):
