@@ -144,37 +144,40 @@ set orde to 4
 *** (antepenultimo: est_his 3-8, penultimo: est_his 12-17) y no hay
 *** E50 en ningun mes. Guias sin ningun digito en dir_num y sin E50 -> *DEV_21
 *** Las reglas anteriores estan en arrastre_reglas_viejas.prg
+*** Ajuste 23/11/2026: guias en MANZANA (MZ, MZN, MZA, MNZ, MANZ...) sin
+*** digitos en dir_num y con ciudad1 NO llevan devolucion inicial
+*** (funcion SIN_DEV_MZ al final). Respaldo: arrastre_antes_mzn.prg
 ************************************************************************
 WLLAVE=STR(word_ini,6)+"i"
 
 seek WLLAVE
 repl cod_sec with "*DEV_ 1" while orden+retorno=wllave ;
-	FOR "D 1"$subs(est_his,3,6).and."D 1"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*"
+	FOR "D 1"$subs(est_his,3,6).and."D 1"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
 
 seek WLLAVE
 repl cod_sec with "*DEV_ 2" while orden+retorno=wllave ;
-	FOR "D 2"$subs(est_his,3,6).and."D 2"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*"
+	FOR "D 2"$subs(est_his,3,6).and."D 2"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
 
 seek WLLAVE
 repl cod_sec with "*DEV_ 5" while orden+retorno=wllave ;
-	FOR "D 5"$subs(est_his,3,6).and."D 5"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*"
+	FOR "D 5"$subs(est_his,3,6).and."D 5"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
 
 seek WLLAVE
 repl cod_sec with "*DEV_17" while orden+retorno=wllave ;
-	FOR "D17"$subs(est_his,3,6).and."D17"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*"
+	FOR "D17"$subs(est_his,3,6).and."D17"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
 
 seek WLLAVE
 repl cod_sec with "*DEV_21" while orden+retorno=wllave ;
-	FOR "D21"$subs(est_his,3,6).and."D21"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*"
+	FOR "D21"$subs(est_his,3,6).and."D21"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
 
 seek WLLAVE
 repl cod_sec with "*DEV_22" while orden+retorno=wllave ;
-	FOR "D22"$subs(est_his,3,6).and."D22"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*"
+	FOR "D22"$subs(est_his,3,6).and."D22"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
 
 *** Sin numero en dir_num y sin E50 en ningun mes
 seek WLLAVE
 repl cod_sec with "*DEV_21" while orden+retorno=wllave ;
-	FOR empty(chrtran(dir_num,chrtran(dir_num,"0123456789",""),"")).and..not."E50"$est_his.and.cod_sec<>"*"
+	FOR empty(chrtran(dir_num,chrtran(dir_num,"0123456789",""),"")).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
 
 ************************************************************************
 *** NIVEL EXTRA **** l-i *** Sirve para el Cierre (mismas reglas)
@@ -184,32 +187,32 @@ wllave2=worden+"il"
 
 seek WLLAVE2
 repl cod_sec with "*DEV_ 1" while orden+ret_esc+retorno=wllave2 ;
-	FOR "D 1"$subs(est_his,3,6).and."D 1"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*"
+	FOR "D 1"$subs(est_his,3,6).and."D 1"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
 
 seek WLLAVE2
 repl cod_sec with "*DEV_ 2" while orden+ret_esc+retorno=wllave2 ;
-	FOR "D 2"$subs(est_his,3,6).and."D 2"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*"
+	FOR "D 2"$subs(est_his,3,6).and."D 2"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
 
 seek WLLAVE2
 repl cod_sec with "*DEV_ 5" while orden+ret_esc+retorno=wllave2 ;
-	FOR "D 5"$subs(est_his,3,6).and."D 5"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*"
+	FOR "D 5"$subs(est_his,3,6).and."D 5"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
 
 seek WLLAVE2
 repl cod_sec with "*DEV_17" while orden+ret_esc+retorno=wllave2 ;
-	FOR "D17"$subs(est_his,3,6).and."D17"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*"
+	FOR "D17"$subs(est_his,3,6).and."D17"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
 
 seek WLLAVE2
 repl cod_sec with "*DEV_21" while orden+ret_esc+retorno=wllave2 ;
-	FOR "D21"$subs(est_his,3,6).and."D21"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*"
+	FOR "D21"$subs(est_his,3,6).and."D21"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
 
 seek WLLAVE2
 repl cod_sec with "*DEV_22" while orden+ret_esc+retorno=wllave2 ;
-	FOR "D22"$subs(est_his,3,6).and."D22"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*"
+	FOR "D22"$subs(est_his,3,6).and."D22"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
 
 *** Sin numero en dir_num y sin E50 en ningun mes
 seek WLLAVE2
 repl cod_sec with "*DEV_21" while orden+ret_esc+retorno=wllave2 ;
-	FOR empty(chrtran(dir_num,chrtran(dir_num,"0123456789",""),"")).and..not."E50"$est_his.and.cod_sec<>"*"
+	FOR empty(chrtran(dir_num,chrtran(dir_num,"0123456789",""),"")).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
 
 ************************************************
 		
@@ -603,3 +606,21 @@ erase /u/tmp/dn_resp.idx
 sele 1
 ?"  Direcciones ajustadas (ERP):",tran(waju,"9,999")
 return
+
+
+*************************
+FUNCTION SIN_DEV_MZ
+*************************
+*** 23/11/2026: .T. si la guia NO debe llevar devolucion inicial:
+*** dir_num sin digitos, ciudad1 con dato y direccion en manzana.
+*** Cubre MZ, MZ., MZN, MZNA, MZA, MNZ, MANZ, MANZANA (con o sin punto,
+*** pegado o no al numero: "MZ5", "MZ.5", "MANZANA E"). Se busca al
+*** comienzo de palabra en dirdes1 (ajustada por el ERP) y en dir_ori.
+private wdir
+if .not.empty(chrtran(dir_num,chrtran(dir_num,"0123456789",""),"")).or.empty(ciudad1)
+   return .f.
+endif
+wdir=" "+chrtran(upper(allt(dirdes1)+" "+allt(dir_ori)),".,-#/:;()","         ")+" "
+*** MANZANARES (municipio/barrio) no es manzana
+wdir=strtran(wdir," MANZANAR"," ")
+return " MZ"$wdir.or." MNZ"$wdir.or." MANZ"$wdir
