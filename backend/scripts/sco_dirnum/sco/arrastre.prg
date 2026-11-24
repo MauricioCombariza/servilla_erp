@@ -136,6 +136,13 @@ set orde to 4
 do punto1_dirnum
 sele 1
 set orde to 4
+*** Ajuste 24/11/2026 (3): TRABAJO marca por historia (*DEV_ 1/2/5/17/22,
+*** tabla tab_est) sin mirar la direccion. Se desmarcan (cod_sec vacio,
+*** se sectoriza despues) las que cumplen la regla de SIN_DEV_MZ.
+*** Las que dirnum ajusto en esta corrida ya se desmarcaron en PUNTO1_DIRNUM.
+seek worden_i
+repl cod_sec with spac(len(cod_sec)) while orden<=worden_f ;
+   for dev_hist().and.sin_dev_mz()
 ?"...Buscando + Devoluciones"
 
 ************************************************************************
@@ -149,37 +156,40 @@ set orde to 4
 *** (funcion SIN_DEV_MZ al final). Respaldo: arrastre_antes_mzn.prg
 *** Ajuste 24/11/2026: igual para KILOMETRO (KM, KMS, KILOMETRO) y LOTE
 *** (LOTE, LOT, LT, LTE). Respaldo: arrastre_antes_km_lote.prg
+*** Ajuste 24/11/2026 (2): tampoco las RURALES (VRDA, VEREDA, FINCA, FCA,
+*** SEC, SECTOR...) que tienen barrio (barrd1 distinto de vacio o NA).
+*** Respaldo: arrastre_antes_rural.prg
 ************************************************************************
 WLLAVE=STR(word_ini,6)+"i"
 
 seek WLLAVE
 repl cod_sec with "*DEV_ 1" while orden+retorno=wllave ;
-	FOR "D 1"$subs(est_his,3,6).and."D 1"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
+	FOR "D 1"$subs(est_his,3,6).and."D 1"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev()
 
 seek WLLAVE
 repl cod_sec with "*DEV_ 2" while orden+retorno=wllave ;
-	FOR "D 2"$subs(est_his,3,6).and."D 2"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
+	FOR "D 2"$subs(est_his,3,6).and."D 2"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev()
 
 seek WLLAVE
 repl cod_sec with "*DEV_ 5" while orden+retorno=wllave ;
-	FOR "D 5"$subs(est_his,3,6).and."D 5"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
+	FOR "D 5"$subs(est_his,3,6).and."D 5"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev()
 
 seek WLLAVE
 repl cod_sec with "*DEV_17" while orden+retorno=wllave ;
-	FOR "D17"$subs(est_his,3,6).and."D17"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
+	FOR "D17"$subs(est_his,3,6).and."D17"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev()
 
 seek WLLAVE
 repl cod_sec with "*DEV_21" while orden+retorno=wllave ;
-	FOR "D21"$subs(est_his,3,6).and."D21"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
+	FOR "D21"$subs(est_his,3,6).and."D21"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev()
 
 seek WLLAVE
 repl cod_sec with "*DEV_22" while orden+retorno=wllave ;
-	FOR "D22"$subs(est_his,3,6).and."D22"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
+	FOR "D22"$subs(est_his,3,6).and."D22"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev()
 
 *** Sin numero en dir_num y sin E50 en ningun mes
 seek WLLAVE
 repl cod_sec with "*DEV_21" while orden+retorno=wllave ;
-	FOR empty(chrtran(dir_num,chrtran(dir_num,"0123456789",""),"")).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
+	FOR empty(chrtran(dir_num,chrtran(dir_num,"0123456789",""),"")).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev()
 
 ************************************************************************
 *** NIVEL EXTRA **** l-i *** Sirve para el Cierre (mismas reglas)
@@ -189,32 +199,32 @@ wllave2=worden+"il"
 
 seek WLLAVE2
 repl cod_sec with "*DEV_ 1" while orden+ret_esc+retorno=wllave2 ;
-	FOR "D 1"$subs(est_his,3,6).and."D 1"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
+	FOR "D 1"$subs(est_his,3,6).and."D 1"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev()
 
 seek WLLAVE2
 repl cod_sec with "*DEV_ 2" while orden+ret_esc+retorno=wllave2 ;
-	FOR "D 2"$subs(est_his,3,6).and."D 2"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
+	FOR "D 2"$subs(est_his,3,6).and."D 2"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev()
 
 seek WLLAVE2
 repl cod_sec with "*DEV_ 5" while orden+ret_esc+retorno=wllave2 ;
-	FOR "D 5"$subs(est_his,3,6).and."D 5"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
+	FOR "D 5"$subs(est_his,3,6).and."D 5"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev()
 
 seek WLLAVE2
 repl cod_sec with "*DEV_17" while orden+ret_esc+retorno=wllave2 ;
-	FOR "D17"$subs(est_his,3,6).and."D17"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
+	FOR "D17"$subs(est_his,3,6).and."D17"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev()
 
 seek WLLAVE2
 repl cod_sec with "*DEV_21" while orden+ret_esc+retorno=wllave2 ;
-	FOR "D21"$subs(est_his,3,6).and."D21"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
+	FOR "D21"$subs(est_his,3,6).and."D21"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev()
 
 seek WLLAVE2
 repl cod_sec with "*DEV_22" while orden+ret_esc+retorno=wllave2 ;
-	FOR "D22"$subs(est_his,3,6).and."D22"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
+	FOR "D22"$subs(est_his,3,6).and."D22"$subs(est_his,12,6).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev()
 
 *** Sin numero en dir_num y sin E50 en ningun mes
 seek WLLAVE2
 repl cod_sec with "*DEV_21" while orden+ret_esc+retorno=wllave2 ;
-	FOR empty(chrtran(dir_num,chrtran(dir_num,"0123456789",""),"")).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev_mz()
+	FOR empty(chrtran(dir_num,chrtran(dir_num,"0123456789",""),"")).and..not."E50"$est_his.and.cod_sec<>"*".and..not.sin_dev()
 
 ************************************************
 		
@@ -224,6 +234,12 @@ sum 1 for cod_sec="*" to wnum_dev while orden=worden
 ?"  Devoluciones encontradas:",tran(wnum_dev,"9,999")
 set defa to /u/admin2
 clos data
+if file("/u/tmp/dn_resp.dbf")
+   erase /u/tmp/dn_resp.dbf
+endif
+if file("/u/tmp/dn_resp.idx")
+   erase /u/tmp/dn_resp.idx
+endif
 @23,24 say "*** FIN DEL TRABAJO ***"
 READ
 
@@ -566,13 +582,13 @@ sele 1
 set orde to 4
 seek worden_i
 count to wnum while orden<=worden_f ;
-   for empty(chrtran(dir_num,chrtran(dir_num,"0123456789",""),"")).and.cod_sec<>"*"
+   for empty(chrtran(dir_num,chrtran(dir_num,"0123456789",""),"")).and.(cod_sec<>"*".or.dev_hist())
 if wnum=0
    return
 endif
 seek worden_i
 copy to &wtmq fields serial,dirdes1,dir_ori delimited while orden<=worden_f ;
-   for empty(chrtran(dir_num,chrtran(dir_num,"0123456789",""),"")).and.cod_sec<>"*"
+   for empty(chrtran(dir_num,chrtran(dir_num,"0123456789",""),"")).and.(cod_sec<>"*".or.dev_hist())
 *** se renombra al final para que el servidor web no lea el archivo a medias
 rename &wtmq to &wreq
 ?"...Ajustando direcciones (ERP):",tran(wnum,"9,999"),"guias sin dir_num"
@@ -597,17 +613,42 @@ inde on serial to /u/tmp/dn_resp
 sele 1
 set rela to serial into dnr
 seek worden_i
-repl dir_num with dnr.dir_num, dirdes1 with dnr.dirdes1 while orden<=worden_f ;
-   for .not.eof("dnr").and.empty(chrtran(dir_num,chrtran(dir_num,"0123456789",""),"")).and.cod_sec<>"*"
-set rela to
-sele dnr
-use
+*** 24/11/2026 (3): si estaba marcada por historia y dirnum la ajusto, se desmarca
+repl cod_sec with iif(dev_hist(),spac(len(cod_sec)),cod_sec),;
+     dir_num with dnr.dir_num, dirdes1 with dnr.dirdes1 while orden<=worden_f ;
+   for .not.eof("dnr").and.empty(chrtran(dir_num,chrtran(dir_num,"0123456789",""),"")).and.(cod_sec<>"*".or.dev_hist())
+*** La relacion con dnr queda puesta: las reglas de devolucion la usan
+*** (AJU_HOY) para no volver a marcar por historia las ajustadas hoy.
+*** dnr y sus temporales se cierran y borran al final de BUSQUEDA.
 erase &wok
-erase /u/tmp/dn_resp.dbf
-erase /u/tmp/dn_resp.idx
 sele 1
 ?"  Direcciones ajustadas (ERP):",tran(waju,"9,999")
 return
+
+
+*************************
+FUNCTION SIN_DEV
+*************************
+*** 24/11/2026 (3): .T. si la guia NO debe llevar devolucion inicial:
+*** cumple SIN_DEV_MZ o dirnum le dio dir_num en esta corrida.
+return sin_dev_mz().or.aju_hoy()
+
+
+*************************
+FUNCTION AJU_HOY
+*************************
+*** .T. si dirnum ajusto esta guia en esta corrida (relacion con dnr)
+if .not.used("dnr")
+   return .f.
+endif
+return .not.eof("dnr")
+
+
+*************************
+FUNCTION DEV_HIST
+*************************
+*** .T. si la marco TRABAJO por historia (tabla tab_est)
+return "|"+left(cod_sec,7)+"|"$"|*DEV_ 1|*DEV_ 2|*DEV_ 5|*DEV_17|*DEV_22|*Bev_ 2|"
 
 
 *************************
@@ -620,16 +661,43 @@ FUNCTION SIN_DEV_MZ
 *** comienzo de palabra en dirdes1 (ajustada por el ERP) y en dir_ori.
 *** 24/11/2026: tambien KILOMETRO (KM, KM., KMS, KM5, KILOMETRO) y
 *** LOTE (LOTE, LOTES, LOT, LT, LT., LTE, LT5). No cuentan LOTERIA ni LTDA.
-private wdir
+*** 24/11/2026 (2): tambien las rurales con barrio: alguna palabra es VRDA,
+*** VEREDA, VDA, VRD, VD, FINCA, FCA, FC, FNC, SEC, SECTOR, SC... y barrd1
+*** tiene dato (NA, NO REGISTRA, X o A.S.D. cuentan como vacio).
+private wdir,wbar,wlis,wpal,wesp,wpp
 if .not.empty(chrtran(dir_num,chrtran(dir_num,"0123456789",""),"")).or.empty(ciudad1)
    return .f.
 endif
 wdir=" "+chrtran(upper(allt(dirdes1)+" "+allt(dir_ori)),".,-#/:;()","         ")+" "
 *** MANZANARES (municipio/barrio) no es manzana
 wdir=strtran(wdir," MANZANAR"," ")
+wdir=strtran(wdir," MANZANO"," ")
 *** LOTERIA y LTDA (nombres de empresa) no son lote
 wdir=strtran(wdir," LOTERI"," ")
 wdir=strtran(wdir," LTDA"," ")
-return " MZ"$wdir.or." MNZ"$wdir.or." MANZ"$wdir.or.;
+if " MZ"$wdir.or." MNZ"$wdir.or." MANZ"$wdir.or.;
    " KM"$wdir.or." KILOM"$wdir.or.;
    " LOT"$wdir.or." LT"$wdir
+   return .t.
+endif
+*** Rurales con barrio
+wbar="|"+upper(allt(barrd1))+"|"
+if wbar$"||NA|NAA|N A|N/A|NO REGISTRA|X|A.S.D.|A.S.D|ASD|"
+   return .f.
+endif
+wlis=" VRDA VEREDA VDA VRD VDRA VERDA VD FINCA FCA FC FNC FNCA FINK FINKA SEC SECTOR SECT SC "
+wpal=allt(wdir)
+do while .not.empty(wpal)
+   wesp=at(" ",wpal)
+   if wesp=0
+      wpp=wpal
+      wpal=""
+   else
+      wpp=left(wpal,wesp-1)
+      wpal=ltrim(subs(wpal,wesp+1))
+   endif
+   if " "+wpp+" "$wlis
+      return .t.
+   endif
+enddo
+return .f.
