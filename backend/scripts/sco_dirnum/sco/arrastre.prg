@@ -147,6 +147,8 @@ set orde to 4
 *** Ajuste 23/11/2026: guias en MANZANA (MZ, MZN, MZA, MNZ, MANZ...) sin
 *** digitos en dir_num y con ciudad1 NO llevan devolucion inicial
 *** (funcion SIN_DEV_MZ al final). Respaldo: arrastre_antes_mzn.prg
+*** Ajuste 24/11/2026: igual para KILOMETRO (KM, KMS, KILOMETRO) y LOTE
+*** (LOTE, LOT, LT, LTE). Respaldo: arrastre_antes_km_lote.prg
 ************************************************************************
 WLLAVE=STR(word_ini,6)+"i"
 
@@ -616,6 +618,8 @@ FUNCTION SIN_DEV_MZ
 *** Cubre MZ, MZ., MZN, MZNA, MZA, MNZ, MANZ, MANZANA (con o sin punto,
 *** pegado o no al numero: "MZ5", "MZ.5", "MANZANA E"). Se busca al
 *** comienzo de palabra en dirdes1 (ajustada por el ERP) y en dir_ori.
+*** 24/11/2026: tambien KILOMETRO (KM, KM., KMS, KM5, KILOMETRO) y
+*** LOTE (LOTE, LOTES, LOT, LT, LT., LTE, LT5). No cuentan LOTERIA ni LTDA.
 private wdir
 if .not.empty(chrtran(dir_num,chrtran(dir_num,"0123456789",""),"")).or.empty(ciudad1)
    return .f.
@@ -623,4 +627,9 @@ endif
 wdir=" "+chrtran(upper(allt(dirdes1)+" "+allt(dir_ori)),".,-#/:;()","         ")+" "
 *** MANZANARES (municipio/barrio) no es manzana
 wdir=strtran(wdir," MANZANAR"," ")
-return " MZ"$wdir.or." MNZ"$wdir.or." MANZ"$wdir
+*** LOTERIA y LTDA (nombres de empresa) no son lote
+wdir=strtran(wdir," LOTERI"," ")
+wdir=strtran(wdir," LTDA"," ")
+return " MZ"$wdir.or." MNZ"$wdir.or." MANZ"$wdir.or.;
+   " KM"$wdir.or." KILOM"$wdir.or.;
+   " LOT"$wdir.or." LT"$wdir
