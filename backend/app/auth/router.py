@@ -22,6 +22,7 @@ from app.auth.schemas import (
     MfaCodigoRequest,
     MfaConfiguracion,
     MfaPendiente,
+    MfaReconfiguracion,
     MfaTokenRequest,
     RefreshRequest,
     TokenResponse,
@@ -160,7 +161,7 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
     return await _abrir_sesion(db, user, request)
 
 
-async def _usuario_mfa(db: AsyncSession, mfa_token: str, paso: str) -> Usuario:
+async def _usuario_mfa(db: AsyncSession, mfa_token: str, paso: str) -> tuple[Usuario, dict]:
     """Usuario del token del paso intermedio (clave ya verificada, falta el código)."""
     try:
         payload = jwt.decode(mfa_token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
@@ -172,13 +173,13 @@ async def _usuario_mfa(db: AsyncSession, mfa_token: str, paso: str) -> Usuario:
     user = await db.scalar(select(Usuario).where(Usuario.username == payload["sub"]))
     if user is None or not user.activo:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario inactivo")
-    return user
+    return user, payload
 
 
 @router.post("/mfa/configurar", response_model=MfaConfiguracion)
 async def mfa_configurar(body: MfaTokenRequest, db: AsyncSession = Depends(get_db)):
     """Primer ingreso con MFA: genera el secreto para el QR (aún no queda activo)."""
-    user = await _usuario_mfa(db, body.mfa_token, "configurar")
+    user, _ = await _usuario_mfa(db, body.mfa_token, "configurar")
     if user.mfa_activo:
         raise HTTPException(status_code=409, detail="El segundo factor ya está configurado")
     secreto = mfa.nuevo_secreto()
@@ -191,7 +192,7 @@ async def mfa_configurar(body: MfaTokenRequest, db: AsyncSession = Depends(get_d
 @router.post("/mfa/activar", response_model=TokenResponse)
 async def mfa_activar(body: MfaCodigoRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Confirma el primer código de la app: activa el MFA, entrega los códigos de respaldo."""
-    user = await _usuario_mfa(db, body.mfa_token, "configurar")
+    user, _ = await _usuario_mfa(db, body.mfa_token, "configurar")
     ip = sesiones.ip_de(request)
     await _rechazar_si_bloqueada(db, user, ip)
     secreto = mfa.descifrar(user.mfa_secreto) if user.mfa_secreto else None
@@ -202,39 +203,95 @@ async def mfa_activar(body: MfaCodigoRequest, request: Request, db: AsyncSession
         await _fallo(db, user, ip, "El código no coincide. Revisa la hora del celular y escribe el código que se ve ahora.")
     user.mfa_activo = True
     user.mfa_ultimo_paso = paso
+    codigos = await _nuevos_respaldos(db, user)
+    await sesiones.registrar_evento(db, "mfa_activado", usuario=user, ip=ip)
+    return await _abrir_sesion(db, user, request, codigos_respaldo=codigos)
+
+
+async def _segundo_factor_ok(db: AsyncSession, user: Usuario, codigo: str, ip: str | None) -> bool:
+    """Código de la app o uno de respaldo sin usar. Deja marcado lo usado (falta el commit)."""
+    secreto = mfa.descifrar(user.mfa_secreto) if user.mfa_secreto else None
+    if not user.mfa_activo or secreto is None:
+        raise HTTPException(status_code=409, detail="El segundo factor no está configurado. Pide al administrador que lo reinicie.")
+
+    paso = mfa.verificar_totp(secreto, codigo, user.mfa_ultimo_paso)
+    if paso is not None:
+        user.mfa_ultimo_paso = paso
+        return True
+
+    if mfa.parece_respaldo(codigo):
+        pendientes = (await db.scalars(select(UsuarioMfaRespaldo).where(
+            UsuarioMfaRespaldo.usuario_id == user.id, UsuarioMfaRespaldo.usado_en.is_(None)))).all()
+        for respaldo in pendientes:
+            if mfa.coincide_respaldo(codigo, respaldo.codigo_hash):
+                respaldo.usado_en = datetime.now(UTC)
+                await sesiones.registrar_evento(db, "mfa_respaldo_usado", usuario=user, ip=ip,
+                                                detalle=f"quedan {len(pendientes) - 1}")
+                return True
+    return False
+
+
+async def _nuevos_respaldos(db: AsyncSession, user: Usuario) -> list[str]:
+    """Reemplaza los códigos de respaldo; los nuevos se muestran una sola vez."""
     codigos = mfa.nuevos_codigos_respaldo()
     await db.execute(delete(UsuarioMfaRespaldo).where(UsuarioMfaRespaldo.usuario_id == user.id))
     db.add_all(UsuarioMfaRespaldo(usuario_id=user.id, codigo_hash=mfa.hash_respaldo(c)) for c in codigos)
-    await sesiones.registrar_evento(db, "mfa_activado", usuario=user, ip=ip)
-    return await _abrir_sesion(db, user, request, codigos_respaldo=codigos)
+    return codigos
 
 
 @router.post("/mfa/verificar", response_model=TokenResponse)
 async def mfa_verificar(body: MfaCodigoRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Código de la app (o uno de respaldo) después de la clave."""
-    user = await _usuario_mfa(db, body.mfa_token, "verificar")
+    user, _ = await _usuario_mfa(db, body.mfa_token, "verificar")
     ip = sesiones.ip_de(request)
     await _rechazar_si_bloqueada(db, user, ip)
-    secreto = mfa.descifrar(user.mfa_secreto) if user.mfa_secreto else None
-    if not user.mfa_activo or secreto is None:
-        raise HTTPException(status_code=409, detail="El segundo factor no está configurado. Pide al administrador que lo reinicie.")
-
-    paso = mfa.verificar_totp(secreto, body.codigo, user.mfa_ultimo_paso)
-    if paso is not None:
-        user.mfa_ultimo_paso = paso
+    if await _segundo_factor_ok(db, user, body.codigo, ip):
         return await _abrir_sesion(db, user, request)
-
-    if mfa.parece_respaldo(body.codigo):
-        pendientes = (await db.scalars(select(UsuarioMfaRespaldo).where(
-            UsuarioMfaRespaldo.usuario_id == user.id, UsuarioMfaRespaldo.usado_en.is_(None)))).all()
-        for respaldo in pendientes:
-            if mfa.coincide_respaldo(body.codigo, respaldo.codigo_hash):
-                respaldo.usado_en = datetime.now(UTC)
-                await sesiones.registrar_evento(db, "mfa_respaldo_usado", usuario=user, ip=ip,
-                                                detalle=f"quedan {len(pendientes) - 1}")
-                return await _abrir_sesion(db, user, request)
-
     await _fallo(db, user, ip, "Código incorrecto")
+
+
+@router.post("/mfa/reconfigurar", response_model=MfaReconfiguracion)
+async def mfa_reconfigurar(body: MfaCodigoRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    """Cambio de celular: con el código actual (o uno de respaldo) entrega un QR nuevo.
+
+    El secreto nuevo viaja cifrado en el token y solo reemplaza al viejo cuando la
+    persona confirma el primer código (mfa/reactivar): si no termina, el celular viejo
+    sigue sirviendo.
+    """
+    user, _ = await _usuario_mfa(db, body.mfa_token, "verificar")
+    ip = sesiones.ip_de(request)
+    await _rechazar_si_bloqueada(db, user, ip)
+    if not await _segundo_factor_ok(db, user, body.codigo, ip):
+        await _fallo(db, user, ip, "Código incorrecto")
+    secreto = mfa.nuevo_secreto()
+    token = _create_token({"sub": user.username, "type": "mfa", "paso": "reconfigurar",
+                           "pendiente": mfa.cifrar(secreto)},
+                          datetime.now(UTC) + timedelta(minutes=_MFA_MINUTOS))
+    await sesiones.registrar_evento(db, "mfa_qr_nuevo", usuario=user, ip=ip)
+    await db.commit()
+    return MfaReconfiguracion(mfa_token=token, secreto=secreto,
+                              uri=mfa.uri_otpauth(secreto, user.username))
+
+
+@router.post("/mfa/reactivar", response_model=TokenResponse)
+async def mfa_reactivar(body: MfaCodigoRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    """Confirma el primer código del celular nuevo: cambia el secreto y los códigos de respaldo."""
+    user, payload = await _usuario_mfa(db, body.mfa_token, "reconfigurar")
+    ip = sesiones.ip_de(request)
+    await _rechazar_si_bloqueada(db, user, ip)
+    secreto = mfa.descifrar(payload.get("pendiente") or "")
+    actual = mfa.descifrar(user.mfa_secreto) if user.mfa_secreto else None
+    # Sin MFA activo (lo reiniciaron) o ese QR ya quedó puesto: hay que volver a empezar
+    if secreto is None or not user.mfa_activo or actual == secreto:
+        raise HTTPException(status_code=409, detail="Vuelve a empezar: ingresa de nuevo usuario y contraseña.")
+    paso = mfa.verificar_totp(secreto, body.codigo, None)
+    if paso is None:
+        await _fallo(db, user, ip, "El código no coincide. Revisa la hora del celular y escribe el código que se ve ahora.")
+    user.mfa_secreto = mfa.cifrar(secreto)
+    user.mfa_ultimo_paso = paso
+    codigos = await _nuevos_respaldos(db, user)
+    await sesiones.registrar_evento(db, "mfa_reconfigurado", usuario=user, ip=ip)
+    return await _abrir_sesion(db, user, request, codigos_respaldo=codigos)
 
 
 def _refresh_de(request: Request, cuerpo: str | None) -> str | None:

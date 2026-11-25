@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { Copy, Check } from "lucide-react";
-import { authApi, type LoginResponse, type MfaPendiente } from "@/api/auth";
+import { authApi, type LoginResponse, type MfaPendiente, type MfaQrNuevo } from "@/api/auth";
 
 /** Mensaje del servidor (detail) o uno genérico. */
 function mensaje(e: unknown, generico: string): { texto: string; vencido: boolean } {
@@ -22,10 +22,16 @@ interface PasoProps {
   onVolver: (aviso?: string) => void;
 }
 
-/** Ya tiene el segundo factor: pide el código de la app (o uno de respaldo). */
-export function PasoCodigo({ pendiente, onListo, onVolver }: PasoProps) {
+/**
+ * Ya tiene el segundo factor: pide el código de la app (o uno de respaldo).
+ * Con "Cambié de celular" ese mismo código, en vez de entrar, pide un QR nuevo.
+ */
+export function PasoCodigo({ pendiente, onListo, onVolver, onQrNuevo }: PasoProps & {
+  onQrNuevo: (q: MfaQrNuevo) => void;
+}) {
   const [codigo, setCodigo] = useState("");
   const [respaldo, setRespaldo] = useState(false);
+  const [qrNuevo, setQrNuevo] = useState(false);
   const [error, setError] = useState("");
   const [enviando, setEnviando] = useState(false);
 
@@ -34,7 +40,8 @@ export function PasoCodigo({ pendiente, onListo, onVolver }: PasoProps) {
     setEnviando(true);
     setError("");
     try {
-      onListo((await authApi.mfaVerificar(pendiente.mfa_token, codigo)).data);
+      if (qrNuevo) onQrNuevo((await authApi.mfaReconfigurar(pendiente.mfa_token, codigo)).data);
+      else onListo((await authApi.mfaVerificar(pendiente.mfa_token, codigo)).data);
     } catch (err) {
       const m = mensaje(err, "Código incorrecto");
       if (m.vencido) onVolver(m.texto);
@@ -48,35 +55,50 @@ export function PasoCodigo({ pendiente, onListo, onVolver }: PasoProps) {
   return (
     <form onSubmit={enviar} className="space-y-4">
       <p className="text-sm text-gray-700">
-        Hola, {pendiente.nombre_completo}. {respaldo
+        Hola, {pendiente.nombre_completo}. {qrNuevo
+          ? "Para generar un QR nuevo, escribe el código de 6 dígitos que muestra la app en el celular de antes, o uno de tus códigos de respaldo."
+          : respaldo
           ? "Escribe uno de tus códigos de respaldo (cada uno sirve una sola vez)."
           : "Abre la app de autenticación del celular y escribe el código de 6 dígitos de Servilla ERP."}
       </p>
       <input
         value={codigo}
         onChange={(e) => setCodigo(e.target.value)}
-        inputMode={respaldo ? "text" : "numeric"}
+        inputMode={respaldo || qrNuevo ? "text" : "numeric"}
         autoComplete="one-time-code"
         autoCapitalize="characters"
-        maxLength={respaldo ? 9 : 6}
-        placeholder={respaldo ? "ABCD-EFGH" : "123456"}
+        maxLength={respaldo || qrNuevo ? 9 : 6}
+        placeholder={qrNuevo ? "123456 o ABCD-EFGH" : respaldo ? "ABCD-EFGH" : "123456"}
         className={claseInput}
         autoFocus
       />
       {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
       <button type="submit" disabled={enviando || codigo.trim().length < 6} className={claseBoton}>
-        {enviando ? "Verificando..." : "Ingresar"}
+        {enviando ? "Verificando..." : qrNuevo ? "Generar QR nuevo" : "Ingresar"}
       </button>
       <div className="flex justify-between text-xs">
-        <button type="button" onClick={() => { setRespaldo(!respaldo); setCodigo(""); setError(""); }}
-                className="text-primary hover:underline">
-          {respaldo ? "Usar el código de la app" : "No tengo el celular"}
-        </button>
+        {qrNuevo ? (
+          <button type="button" onClick={() => { setQrNuevo(false); setCodigo(""); setError(""); }}
+                  className="text-primary hover:underline">
+            Solo quiero ingresar
+          </button>
+        ) : (
+          <button type="button" onClick={() => { setRespaldo(!respaldo); setCodigo(""); setError(""); }}
+                  className="text-primary hover:underline">
+            {respaldo ? "Usar el código de la app" : "No tengo el celular"}
+          </button>
+        )}
         <button type="button" onClick={() => onVolver()} className="text-gray-500 hover:underline">
           Volver
         </button>
       </div>
-      {respaldo && (
+      {!qrNuevo && (
+        <button type="button" onClick={() => { setQrNuevo(true); setRespaldo(false); setCodigo(""); setError(""); }}
+                className="w-full text-xs text-primary hover:underline">
+          Cambié de celular: generar QR nuevo
+        </button>
+      )}
+      {respaldo && !qrNuevo && (
         <p className="text-xs text-gray-500">
           Si tampoco tienes los códigos de respaldo, pide al administrador que reinicie tu segundo factor.
         </p>
@@ -87,6 +109,36 @@ export function PasoCodigo({ pendiente, onListo, onVolver }: PasoProps) {
 
 /** Primer ingreso con segundo factor: QR para la app y confirmación con el primer código. */
 export function PasoConfigurar({ pendiente, onListo, onVolver }: PasoProps) {
+  const token = pendiente.mfa_token;
+  const preparar = useCallback(async () => (await authApi.mfaConfigurar(token)).data, [token]);
+  const confirmar = useCallback(async (c: string) => (await authApi.mfaActivar(token, c)).data, [token]);
+  return <VistaQr preparar={preparar} confirmar={confirmar} onListo={onListo} onVolver={onVolver} />;
+}
+
+/** Cambio de celular: el QR ya viene generado; al confirmar reemplaza al anterior. */
+export function PasoQrNuevo({ qr, onListo, onVolver }: {
+  qr: MfaQrNuevo;
+  onListo: (d: LoginResponse) => void;
+  onVolver: (aviso?: string) => void;
+}) {
+  const preparar = useCallback(async () => qr, [qr]);
+  const confirmar = useCallback(
+    async (c: string) => (await authApi.mfaReactivar(qr.mfa_token, c)).data, [qr]);
+  return (
+    <VistaQr preparar={preparar} confirmar={confirmar} onListo={onListo} onVolver={onVolver}
+             titulo="Código QR nuevo para tu celular"
+             aviso="Al confirmar, el código del celular anterior deja de servir y tus códigos de respaldo cambian." />
+  );
+}
+
+function VistaQr({ preparar, confirmar, onListo, onVolver, titulo, aviso }: {
+  preparar: () => Promise<{ secreto: string; uri: string }>;
+  confirmar: (codigo: string) => Promise<LoginResponse>;
+  onListo: (d: LoginResponse) => void;
+  onVolver: (aviso?: string) => void;
+  titulo?: string;
+  aviso?: string;
+}) {
   const [qr, setQr] = useState("");
   const [secreto, setSecreto] = useState("");
   const [codigo, setCodigo] = useState("");
@@ -96,8 +148,8 @@ export function PasoConfigurar({ pendiente, onListo, onVolver }: PasoProps) {
 
   useEffect(() => {
     let vivo = true;
-    authApi.mfaConfigurar(pendiente.mfa_token)
-      .then(async ({ data }) => {
+    preparar()
+      .then(async (data) => {
         const imagen = await QRCode.toDataURL(data.uri, { width: 220, margin: 1 });
         if (vivo) { setQr(imagen); setSecreto(data.secreto); }
       })
@@ -107,14 +159,14 @@ export function PasoConfigurar({ pendiente, onListo, onVolver }: PasoProps) {
         else if (vivo) setError(m.texto);
       });
     return () => { vivo = false; };
-  }, [pendiente.mfa_token, onVolver]);
+  }, [preparar, onVolver]);
 
   async function enviar(e: React.FormEvent) {
     e.preventDefault();
     setEnviando(true);
     setError("");
     try {
-      onListo((await authApi.mfaActivar(pendiente.mfa_token, codigo)).data);
+      onListo(await confirmar(codigo));
     } catch (err) {
       const m = mensaje(err, "El código no coincide");
       if (m.vencido) onVolver(m.texto);
@@ -128,12 +180,13 @@ export function PasoConfigurar({ pendiente, onListo, onVolver }: PasoProps) {
   return (
     <form onSubmit={enviar} className="space-y-4">
       <div className="text-sm text-gray-700 space-y-2">
-        <p className="font-medium">Configura el código del celular (una sola vez)</p>
+        <p className="font-medium">{titulo ?? "Configura el código del celular (una sola vez)"}</p>
         <ol className="list-decimal pl-5 space-y-1 text-gray-600">
           <li>Instala <strong>Google Authenticator</strong> o <strong>Microsoft Authenticator</strong> en tu celular.</li>
           <li>En la app toca <strong>+</strong> y escanea este código.</li>
           <li>Escribe abajo el número de 6 dígitos que aparece.</li>
         </ol>
+        {aviso && <p className="text-xs text-amber-800 bg-amber-50 rounded-lg px-3 py-2">{aviso}</p>}
       </div>
       <div className="flex justify-center min-h-[220px] items-center">
         {qr ? <img src={qr} alt="Código QR para la app de autenticación" className="w-[220px] h-[220px]" />

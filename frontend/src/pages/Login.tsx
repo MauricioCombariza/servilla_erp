@@ -3,8 +3,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useCallback, useState } from "react";
-import { authApi, esMfaPendiente, guardarSesion, type LoginResponse, type MfaPendiente } from "@/api/auth";
-import { PasoCodigo, PasoCodigosRespaldo, PasoConfigurar } from "@/pages/LoginMfa";
+import { authApi, esMfaPendiente, guardarSesion, type LoginResponse, type MfaPendiente, type MfaQrNuevo } from "@/api/auth";
+import { PasoCodigo, PasoCodigosRespaldo, PasoConfigurar, PasoQrNuevo } from "@/pages/LoginMfa";
 
 const schema = z.object({
   username: z.string().min(1, "Requerido"),
@@ -26,6 +26,8 @@ export function Login() {
   // Segundo factor: después de la clave, el código del celular (o configurarlo)
   const [pendiente, setPendiente] = useState<MfaPendiente | null>(null);
   const [codigos, setCodigos] = useState<{ codigos: string[]; sesion: LoginResponse } | null>(null);
+  // Cambio de celular: QR nuevo, pedido con el código actual
+  const [qrNuevo, setQrNuevo] = useState<MfaQrNuevo | null>(null);
 
   function entrar(d: LoginResponse) {
     guardarSesion(d);
@@ -39,6 +41,7 @@ export function Login() {
 
   const volver = useCallback((avisoVolver?: string) => {
     setPendiente(null);
+    setQrNuevo(null);
     setError(avisoVolver ?? "");
   }, []);
 
@@ -69,8 +72,10 @@ export function Login() {
 
         {codigos ? (
           <PasoCodigosRespaldo codigos={codigos.codigos} onSeguir={() => entrar(codigos.sesion)} />
+        ) : qrNuevo ? (
+          <PasoQrNuevo qr={qrNuevo} onListo={alTerminarMfa} onVolver={volver} />
         ) : pendiente?.mfa_paso === "verificar" ? (
-          <PasoCodigo pendiente={pendiente} onListo={alTerminarMfa} onVolver={volver} />
+          <PasoCodigo pendiente={pendiente} onListo={alTerminarMfa} onVolver={volver} onQrNuevo={setQrNuevo} />
         ) : pendiente?.mfa_paso === "configurar" ? (
           <PasoConfigurar pendiente={pendiente} onListo={alTerminarMfa} onVolver={volver} />
         ) : (
