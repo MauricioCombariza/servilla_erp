@@ -206,3 +206,95 @@ async def test_admin_reinicia_el_mfa(client):
             admin_u = await db.scalar(select(Usuario).where(Usuario.username == "admin"))
             admin_u.mfa_activo, admin_u.mfa_secreto, admin_u.mfa_ultimo_paso = False, None, None
             await db.commit()
+
+
+# ── Cambio de celular: QR nuevo desde el login ───────────────────────────────
+
+async def _codigo_actual() -> str:
+    """Un código de la app que todavía no se ha usado (respeta mfa_ultimo_paso)."""
+    secreto = await _secreto()
+    async with AsyncSessionLocal() as db:
+        ultimo = await db.scalar(select(Usuario.mfa_ultimo_paso).where(Usuario.username == USUARIO))
+    return mfa.codigo_en(secreto, max((ultimo or 0) + 1, mfa.paso_actual()))
+
+
+async def _qr_nuevo(client, codigo: str):
+    paso1 = await _login(client)
+    assert paso1["mfa_paso"] == "verificar"
+    return await client.post("/api/auth/mfa/reconfigurar",
+                             json={"mfa_token": paso1["mfa_token"], "codigo": codigo})
+
+
+async def test_qr_nuevo_reemplaza_el_celular_y_los_respaldos(client):
+    viejos = (await _configurar(client))["codigos_respaldo"]
+    secreto_viejo = await _secreto()
+    r = await _qr_nuevo(client, await _codigo_actual())
+    assert r.status_code == 200, r.text
+    nuevo = r.json()
+    assert nuevo["uri"].startswith("otpauth://totp/") and nuevo["secreto"] != secreto_viejo
+    # Mientras no confirme, sigue el secreto viejo
+    assert await _secreto() == secreto_viejo
+
+    codigo = mfa.codigo_en(nuevo["secreto"], mfa.paso_actual())
+    r = await client.post("/api/auth/mfa/reactivar", json={"mfa_token": nuevo["mfa_token"], "codigo": codigo})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["codigos_respaldo"]) == 10 and set(body["codigos_respaldo"]).isdisjoint(viejos)
+    assert (await client.get("/api/auth/me", headers=_h(body["access_token"]))).status_code == 200
+    assert await _secreto() == nuevo["secreto"]
+
+    # El mismo QR no se puede confirmar otra vez (cambiaría de nuevo los respaldos)
+    r = await client.post("/api/auth/mfa/reactivar", json={"mfa_token": nuevo["mfa_token"], "codigo": codigo})
+    assert r.status_code == 409
+
+    # El celular viejo y los respaldos viejos ya no sirven
+    paso1 = await _login(client)
+    for malo in (mfa.codigo_en(secreto_viejo, mfa.paso_actual() + 1), viejos[0]):
+        r = await client.post("/api/auth/mfa/verificar", json={"mfa_token": paso1["mfa_token"], "codigo": malo})
+        assert r.status_code == 401
+
+
+async def test_qr_nuevo_con_codigo_de_respaldo(client):
+    codigos = (await _configurar(client))["codigos_respaldo"]
+    r = await _qr_nuevo(client, codigos[2])
+    assert r.status_code == 200, r.text
+    # Ese respaldo quedó usado
+    paso1 = await _login(client)
+    r = await client.post("/api/auth/mfa/verificar", json={"mfa_token": paso1["mfa_token"], "codigo": codigos[2]})
+    assert r.status_code == 401
+
+
+async def test_qr_nuevo_sin_terminar_deja_el_celular_viejo(client):
+    # Con un respaldo: dos códigos de la app seguidos se saldrían de la ventana de tiempo
+    codigos = (await _configurar(client))["codigos_respaldo"]
+    assert (await _qr_nuevo(client, codigos[0])).status_code == 200
+    paso1 = await _login(client)
+    r = await client.post("/api/auth/mfa/verificar",
+                          json={"mfa_token": paso1["mfa_token"], "codigo": await _codigo_actual()})
+    assert r.status_code == 200
+
+
+async def test_qr_nuevo_con_codigos_malos_bloquea(client):
+    await _configurar(client)
+    paso1 = await _login(client)
+    for _ in range(settings.login_max_intentos - 1):
+        r = await client.post("/api/auth/mfa/reconfigurar", json={"mfa_token": paso1["mfa_token"], "codigo": "000000"})
+        assert r.status_code == 401
+    r = await client.post("/api/auth/mfa/reconfigurar", json={"mfa_token": paso1["mfa_token"], "codigo": "000000"})
+    assert r.status_code == 423
+
+
+async def test_qr_nuevo_tokens_de_otro_paso_no_sirven(client):
+    await _configurar(client)
+    paso1 = await _login(client)
+    # El token de "verificar" no confirma un QR, y sin segundo factor no hay QR
+    r = await client.post("/api/auth/mfa/reactivar", json={"mfa_token": paso1["mfa_token"], "codigo": "123456"})
+    assert r.status_code == 401
+    r = await client.post("/api/auth/mfa/configurar", json={"mfa_token": paso1["mfa_token"]})
+    assert r.status_code == 401
+    nuevo = (await client.post("/api/auth/mfa/reconfigurar",
+                               json={"mfa_token": paso1["mfa_token"], "codigo": await _codigo_actual()})).json()
+    # El token del QR nuevo no sirve para entrar ni para la API
+    r = await client.post("/api/auth/mfa/verificar", json={"mfa_token": nuevo["mfa_token"], "codigo": "123456"})
+    assert r.status_code == 401
+    assert (await client.get("/api/auth/me", headers=_h(nuevo["mfa_token"]))).status_code == 401

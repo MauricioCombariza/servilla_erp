@@ -45,6 +45,11 @@ class MfaConfiguracion(BaseModel):
     uri: str
 
 
+class MfaReconfiguracion(MfaConfiguracion):
+    """QR nuevo (cambio de celular); el token sirve para confirmarlo en mfa/reactivar."""
+    mfa_token: str
+
+
 class CambioClaveRequest(BaseModel):
     clave_actual: str
     clave_nueva: str = Field(max_length=100)

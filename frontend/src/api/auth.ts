@@ -21,6 +21,13 @@ export interface MfaPendiente {
   nombre_completo: string;
 }
 
+/** QR nuevo; su token solo sirve para confirmarlo con el primer código (mfa/reactivar). */
+export interface MfaQrNuevo {
+  mfa_token: string;
+  secreto: string;
+  uri: string;
+}
+
 export function esMfaPendiente(d: LoginResponse | MfaPendiente): d is MfaPendiente {
   return "mfa_paso" in d;
 }
@@ -34,6 +41,11 @@ export const authApi = {
     axios.post<LoginResponse>("/api/auth/mfa/activar", { mfa_token, codigo }),
   mfaVerificar: (mfa_token: string, codigo: string) =>
     axios.post<LoginResponse>("/api/auth/mfa/verificar", { mfa_token, codigo }),
+  /** Cambio de celular: con el código actual (o uno de respaldo) entrega un QR nuevo */
+  mfaReconfigurar: (mfa_token: string, codigo: string) =>
+    axios.post<MfaQrNuevo>("/api/auth/mfa/reconfigurar", { mfa_token, codigo }),
+  mfaReactivar: (mfa_token: string, codigo: string) =>
+    axios.post<LoginResponse>("/api/auth/mfa/reactivar", { mfa_token, codigo }),
   cambiarClave: (clave_actual: string, clave_nueva: string) =>
     api.post<LoginResponse>("/auth/cambiar-clave", { clave_actual, clave_nueva }),
 };
